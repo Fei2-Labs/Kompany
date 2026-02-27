@@ -1,6 +1,26 @@
 # Changelog
 
-All notable changes to the AI C-Suite Framework are documented here.
+All notable changes to Kompany are documented here.
+
+## [2.0.0] - 2026-02-27
+
+### Added
+- **Kompany Engine** — Autonomous business operating system with directive-driven architecture
+- **16 AI Agents** — 11 C-suite executives + 5 execution subagents (Analyst, Builder, Procurement, Researcher, Writer)
+- **Four Interfaces** — CLI (Typer), REST API (FastAPI), MCP Server, Python SDK — all calling the same engine
+- **Directive Classification** — CEO auto-classifies into ACQUISITION, STRATEGIC, OPERATIONAL, INFORMATIONAL
+- **Mission Integrity** — Budget shortfall creates revenue projects instead of downgrading the mission
+- **AI Cost Tracking** — Every LLM call is a real expense in the company ledger
+- **Autonomy Tiers** — Auto-execute (€5), CEO-approved (€50), Master-approved (unlimited)
+- **Revenue Project Execution** — Subagents autonomously decompose and execute project tasks
+- **SQLite Persistence** — Ledger, projects, tasks, decisions, agent memory
+- **Agent Soul System** — 11 personality YAML files with per-agent learning across directives
+- **Claude Code Skill** — `/kompany` skill for direct invocation
+- Comprehensive README with detailed usage guide for all four interfaces
+- Star history chart and Buy Me a Coffee support link
+
+### Fixed
+- Replaced deprecated `datetime.utcnow()` with `datetime.now(UTC)` across all models
 
 ## [1.2.0] - 2026-02-25
 

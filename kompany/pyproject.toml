@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kompany"
+version = "0.1.0"
+description = "Autonomous business operating system for solo founders"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "anthropic>=0.40.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typer[all]>=0.12",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.115", "uvicorn>=0.30"]
+mcp = ["mcp>=1.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+kompany = "kompany.interfaces.cli:app"
+kompany-mcp = "kompany.interfaces.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kompany"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

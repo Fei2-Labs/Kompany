@@ -1,0 +1,12 @@
+# Kompany default company configuration
+company:
+  name: ""
+  product: ""
+  stage: "solo"  # solo | pre-seed | seed | series-a
+  currency: "EUR"
+  founded: ""
+
+master:
+  name: "Founder"
+  skills: []
+  constraints: []

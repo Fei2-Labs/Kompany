@@ -1,13 +1,13 @@
-# Contributing to AI C-Suite Framework
+# Contributing to Kompany
 
-Thanks for your interest in contributing. This project is open to improvements across the framework, agent definitions, and documentation.
+Thanks for your interest in contributing. This project is open to improvements across the engine, agents, interfaces, and documentation.
 
 ## How to Contribute
 
 ### Reporting Issues
 
-- Use GitHub Issues for bugs, feature requests, and questions
-- Include your company stage profile and the decision topic that triggered the issue
+- Use [GitHub Issues](https://github.com/clarezoe/AI-C-Suite/issues) for bugs, feature requests, and questions
+- Include your company stage profile and the directive that triggered the issue
 - Include the full error output if applicable
 
 ### Pull Requests
@@ -15,15 +15,19 @@ Thanks for your interest in contributing. This project is open to improvements a
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
 3. Make your changes
-4. Run tests: `python3 -m pytest eval/`
+4. Run tests: `cd kompany && source .venv/bin/activate && python -m pytest tests/ -v`
 5. Commit with a clear message
 6. Push and open a PR against `main`
 
 ### What We're Looking For
 
-- New agent personas or refinements to existing ones
-- Better guardrail rules
+- New agent personas or refinements to existing soul.yaml files
+- Additional execution subagents
 - Cost optimization strategies
 - Memory system improvements
-- OpenClaw integration enhancements
+- New interface adapters (Slack, Discord, etc.)
 - Documentation improvements
+
+### Support the Project
+
+If you find Kompany useful, consider [buying me a coffee](https://buymeacoffee.com/clarezoe).

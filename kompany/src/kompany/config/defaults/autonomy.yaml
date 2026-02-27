@@ -1,0 +1,32 @@
+# Autonomy tier configuration
+tiers:
+  auto_execute:
+    max_spend_eur: 5
+    actions:
+      - research
+      - analysis
+      - internal_planning
+      - file_creation
+    description: "No approval needed"
+
+  ceo_approved:
+    max_spend_eur: 50
+    actions:
+      - small_purchases
+      - internal_communication
+      - scheduling
+    description: "CEO decides, Master informed"
+
+  master_approved:
+    max_spend_eur: null  # unlimited
+    actions:
+      - large_purchases
+      - legal_commitments
+      - public_statements
+      - hiring
+      - irreversible_actions
+    always_require:
+      - spend_over_50
+      - external_facing
+      - irreversible
+    description: "Must ask Master"
