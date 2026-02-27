@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="logo.svg" alt="Kompany Logo" width="180" />
+</p>
+
+<p align="center">
   <strong>Kompany</strong><br>
   Autonomous Business Operating System for Solo Founders
 </p>
