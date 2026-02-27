@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Autonomous business operating system for solo founders"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
 dependencies = [
     "anthropic>=0.40.0",
     "pydantic>=2.0",
