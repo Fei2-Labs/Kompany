@@ -108,6 +108,7 @@ Intra-squad agents communicate directly; cross-squad goes through the CoS.
 - [Autonomy Tiers](#autonomy-tiers)
 - [Multi-Agent Debates](#multi-agent-debates)
 - [Stage Profiles](#stage-profiles)
+- [Multi-Provider LLM Support](#multi-provider-llm-support)
 - [Project Structure](#project-structure)
 - [Configuration](#configuration)
 - [Running Tests](#running-tests)
@@ -122,7 +123,7 @@ Intra-squad agents communicate directly; cross-squad goes through the CoS.
 ### Prerequisites
 
 - Python 3.11+
-- An [Anthropic API key](https://console.anthropic.com/)
+- An API key for at least one supported LLM provider (see [Multi-Provider LLM Support](#multi-provider-llm-support))
 
 ### Install from Source
 
@@ -162,6 +163,8 @@ Or create a `.env` file in the `kompany/` directory:
 ```
 ANTHROPIC_API_KEY=your-key-here
 ```
+
+To use other providers, set their API keys too (see [Multi-Provider LLM Support](#multi-provider-llm-support)).
 
 ### Verify Installation
 
@@ -590,6 +593,39 @@ The framework adapts its agent roster and cost profile based on your company sta
 
 ---
 
+## Multi-Provider LLM Support
+
+Kompany supports multiple LLM providers. Any model tier (apex/primary/economy) can use any provider:
+
+| Provider | Example Models | Connection |
+|---|---|---|
+| **Anthropic** | Claude Opus 4, Sonnet 4, Haiku 4 | Native `anthropic` SDK |
+| **OpenAI** | GPT-4o, GPT-4.1, o3, o4-mini | `openai` SDK |
+| **Google Gemini** | Gemini 2.5 Pro, 2.5/2.0 Flash | `openai` SDK (compatible endpoint) |
+| **GLM (Zhipu AI)** | GLM-4 Plus, Air, Flash | `openai` SDK (compatible endpoint) |
+| **Kimi (Moonshot)** | Moonshot v1, Kimi | `openai` SDK (compatible endpoint) |
+| **Custom** | Any OpenAI-compatible model | `openai` SDK (your base URL) |
+
+Provider detection is automatic based on model name prefix (`claude-` → Anthropic, `gpt-`/`o3`/`o4` → OpenAI, `gemini-` → Gemini, etc.). Unknown model names route to the custom endpoint if `CUSTOM_LLM_BASE_URL` is set, otherwise fall back to Anthropic.
+
+### Example: Use GPT-4o as primary
+
+```bash
+export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENAI_API_KEY="sk-..."
+```
+
+```yaml
+models:
+  apex: "claude-opus-4-20250514"
+  primary: "gpt-4o"
+  economy: "gemini-2.0-flash"
+```
+
+Cost tracking works across all providers — each model has pricing data for accurate ledger entries.
+
+---
+
 ## Project Structure
 
 ```
@@ -607,7 +643,8 @@ kompany/
 │   │   ├── autonomy.py           # Autonomy gate (approval logic)
 │   │   └── runner.py             # Project execution engine
 │   ├── llm/
-│   │   ├── client.py             # Anthropic API wrapper + cost tracking
+│   │   ├── client.py             # Multi-provider LLM client + cost tracking
+│   │   ├── providers.py          # Provider enum, base URLs, auto-detection
 │   │   ├── cost_tracker.py       # Per-call cost accounting
 │   │   └── models.py             # Model pricing & tier config
 │   ├── agents/
@@ -628,7 +665,7 @@ kompany/
 │       ├── api.py                # FastAPI REST API (7 endpoints)
 │       ├── mcp_server.py         # MCP Server (8 tools)
 │       └── sdk.py                # Python SDK
-├── tests/                        # 47 tests across 8 modules
+├── tests/                        # 81 tests across 11 modules
 ├── pyproject.toml                # Package definition
 └── README.md
 ```
@@ -641,16 +678,34 @@ kompany/
 
 | Variable | Description | Required |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key | Yes |
+| `ANTHROPIC_API_KEY` | Anthropic API key | Yes (if using Claude models) |
+| `OPENAI_API_KEY` | OpenAI API key | No |
+| `GEMINI_API_KEY` | Google Gemini API key | No |
+| `GLM_API_KEY` | Zhipu AI (GLM) API key | No |
+| `KIMI_API_KEY` | Moonshot (Kimi) API key | No |
+| `CUSTOM_LLM_API_KEY` | Custom endpoint API key | No |
+| `CUSTOM_LLM_BASE_URL` | Custom OpenAI-compatible base URL | No |
 | `KOMPANY_DB_PATH` | SQLite database path | No (defaults to `./kompany.db`) |
 | `KOMPANY_CONFIG_PATH` | YAML config file path | No |
 
 ### Company Config (YAML)
 
 ```yaml
-name: "Your Company"
-product: "One-line product description"
-stage: "solo"          # solo | pre-seed | seed | series-a
+company:
+  name: "Your Company"
+  product: "One-line product description"
+  stage: "solo"          # solo | pre-seed | seed | series-a
+
+# Override model tiers (optional)
+models:
+  apex: "claude-opus-4-20250514"     # or "gpt-4o", "gemini-2.5-pro", etc.
+  primary: "claude-sonnet-4-20250514"
+  economy: "claude-haiku-4-20250414"
+
+# Custom OpenAI-compatible endpoint (optional)
+custom_llm:
+  base_url: "https://my-endpoint.example.com/v1"
+  api_key: "my-key"
 ```
 
 ---
@@ -664,7 +719,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-All 47 tests should pass.
+All 81 tests should pass.
 
 ---
 
