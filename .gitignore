@@ -33,6 +33,8 @@ Thumbs.db
 logs/*.json
 data/*.db
 data/*.sqlite
+*.db
+*.sqlite
 *.log
 
 # API keys and secrets
