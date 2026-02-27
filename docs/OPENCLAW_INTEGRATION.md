@@ -1,444 +1,341 @@
 # OpenClaw Integration Guide
 
-This guide walks you through deploying the AI C-Suite Framework as a native OpenClaw multi-agent system, where each executive runs as a standalone agent with its own messaging channel.
+This guide walks you through using Kompany with [OpenClaw](https://github.com/openclaw/openclaw) and other multi-agent platforms. Kompany is a standalone Python package — any tool that can run shell commands or make HTTP requests can use it.
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Prerequisites](#prerequisites)
-3. [Project Setup](#project-setup)
-4. [Agent Configuration](#agent-configuration)
-5. [Agent-to-Agent Communication](#agent-to-agent-communication)
-6. [Squad Architecture Setup](#squad-architecture-setup)
-7. [Three-File Identity System](#three-file-identity-system)
-8. [Messaging Channels](#messaging-channels)
-9. [Time-Phased Execution](#time-phased-execution)
-10. [Three-Layer Workflow System](#three-layer-workflow-system)
-11. [Publishing to ClawHub](#publishing-to-clawhub)
-12. [Security and VirusTotal Compliance](#security-and-virustotal-compliance)
+2. [Integration Modes](#integration-modes)
+3. [CLI Integration (Any Platform)](#cli-integration-any-platform)
+4. [Python SDK Integration](#python-sdk-integration)
+5. [REST API Integration](#rest-api-integration)
+6. [MCP Server Integration](#mcp-server-integration)
+7. [OpenClaw Native Setup](#openclaw-native-setup)
+8. [Codex / Other Agent Platforms](#codex--other-agent-platforms)
+9. [Squad Architecture](#squad-architecture)
+10. [Agent Identity System](#agent-identity-system)
 
 ---
 
 ## Overview
 
-The AI C-Suite Framework can run in two modes:
+Kompany is designed to work with any AI agent platform. All interfaces call the same `KompanyEngine` — same logic, same ledger, same results.
 
-| Mode | How It Works | Best For |
+| Interface | Best For |
+|---|---|
+| **CLI** | Any platform with shell access (OpenClaw, Codex, Claude Code) |
+| **Python SDK** | Platforms with Python runtime (custom agents, scripts) |
+| **REST API** | Any HTTP client (web apps, microservices, webhooks) |
+| **MCP Server** | MCP-compatible clients (Claude Code, Cursor) |
+
+---
+
+## Integration Modes
+
+### Mode 1: CLI (Simplest)
+
+Any platform that can run shell commands can use Kompany immediately:
+
+```bash
+kompany directive "Buy a Mac Studio M4 128GB, budget €50"
+```
+
+### Mode 2: Python SDK (Programmatic)
+
+For platforms with Python access:
+
+```python
+from kompany import Kompany
+k = Kompany()
+result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
+```
+
+### Mode 3: REST API (HTTP)
+
+For any HTTP client:
+
+```bash
+curl -X POST http://localhost:8000/directive \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Buy a Mac Studio M4 128GB, budget €50"}'
+```
+
+### Mode 4: MCP Server (Claude Ecosystem)
+
+For Claude Code, Cursor, and other MCP clients:
+
+```bash
+kompany-mcp
+```
+
+---
+
+## CLI Integration (Any Platform)
+
+### Prerequisites
+
+```bash
+cd kompany
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+### Available Commands
+
+```bash
+kompany init --name "Acme" --product "AI tools" --balance 50 --stage solo
+kompany directive "Your directive here"
+kompany status
+kompany projects
+kompany project <project_id>
+kompany debate "Strategic question here"
+kompany ledger --limit 10
+kompany execute <project_id>
+```
+
+### Example: OpenClaw Agent Using CLI
+
+In your OpenClaw agent config, use Kompany via shell tool:
+
+```yaml
+# openclaw agent config
+tools:
+  - type: shell
+    commands:
+      - "kompany directive \"{input}\""
+      - "kompany status"
+      - "kompany projects"
+```
+
+---
+
+## Python SDK Integration
+
+### Installation
+
+```bash
+pip install -e ./kompany
+```
+
+### Full Example
+
+```python
+from kompany import Kompany
+
+# Create and initialize
+k = Kompany()
+k.init(name="Acme SaaS", product="AI invoice tools", balance=50, stage="solo")
+
+# Send directives
+result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
+print(f"Status: {result['status']}")
+print(f"Message: {result['message']}")
+print(f"AI cost: ${result['total_ai_cost']:.2f}")
+
+# Check state
+print(f"Balance: €{k.balance():.2f}")
+print(f"Active projects: {len(k.projects())}")
+
+# View financials
+for entry in k.ledger(limit=5):
+    print(f"  {entry['category']}: {entry['description']} ({entry['amount']})")
+
+# Execute a project
+projects = k.projects()
+if projects:
+    result = k.execute_project(projects[0]["id"])
+    print(f"Execution result: {result}")
+```
+
+### SDK Methods
+
+| Method | Returns | Description |
 |---|---|---|
-| **Claude Code Skill** | Single skill simulates all agents in one conversation | Quick decisions, solo founders |
-| **OpenClaw Native** | Each agent is a standalone OpenClaw agent with its own identity and messaging | Full team simulation, async workflows, multi-channel ops |
-
-This guide covers the OpenClaw Native mode.
-
----
-
-## Prerequisites
-
-- [OpenClaw](https://github.com/openclaw/openclaw) installed and running
-- An Anthropic API key configured in OpenClaw
-- Feishu, Slack, or Discord bot tokens (for messaging channels)
-- Basic familiarity with OpenClaw's agent creation workflow
+| `Kompany(config_path=None)` | — | Constructor |
+| `init(name, product, balance, stage)` | `None` | Initialize company |
+| `directive(text)` | `dict` | Send a directive |
+| `status()` | `dict` | Company status |
+| `projects()` | `list[dict]` | Active projects |
+| `project(id)` | `dict \| None` | Project details |
+| `balance()` | `float` | Current balance |
+| `ledger(limit=10)` | `list[dict]` | Ledger entries |
+| `execute_project(id)` | `dict` | Execute project tasks |
 
 ---
 
-## Project Setup
+## REST API Integration
+
+### Start the Server
+
+```bash
+pip install -e ".[api]"
+uvicorn kompany.interfaces.api:app --host 0.0.0.0 --port 8000
+```
+
+### Endpoints
+
+| Method | Endpoint | Body | Description |
+|---|---|---|---|
+| POST | `/init` | `{name, product, balance, stage}` | Initialize company |
+| POST | `/directive` | `{text}` | Send directive |
+| GET | `/status` | — | Company status |
+| GET | `/projects` | — | List projects |
+| GET | `/projects/{id}` | — | Project details |
+| GET | `/ledger?limit=N` | — | Ledger entries |
+| POST | `/projects/{id}/execute` | — | Execute project |
+
+### Interactive Docs
+
+Once running, visit `http://localhost:8000/docs` for the auto-generated Swagger UI.
+
+---
+
+## MCP Server Integration
+
+### Start the MCP Server
+
+```bash
+pip install -e ".[mcp]"
+kompany-mcp
+```
+
+### Claude Code Configuration
+
+Add to your Claude Code MCP settings (`.claude/settings.json` or project settings):
+
+```json
+{
+  "mcpServers": {
+    "kompany": {
+      "command": "kompany-mcp",
+      "env": {
+        "ANTHROPIC_API_KEY": "your-key-here"
+      }
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `kompany_init` | `name`\*, `product`\*, `balance`, `stage` | Initialize company |
+| `kompany_directive` | `text`\* | Send directive |
+| `kompany_status` | — | Company status |
+| `kompany_projects` | — | List projects |
+| `kompany_project` | `project_id`\* | Project details |
+| `kompany_ledger` | `limit` | Ledger entries |
+| `kompany_debate` | `question`\* | Run debate |
+| `kompany_execute` | `project_id`\* | Execute project |
+
+---
+
+## OpenClaw Native Setup
+
+For full OpenClaw integration where each Kompany agent runs as a standalone OpenClaw agent:
 
 ### 1. Initialize OpenClaw Project
 
 ```bash
-openclaw init ai-csuite
-cd ai-csuite
+openclaw init kompany
+cd kompany
 ```
 
-### 2. Configure `openclaw.json`
+### 2. Configure Agent Routing
 
-This is the central configuration file. It defines all agents, their communication rules, and messaging channels.
+Each C-suite agent can be registered as an OpenClaw agent. The CLI serves as the bridge:
 
 ```json
 {
-  "name": "ai-csuite",
-  "version": "1.0.0",
-  "description": "AI C-Suite Multi-Agent Framework",
-  "model": {
-    "provider": "anthropic",
-    "default": "claude-sonnet-4-6-20250620",
-    "overrides": {
-      "ceo": "claude-opus-4-6",
-      "cv": "claude-haiku-4-20250414"
-    }
-  },
-  "agents": [
-    "ceo", "cto", "cpo", "cfo", "cmo", "cro", "coo",
-    "csa", "ciso", "cos", "cv"
-  ],
+  "name": "kompany",
+  "version": "2.0.0",
+  "description": "Autonomous business OS — Kompany",
+  "agents": ["ceo", "cto", "cpo", "cfo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"],
   "tools": {
+    "shell": {
+      "commands": [
+        "kompany directive \"{input}\"",
+        "kompany debate \"{input}\"",
+        "kompany status",
+        "kompany projects",
+        "kompany ledger"
+      ]
+    },
     "agentToAgent": {
       "enabled": true,
-      "allow": [
-        "ceo", "cto", "cpo", "cfo", "cmo", "cro", "coo",
-        "csa", "ciso", "cos", "cv"
-      ],
       "maxRecursion": 3
     }
   }
 }
 ```
 
+### 3. Communication Rules
+
+- **Intra-squad**: Agents in the same squad communicate directly
+- **Cross-squad**: Messages route through CoS (Chief of Staff)
+- **Squad leads** always participate in debates; other members join when relevant
+
 ---
 
-## Agent Configuration
+## Codex / Other Agent Platforms
 
-### 3. Create Each Agent
-
-Use the OpenClaw CLI to create all 11 agents:
+Any platform with shell access can use Kompany:
 
 ```bash
-# Core executives
-openclaw agent create ceo --model claude-opus-4-6
-openclaw agent create cto
-openclaw agent create cpo
-openclaw agent create cfo
-openclaw agent create cmo
-openclaw agent create cro
-openclaw agent create coo
-openclaw agent create csa
-openclaw agent create ciso
-
-# Supporting agents
-openclaw agent create cos    # Chief of Staff (moderator)
-openclaw agent create cv --model claude-haiku-4-20250414  # Customer Voice
+# Codex / generic agent
+kompany directive "Your directive here"
 ```
 
-Each command creates a directory under `agents/` with the three-file identity structure.
+The CLI returns structured output that any agent can parse. All state is persisted in SQLite, so multiple sessions share the same company state.
 
 ---
 
-## Agent-to-Agent Communication
+## Squad Architecture
 
-### 4. How Communication Works
+Kompany agents are organized into three squads:
 
-The `agentToAgent` config in `openclaw.json` enables direct messaging between agents:
+| Squad | Mission | Members |
+|---|---|---|
+| **Strategy** | Strategic direction & financial health | CEO, CFO, COO, CoS |
+| **Product** | Product-market fit & technical delivery | CTO, CPO, CSA, CISO |
+| **Growth** | Revenue & market expansion | CMO, CRO, CV |
 
-```json
-"tools": {
-  "agentToAgent": {
-    "enabled": true,
-    "allow": ["ceo", "cto", "cpo", "cfo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"],
-    "maxRecursion": 3
-  }
-}
-```
+### Communication Model
 
-Key parameters:
-
-- **`enabled: true`** — Agents can send messages to each other
-- **`allow`** — Whitelist of agent IDs that can communicate
-- **`maxRecursion: 3`** — Maximum depth of agent-to-agent call chains (prevents infinite loops)
-
-### Communication Flow Example
-
-```
-Data Analyst (CV) → gathers competitor intel
-  → sends to Content Strategist (CMO)
-    → CMO drafts positioning response
-      → sends to CRO for revenue impact assessment
-```
-
-Each hop counts as one recursion level. At `maxRecursion: 3`, the chain stops.
+- **Intra-squad**: Direct agent-to-agent communication
+- **Cross-squad**: Mediated through the Chief of Staff (CoS)
+- **Squad leads**: CFO (Strategy), CPO (Product), CRO (Growth)
 
 ---
 
-## Squad Architecture Setup
+## Agent Identity System
 
-### 5. Define Squads
+Each agent's personality is defined by a `soul.yaml` file in `kompany/src/kompany/agents/souls/`. These YAML files contain:
 
-Squads determine which agents collaborate directly vs. through mediation. Add to `openclaw.json`:
+- **Name and role** — What the agent does
+- **Domain expertise** — Areas of knowledge
+- **Optimization objectives** — What the agent prioritizes
+- **Personality traits** — How the agent communicates and debates
+- **Relationships** — Which agents they collaborate or clash with
 
-```json
-"squads": {
-  "strategy": {
-    "mission": "Strategic direction & financial health",
-    "lead": "cfo",
-    "members": ["ceo", "cfo", "coo", "cos"]
-  },
-  "product": {
-    "mission": "Product-market fit & technical delivery",
-    "lead": "cpo",
-    "members": ["cto", "cpo", "csa", "ciso"]
-  },
-  "growth": {
-    "mission": "Revenue & market expansion",
-    "lead": "cro",
-    "members": ["cmo", "cro", "cv"]
-  }
-}
-```
+### Agent Memory
 
-### Communication Rules
+Each agent has persistent memory stored in SQLite (via `AgentMemory`):
 
-- **Intra-squad**: Agents in the same squad message each other directly
-- **Cross-squad**: Messages route through CoS (Chief of Staff) to prevent chaos
-- **Squad leads** always participate in debates; other members join only when relevant
+- Learnings from past directives
+- Positions taken in debates
+- Company-specific knowledge accumulated over time
 
----
+Memory is scoped per-agent and persists across sessions.
 
-## Three-File Identity System
+### Customizing Agents
 
-### 6. Configure Agent Identity Files
-
-Each agent gets three files that define who they are. This is the core of the OpenClaw pattern.
+To modify an agent's personality, edit their soul file:
 
 ```
-agents/
-├── cto/
-│   ├── SOUL.md      # Core identity
-│   ├── USER.md      # Organizational context
-│   └── MEMORY.md    # Persistent learning
-├── cpo/
-│   ├── SOUL.md
-│   ├── USER.md
-│   └── MEMORY.md
-└── ...
+kompany/src/kompany/agents/souls/cto.yaml
 ```
 
-### SOUL.md — Core Identity
-
-```markdown
-# CTO — Chief Technology Officer
-
-## Identity
-I am the CTO. I optimize for technical correctness, scalability,
-and engineering velocity.
-
-## Optimization Objective
-Ensure every technical decision is architecturally sound and
-maintainable at scale.
-
-## Debate Behavior
-- I challenge proposals that create technical debt
-- I push back on timelines that compromise code quality
-- I defer to CPO on user value but hold firm on architecture
-- I ask CSA for integration feasibility before endorsing
-
-## Core Biases
-- Prefer proven technology over bleeding edge
-- Favor build over buy when the domain is core
-- Skeptical of "quick fixes" that accumulate debt
-```
-
-### USER.md — Organizational Context
-
-```markdown
-## Squad
-Product Squad (Lead: CPO)
-
-## Reports To
-CEO
-
-## Collaborates With
-- CPO: Daily alignment on roadmap feasibility
-- CSA: Architecture reviews and integration checks
-- CISO: Security review on infrastructure decisions
-
-## Common Clashes
-- CPO: Speed vs quality tradeoffs
-- CFO: Infrastructure cost justification
-
-## Decisions I Influence
-- Tech stack selection
-- Build vs buy
-- Engineering hiring priorities
-- Architecture direction
-```
-
-### MEMORY.md — Persistent Learning
-
-```markdown
-## Decision History
-- 2026-02-20 Pricing debate: Argued SSO should be built before
-  pricing changes. Overruled by CEO (PLG priority). Lesson:
-  business timing can override technical readiness.
-- 2026-02-22 Architecture debate: Pushed for event-driven
-  architecture. Consensus reached. CSA validated integration path.
-
-## Patterns Learned
-- CFO consistently pushes back on infra spend > $500/mo at solo stage
-- CPO prioritizes activation metrics over feature completeness
-```
-
-`MEMORY.md` is updated programmatically after each debate. Don't edit it manually.
-
----
-
-## Messaging Channels
-
-### 7. Configure Multi-Bot Communication
-
-Each agent gets its own messaging bot account. This lets you DM any executive directly or create group chats for squad collaboration.
-
-Add to `openclaw.json`:
-
-```json
-"channels": {
-  "feishu": {
-    "accounts": {
-      "ceo": { "appId": "cli_xxx_ceo", "agentId": "ceo" },
-      "cto": { "appId": "cli_xxx_cto", "agentId": "cto" },
-      "cpo": { "appId": "cli_xxx_cpo", "agentId": "cpo" },
-      "cfo": { "appId": "cli_xxx_cfo", "agentId": "cfo" },
-      "cmo": { "appId": "cli_xxx_cmo", "agentId": "cmo" },
-      "cro": { "appId": "cli_xxx_cro", "agentId": "cro" },
-      "coo": { "appId": "cli_xxx_coo", "agentId": "coo" },
-      "csa": { "appId": "cli_xxx_csa", "agentId": "csa" },
-      "ciso": { "appId": "cli_xxx_ciso", "agentId": "ciso" },
-      "cos": { "appId": "cli_xxx_cos", "agentId": "cos" },
-      "cv":  { "appId": "cli_xxx_cv",  "agentId": "cv" }
-    }
-  }
-}
-```
-
-For Slack or Discord, replace the `feishu` key with the appropriate channel config:
-
-```json
-"channels": {
-  "slack": {
-    "accounts": {
-      "ceo": { "botToken": "xoxb-xxx-ceo", "agentId": "ceo" },
-      "cto": { "botToken": "xoxb-xxx-cto", "agentId": "cto" }
-    }
-  }
-}
-```
-
-### What This Enables
-
-- **DM any executive**: Send a private message to the CTO bot to ask about a technical decision
-- **Group chats**: Create a channel with CTO + CPO + CSA bots for a Product Squad discussion
-- **@mentions**: In a group, @mention a specific agent to get their take
-
----
-
-## Time-Phased Execution
-
-### 8. Configure Cron-Based Scheduling
-
-In OpenClaw native mode, agents run on a schedule rather than all at once. This mirrors a real company's daily rhythm.
-
-```
-08:00-09:00  Data Layer agents execute first
-             - CV: Gathers customer signals, support tickets, reviews
-             - CFO: Pulls financial metrics, runway updates
-
-09:00-18:00  Debate agents run in parallel
-             - CTO, CPO, CMO, CRO, COO, CSA, CISO
-             - Intra-squad communication happens here
-
-18:00-19:00  CEO reviews and decides
-             - CoS synthesizes the day's debates
-             - CEO makes final calls
-```
-
-Configure cron jobs in your OpenClaw deployment:
-
-```bash
-# Data agents first (T+0)
-0 8 * * * openclaw run cv --task "daily-customer-signals"
-0 8 * * * openclaw run cfo --task "daily-financial-snapshot"
-
-# Debate agents (T+1)
-0 9 * * * openclaw run cos --task "initiate-daily-debate"
-
-# CEO review (T+2)
-0 18 * * * openclaw run ceo --task "daily-review"
-```
-
----
-
-## Three-Layer Workflow System
-
-### 9. Daily Document Generation
-
-Each morning, the system generates 3 layers of planning documents:
-
-**L1: CEO Overview (1 document)**
-- Today's core objectives
-- Squad key milestones
-- Risk warnings
-
-**L2: Squad Overviews (3 documents)**
-- Strategy Squad goals
-- Product Squad goals
-- Growth Squad goals
-
-**L3: Individual Task Cards (11 documents)**
-- Specific tasks per agent
-- Input dependencies
-- Output standards
-
-These documents are auto-generated by the CoS agent and distributed to each agent's context before their daily execution begins.
-
----
-
-## Publishing to ClawHub
-
-### 10. Package as a ClawHub Skill
-
-To share the AI C-Suite Framework on ClawHub (OpenClaw's skill marketplace):
-
-```bash
-# Validate the skill package
-openclaw skill validate .
-
-# Publish to ClawHub
-openclaw skill publish --name ai-csuite --version 1.0.0
-```
-
-### Skill Package Structure
-
-ClawHub expects this structure:
-
-```
-ai-csuite/
-├── SKILL.md              # Skill definition (already created)
-├── openclaw.json          # Agent configuration
-├── agents/                # All agent identity files
-│   ├── ceo/
-│   │   ├── SOUL.md
-│   │   ├── USER.md
-│   │   └── MEMORY.md
-│   ├── cto/
-│   │   └── ...
-│   └── ...
-└── config/
-    ├── company.example.yaml
-    ├── profiles.yaml
-    └── squads.yaml
-```
-
----
-
-## Security and VirusTotal Compliance
-
-### 11. Passing ClawHub Security Scanning
-
-After the January 2026 supply-chain attack on ClawHub (230+ malicious skills), all published skills are scanned by VirusTotal. The AI C-Suite skill is designed to pass cleanly.
-
-**What the scanner checks for:**
-
-| Check | Our Status |
-|---|---|
-| Executable payloads | None — plaintext markdown only |
-| Obfuscated strings / base64 | None |
-| Shell injection patterns | None |
-| Credential harvesting | None — no env var reads, no secret access |
-| External network calls from skill | None — tools may fetch if configured |
-| Filesystem writes outside project | None — logs only in `logs/` directory |
-
-**Design principles for compliance:**
-
-- All agent reasoning happens within the LLM context — no code execution required
-- The SKILL.md contains only markdown instructions, no executable code
-- No encoded instructions hiding true intent
-- No `eval()`, `exec()`, or dynamic code generation
-- All tool usage is declared in the YAML frontmatter `allowed-tools` field
+The system prompt is assembled at runtime from: `soul.yaml` personality + company context + directive context.

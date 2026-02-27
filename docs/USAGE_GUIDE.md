@@ -1,22 +1,27 @@
-# AI C-Suite Framework — Usage Guide
+# Kompany — Usage Guide
 
-This guide covers everything you need to run strategic debates with your AI executive team.
+This guide covers everything you need to operate Kompany, from initializing your company to sending directives, running debates, and executing revenue projects.
 
 ## Table of Contents
 
 1. [Installation](#installation)
 2. [Configuration](#configuration)
-3. [Running Your First Debate](#running-your-first-debate)
-4. [Understanding the Debate Flow](#understanding-the-debate-flow)
-5. [Stage Profiles](#stage-profiles)
-6. [Solo Mode](#solo-mode)
-7. [Customizing Agents](#customizing-agents)
-8. [Human-in-the-Loop Interventions](#human-in-the-loop-interventions)
-9. [Cost Management](#cost-management)
-10. [Memory and Decision Journal](#memory-and-decision-journal)
-11. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
-12. [Best Practices](#best-practices)
-13. [Troubleshooting](#troubleshooting)
+3. [Initializing Your Company](#initializing-your-company)
+4. [Sending Directives](#sending-directives)
+5. [Understanding Directive Types](#understanding-directive-types)
+6. [Checking Status](#checking-status)
+7. [Working with Projects](#working-with-projects)
+8. [Running Strategic Debates](#running-strategic-debates)
+9. [Viewing the Ledger](#viewing-the-ledger)
+10. [Executing Projects](#executing-projects)
+11. [Using the REST API](#using-the-rest-api)
+12. [Using the MCP Server](#using-the-mcp-server)
+13. [Using the Python SDK](#using-the-python-sdk)
+14. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
+15. [Cost Management](#cost-management)
+16. [Agent Memory](#agent-memory)
+17. [Best Practices](#best-practices)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -25,319 +30,449 @@ This guide covers everything you need to run strategic debates with your AI exec
 ### Prerequisites
 
 - Python 3.11 or higher
-- An Anthropic API key with access to Claude Sonnet 4.6 (minimum) and Opus 4.6 (recommended for CEO agent)
-- pip or pipenv for dependency management
+- An [Anthropic API key](https://console.anthropic.com/)
 
 ### Setup
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/ai-csuite-framework.git
-cd ai-csuite-framework
+git clone https://github.com/clarezoe/AI-C-Suite.git
+cd AI-C-Suite/kompany
 
 # Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # macOS/Linux
-# or: venv\Scripts\activate  # Windows
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the package
+pip install -e .
 
-# Set your API key
+# For REST API support
+pip install -e ".[api]"
+
+# For MCP server support
+pip install -e ".[mcp]"
+
+# For development (tests)
+pip install -e ".[dev]"
+```
+
+### Set Your API Key
+
+```bash
 export ANTHROPIC_API_KEY=your-key-here
+```
+
+Or create a `.env` file in the `kompany/` directory:
+
+```
+ANTHROPIC_API_KEY=your-key-here
 ```
 
 ### Verify Installation
 
 ```bash
-python3 main.py --health-check
+kompany --help
 ```
 
-This confirms API connectivity, model access, and config file validity.
+You should see all 8 commands listed: `init`, `directive`, `status`, `projects`, `project`, `debate`, `ledger`, `execute`.
 
 ---
 
 ## Configuration
 
-### Company Context (`config/company.yaml`)
+### Environment Variables
 
-This is the most important config file. Every agent reads it before taking a position.
+| Variable | Description | Required |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key | Yes |
+| `KOMPANY_DB_PATH` | SQLite database path | No (defaults to `./kompany.db`) |
+| `KOMPANY_CONFIG_PATH` | YAML config file path | No |
+
+### Company Config (YAML)
+
+You can optionally provide a YAML config file:
 
 ```yaml
-name: "Acme SaaS"
-product: "AI-powered invoice reconciliation for SMBs"
-stage: "solo"                    # solo | pre-seed | seed | series-a
-arr: "$0"                        # or "$48,000", "$1.2M", etc.
-mrr: "$0"
-runway_months: 18
-team_size: 1
-constraints:
-  - "bootstrapped"
-  - "solo developer"
-  - "no hiring budget"
-target_market: "US SMBs with 10-50 employees"
-key_metrics:
-  churn_rate: "5%"
-  cac: "$120"
-  ltv: "$1,400"
+name: "Your Company"
+product: "One-line product description"
+stage: "solo"          # solo | pre-seed | seed | series-a
 ```
 
-If this file doesn't exist when you run a debate, the framework will prompt you to provide the basics interactively.
+If no config file exists, use `kompany init` to set up your company interactively.
 
-### Stage Profiles (`config/profiles.yaml`)
+---
 
-Controls which agents participate and how many rounds run based on your company stage:
+## Initializing Your Company
 
-```yaml
-solo:
-  agents: [CEO, CTO, CPO, CFO, CoS]
-  rounds: 2
-  model_overrides:
-    CFO: "claude-haiku-4-20250414"    # economy model for solo
-  max_cost_usd: 0.50
+Before sending any directives, initialize your company:
 
-pre_seed:
-  agents: [CEO, CTO, CPO, CoS, CV]
-  rounds: 2
-  model_overrides:
-    CV: "claude-haiku-4-20250414"
-  max_cost_usd: 0.75
-
-seed:
-  agents: [CEO, CTO, CPO, CMO, CRO, CoS, CV]
-  rounds: 3
-  max_cost_usd: 1.50
-
-series_a:
-  agents: [CEO, CTO, CPO, CMO, CRO, CFO, COO, CSA, CISO, CoS, CV]
-  rounds: 3
-  max_cost_usd: 2.00
+```bash
+kompany init --name "Acme SaaS" --product "AI invoice reconciliation" --balance 50 --stage solo
 ```
 
-### Squad Configuration (`config/squads.yaml`)
+| Option | Description | Default |
+|---|---|---|
+| `--name` | Company name | *(prompted)* |
+| `--product` | One-line product description | *(prompted)* |
+| `--balance` | Starting balance in euros | *(prompted)* |
+| `--stage` | Company stage: `solo`, `pre-seed`, `seed`, `series-a` | *(prompted)* |
 
-Defines which agents belong to which squad and communication rules:
+This creates the SQLite database, sets your starting balance, and records your company profile. If you omit any option, you'll be prompted interactively.
 
-```yaml
-squads:
-  strategy:
-    mission: "Strategic direction & financial health"
-    lead: CFO
-    members: [CEO, CFO, COO, CoS]
-  product:
-    mission: "Product-market fit & technical delivery"
-    lead: CPO
-    members: [CTO, CPO, CSA, CISO]
-  growth:
-    mission: "Revenue & market expansion"
-    lead: CRO
-    members: [CMO, CRO, CV]
+**What happens under the hood:**
+- SQLite database is created with schema (ledger, projects, tasks, decisions, agent memory)
+- Starting balance is recorded as an `income` entry in the ledger
+- Company config is stored in the `company_config` table
 
-communication:
-  intra_squad: direct          # agents in same squad talk directly
-  cross_squad: mediated        # cross-squad goes through CoS
-  max_recursion: 3
+---
+
+## Sending Directives
+
+The `directive` command is the primary way to interact with Kompany. Send any natural-language instruction:
+
+```bash
+# Acquisition — triggers budget check + revenue project if needed
+kompany directive "Buy a Mac Studio M4 128GB, budget €50"
+
+# Strategic — CEO analyzes or triggers full debate
+kompany directive "Should we pivot from B2C to B2B?"
+
+# Operational — CEO delegates to squad
+kompany directive "Set up a CI/CD pipeline for the main repo"
+
+# Informational — no AI cost, mechanical response
+kompany directive "What's our current balance?"
+```
+
+**What happens under the hood:**
+
+1. The CEO agent classifies the directive (type, urgency, estimated cost, squad, agents needed, approval tier)
+2. The autonomy gate checks the approval tier
+3. The directive is routed to the appropriate handler
+4. For ACQUISITION: CFO checks budget → shortfall triggers revenue project creation
+5. For STRATEGIC: CEO analysis or full multi-agent debate
+6. For OPERATIONAL: CEO breaks into steps and delegates
+7. For INFORMATIONAL: CFO responds mechanically (no LLM cost)
+8. All AI costs are recorded in the ledger
+9. Result is displayed with cost transparency
+
+---
+
+## Understanding Directive Types
+
+The CEO classifies every directive into one of four types:
+
+### ACQUISITION
+
+Triggered by: "Buy X", "Get X", "Hire X", "Purchase X"
+
+The system **must deliver** what was requested. If the budget is insufficient, the CEO creates a revenue project with concrete revenue paths instead of downgrading the mission.
+
+```bash
+kompany directive "Hire a freelance designer for the landing page, budget €500"
+```
+
+### STRATEGIC
+
+Triggered by: "Should we X?", "What's our approach to Y?", questions requiring analysis
+
+For simple questions, the CEO provides analysis directly. For complex strategic questions, use the `debate` command for a full multi-agent debate.
+
+```bash
+kompany directive "Should we raise a Series A or extend runway through revenue?"
+```
+
+### OPERATIONAL
+
+Triggered by: "Set up X", "Configure Y", "Deploy Z", "Create X"
+
+The CEO breaks the directive into action steps and delegates to the appropriate squad.
+
+```bash
+kompany directive "Set up monitoring and alerting for our production API"
+```
+
+### INFORMATIONAL
+
+Triggered by: "What's our balance?", "Status", "How many projects?"
+
+Queries the state directly. The CFO responds mechanically — **no AI cost**.
+
+```bash
+kompany directive "What's our total AI spending so far?"
 ```
 
 ---
 
-## Running Your First Debate
+## Checking Status
 
-### Basic Usage
-
-```bash
-python3 main.py "Should we build SSO or focus on self-serve onboarding?"
-```
-
-### With Options
+View the current state of your company:
 
 ```bash
-# Override stage profile
-python3 main.py --stage seed "Should we raise a Series A?"
-
-# Solo mode (minimal agents, minimal cost)
-python3 main.py --solo "What pricing tier should we add?"
-
-# Verbose output (show full thinking chains)
-python3 main.py --verbose "Monolith vs microservices for our API?"
-
-# Save decision to journal
-python3 main.py --save "Should we hire a sales rep or invest in PLG?"
+kompany status
 ```
+
+Output includes:
+- Company name and product
+- Current balance
+- Total income, expenses, and AI costs
+- Number of active projects
 
 ---
 
-## Understanding the Debate Flow
+## Working with Projects
 
-Every debate follows this sequence:
+### List All Projects
 
-### Step 1: Data Layer (Pre-Round)
+```bash
+kompany projects
+```
 
-Before any agent takes a position, the data-gathering agents run first:
+Shows project ID, name, type (revenue/operational/strategic), status, target amount, and funded amount.
 
-- **Customer Voice (CV)**: Summarizes relevant customer signals
-- **CFO**: Surfaces financial constraints (runway, unit economics, budget)
+### View Project Details
 
-This grounds the debate in facts, not opinions.
+```bash
+kompany project abc12345
+```
 
-### Step 2: Round 1 — Independent Positions
+Shows full project details including:
+- Revenue paths and plan
+- Assigned agents
+- Task breakdown and status
+- Target vs. funded amounts
 
-Each active agent (excluding CoS and CEO) generates their position independently. No agent sees another's position. Each must provide:
+---
 
-- Domain-specific analysis (3-5 sentences)
-- A concrete recommendation
-- Confidence level (low / medium / high)
+## Running Strategic Debates
 
-### Step 3: Human Checkpoint (Optional)
+For complex strategic questions, run a full multi-agent debate:
 
-After Round 1, you're asked: "Want to redirect, add constraints, or continue?"
+```bash
+kompany debate "Should we build SSO or focus on self-serve onboarding?"
+```
 
-This is where you can inject context the agents don't have — a competitor move, a customer conversation, a board constraint.
+### Debate Protocol
 
-### Step 4: Round 2 — Rebuttal & Challenge
+The debate follows a structured multi-round protocol:
 
-Each agent now sees all Round 1 positions and must:
+**Round 1 — Independent Positions**
+Each agent argues from their domain without seeing other positions. Output includes domain-specific analysis, a recommendation, and confidence level.
 
-- Acknowledge valid points from other agents by name
-- Challenge specific points they disagree with
-- Update their own position if warranted
+**Round 2 — Rebuttal & Challenge**
+Each agent sees all Round 1 positions. They must acknowledge valid points, challenge disagreements, and update their position if warranted. Intra-squad agents address each other directly.
 
-Intra-squad agents address each other directly. Cross-squad challenges reference the other agent's squad context.
-
-### Step 5: Round 3 — Convergence (3-round mode only)
-
+**Round 3 — Convergence** *(3-round mode only)*
 Agents move toward consensus. They state concessions and any non-negotiable hard lines. Skipped in 2-round mode (solo/pre-seed stages).
 
-### Step 6: CoS Synthesis
+**CoS Synthesis**
+The Chief of Staff produces a structured CEO brief: consensus position, key tensions, recommended option, risk flags, and the decision required.
 
-The Chief of Staff produces a structured CEO brief covering: consensus position, key tensions, recommended option, risk flags, and the decision required.
+**CEO Decision**
+The CEO reviews everything and makes the final call: decision, rationale, tradeoffs, overrides, next steps, confidence score, and reversibility assessment.
 
-### Step 7: CEO Decision
+### Stage-Based Configuration
 
-The CEO agent (running on Opus 4.6) reviews everything and makes the final call. The output includes: decision, rationale, tradeoffs weighed, overrides, next steps, confidence score, and reversibility assessment.
-
-### Step 8: Post-Decision
-
-You're asked whether to accept, challenge, or re-run with different constraints.
+| Stage | Agents | Rounds | Max Cost |
+|---|---|---|---|
+| Solo | CEO, CTO, CPO, CFO, CoS | 2 | ~$0.50 |
+| Pre-seed | CEO, CTO, CPO, CoS, CV | 2 | ~$0.75 |
+| Seed | CEO, CTO, CPO, CMO, CRO, CoS, CV | 3 | ~$1.50 |
+| Series A | All 11 agents | 3 | ~$2.00 |
 
 ---
 
-## Stage Profiles
+## Viewing the Ledger
 
-Your company stage determines the debate configuration:
-
-| Stage | What Changes |
-|---|---|
-| **Solo** | Only 4 agents + CoS. 2 rounds. CFO runs on Haiku for cost. Max $0.50/debate. |
-| **Pre-seed** | Adds Customer Voice. 2 rounds. CV runs on Haiku. Max $0.75/debate. |
-| **Seed** | Adds CMO and CRO. 3 rounds. All on Sonnet. Max $1.50/debate. |
-| **Series A** | Full 11-agent roster. 3 rounds. CEO on Opus. Max $2.00/debate. |
-
-Set your stage in `config/company.yaml` or override per-debate:
+See all financial transactions including AI costs:
 
 ```bash
-python3 main.py --stage series_a "Should we acquire CompetitorX?"
+kompany ledger
+kompany ledger --limit 25
 ```
+
+Each entry shows: timestamp, amount, balance after, description, and category.
+
+Categories:
+- `income` — Funds added to the company
+- `expense` — Purchases, payments
+- `ai_cost` — LLM API calls (automatically tracked)
+- `allocation` — Funds reserved for projects
+- `refund` — Returned funds
 
 ---
 
-## Solo Mode
+## Executing Projects
 
-Solo mode is designed for bootstrapped founders who need to minimize API costs. It activates automatically at the `solo` stage, or you can force it:
+Once a revenue project is created, execute its tasks autonomously:
 
 ```bash
-python3 main.py --solo "Should I pivot from B2C to B2B?"
+kompany execute abc12345
 ```
 
-What solo mode changes:
+The `ProjectRunner` handles execution:
 
-- **Primary agents**: CTO, CPO, CFO only (the essential triad)
-- **Secondary agents**: CMO, CRO, COO skipped entirely
-- **Specialist agents**: CSA, CISO skipped
-- **Rounds**: Maximum 2
-- **Models**: Haiku 4 for non-critical agents, Sonnet 4.6 for primary
-- **CEO**: Still runs on the best available model for the final decision
+1. Decomposes the project into tasks based on the plan
+2. Assigns each task to the appropriate subagent:
+   - **Analyst** — Financial modeling, ROI analysis
+   - **Builder** — Code generation, prototyping
+   - **Procurement** — Vendor research, price comparison
+   - **Researcher** — Market research, data gathering
+   - **Writer** — Content creation, copywriting
+3. Runs tasks and tracks AI cost per task
+4. Updates project status and reports results
 
 ---
 
-## Customizing Agents
+## Using the REST API
 
-### Editing Agent Identity
+Start the API server (requires `pip install -e ".[api]"`):
 
-Each agent's behavior is controlled by three files in `agents/<role>/`:
-
-**SOUL.md** — Core identity and debate behavior:
-```markdown
-# CTO — Chief Technology Officer
-
-## Identity
-I am the CTO. I optimize for technical correctness, scalability, and engineering velocity.
-
-## Debate Behavior
-- I challenge proposals that create technical debt
-- I push back on timelines that compromise code quality
-- I defer to CPO on user value questions but hold firm on architecture
+```bash
+uvicorn kompany.interfaces.api:app --reload
 ```
 
-**USER.md** — Organizational context:
-```markdown
-## Squad
-Product Squad (Lead: CPO)
+The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
 
-## Relationships
-- Reports to: CEO
-- Collaborates with: CPO (daily), CSA (architecture reviews)
-- Common clashes: CPO (speed vs quality), CFO (infrastructure cost)
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/init` | Initialize a new company |
+| `POST` | `/directive` | Send a directive |
+| `GET` | `/status` | Get company status |
+| `GET` | `/projects` | List active projects |
+| `GET` | `/projects/{project_id}` | Get a specific project |
+| `GET` | `/ledger?limit=10` | Get recent ledger entries |
+| `POST` | `/projects/{project_id}/execute` | Execute a project's tasks |
+
+### Examples
+
+```bash
+# Initialize
+curl -X POST http://localhost:8000/init \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Acme", "product": "AI tools", "balance": 50, "stage": "solo"}'
+
+# Send a directive
+curl -X POST http://localhost:8000/directive \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Buy a Mac Studio M4 128GB, budget €50"}'
+
+# Check status
+curl http://localhost:8000/status
+
+# View ledger
+curl "http://localhost:8000/ledger?limit=20"
 ```
 
-**MEMORY.md** — Updated automatically after each debate:
-```markdown
-## Decision History
-- 2026-02-20 Pricing debate: Argued for SSO-first. Overruled by CEO (PLG priority).
-- 2026-02-22 Architecture debate: Pushed for event-driven. Consensus reached.
+---
+
+## Using the MCP Server
+
+Run as an MCP server for Claude Code, Cursor, or any MCP-compatible client (requires `pip install -e ".[mcp]"`):
+
+```bash
+kompany-mcp
+# or
+python -m kompany.interfaces.mcp_server
 ```
 
-### Adding Domain-Specific Tools
+### Available Tools
 
-Agents can be given tools relevant to their domain. Configure in `agents/<role>/agent.py`:
+| Tool | Parameters | Description |
+|---|---|---|
+| `kompany_init` | `name`\*, `product`\*, `balance`, `stage` | Initialize a new company |
+| `kompany_directive` | `text`\* | Send a natural language directive |
+| `kompany_status` | *(none)* | Get company status |
+| `kompany_projects` | *(none)* | List active projects |
+| `kompany_project` | `project_id`\* | Get project details |
+| `kompany_ledger` | `limit` | Get recent ledger entries |
+| `kompany_debate` | `question`\* | Run a multi-agent debate |
+| `kompany_execute` | `project_id`\* | Execute a project's tasks |
+
+### Claude Code Configuration
+
+Add to your Claude Code MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "kompany": {
+      "command": "kompany-mcp",
+      "env": {
+        "ANTHROPIC_API_KEY": "your-key-here"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Using the Python SDK
 
 ```python
-# agents/cfo/agent.py
-TOOLS = [
-    {"name": "runway_calculator", "description": "Calculate runway from burn rate and cash"},
-    {"name": "unit_economics", "description": "Compute LTV, CAC, payback period"},
-]
+from kompany import Kompany
+
+# Initialize
+k = Kompany()
+k.init(name="Acme", product="AI tools", balance=50, stage="solo")
+
+# Send a directive
+result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
+print(result["message"])
+print(f"AI cost: ${result['total_ai_cost']:.2f}")
+
+# Check balance
+print(f"Balance: €{k.balance():.2f}")
+
+# View status
+status = k.status()
+print(f"Active projects: {status['active_projects']}")
+
+# List projects
+for project in k.projects():
+    print(f"  {project['id']}: {project['name']} ({project['status']})")
+
+# Get project details
+project = k.project("abc12345")
+
+# View ledger
+for entry in k.ledger(limit=5):
+    print(f"  {entry['description']}: {entry['amount']}")
+
+# Execute a revenue project
+result = k.execute_project("abc12345")
 ```
 
-### Creating a New Agent
+### SDK Methods
 
-1. Create a directory: `agents/your_role/`
-2. Add `SOUL.md`, `USER.md`, `MEMORY.md`
-3. Add `agent.py` with role-specific tools
-4. Register in `config/squads.yaml` under the appropriate squad
-5. Add to the relevant stage profile in `config/profiles.yaml`
+| Method | Returns | Description |
+|---|---|---|
+| `Kompany(config_path=None)` | — | Constructor |
+| `init(name, product, balance=0.0, stage="solo")` | `None` | Initialize a new company |
+| `directive(text)` | `dict` | Send a directive, get the result |
+| `status()` | `dict` | Company status |
+| `projects()` | `list[dict]` | All active projects |
+| `project(project_id)` | `dict \| None` | A specific project |
+| `balance()` | `float` | Current balance |
+| `ledger(limit=10)` | `list[dict]` | Recent ledger entries |
+| `execute_project(project_id)` | `dict` | Execute a project autonomously |
 
 ---
 
-## Human-in-the-Loop Interventions
+## Using as a Claude Code Skill
 
-The framework is a decision-support tool, not an autopilot. You can intervene at multiple points:
+Kompany ships as a Claude Code skill. Invoke it directly in any Claude Code session:
 
-### Pre-Debate
-- Set constraints: "Assume we can't hire for 6 months"
-- Inject context: "We just lost our biggest customer"
-- Adjust roster: "Skip CISO for this one, it's not security-related"
+```
+/kompany "Buy a Mac Studio M4 128GB, budget €50"
+/kompany "What's our balance?"
+/kompany "Should we build SSO or focus on self-serve onboarding?"
+```
 
-### Mid-Debate (after Round 1)
-- **Redirect**: Change the framing of the question
-- **Constrain**: Add a new constraint agents must respect
-- **Inject**: Provide data or context agents don't have
-- **Skip**: Jump straight to CEO decision
-
-### Post-Decision
-- **Accept**: Log the decision and move on
-- **Challenge**: Push back on the CEO's reasoning
-- **Re-run**: Start over with different constraints or roster
+The skill file is at `.claude/skills/kompany/SKILL.md`. It activates the venv, ensures the engine is installed, and routes your directive through `kompany directive`.
 
 ---
 
@@ -345,131 +480,111 @@ The framework is a decision-support tool, not an autopilot. You can intervene at
 
 ### How Costs Work
 
-Every API call to Claude is tracked per-agent, per-round, per-debate. The framework enforces:
+Every LLM API call is tracked as a real business expense. The `CostTracker` records each call to the ledger with:
 
-- **Per-debate hard ceiling**: $2.00 (full board), $0.50 (solo mode)
-- **Per-agent soft limit**: $0.30 — triggers a warning, not a stop
-- **Model fallback chain**: If budget is tight, agents automatically fall back from Sonnet → Haiku
+- Model used (Opus, Sonnet, Haiku)
+- Input and output token counts
+- Calculated cost based on model pricing
+- Description of what the call was for
+
+### Model Pricing
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) | Used By |
+|---|---|---|---|
+| claude-opus-4 | $15.00 | $75.00 | CEO (apex tier) |
+| claude-sonnet-4 | $3.00 | $15.00 | All other agents (primary tier) |
+| claude-haiku-4 | $1.00 | $5.00 | Fallback (economy tier) |
 
 ### Monitoring Costs
 
-After each debate, a cost summary is printed:
+After each directive, the AI cost is displayed:
 
 ```
-┌─────────────────────────────────────┐
-│ DEBATE COST SUMMARY                 │
-├──────────┬──────────┬───────────────┤
-│ Agent    │ Calls    │ Cost (USD)    │
-├──────────┼──────────┼───────────────┤
-│ CTO      │ 3        │ $0.12         │
-│ CPO      │ 3        │ $0.11         │
-│ CFO      │ 3        │ $0.08         │
-│ CoS      │ 2        │ $0.09         │
-│ CEO      │ 1        │ $0.18         │
-├──────────┼──────────┼───────────────┤
-│ TOTAL    │ 12       │ $0.58         │
-└──────────┴──────────┴───────────────┘
+AI cost for this directive: $0.18
+  CEO classify:      $0.03
+  CEO revenue plan:  $0.15
+Balance before: €50.00 → Balance after: €49.82
 ```
+
+Use `kompany ledger` to see all AI cost entries in the transaction history.
+
+### Cost-Saving Tips
+
+- Use INFORMATIONAL directives for status checks — they cost nothing (mechanical CFO)
+- The `solo` stage uses fewer agents in debates (~$0.50 vs. ~$2.00 for Series A)
+- Simple directives cost ~$0.03–$0.20; full debates cost ~$0.50–$2.00
 
 ---
 
-## Memory and Decision Journal
+## Agent Memory
 
-### Three-Tier Memory
+Each agent has persistent memory stored in SQLite. After processing directives, agents can store learnings:
 
-1. **Short-term**: The debate context itself — positions, rebuttals, synthesis. Lives only during the debate.
-2. **Entity memory**: Cross-debate knowledge stored in SQLite. Tracks agent positions, company facts, recurring themes.
-3. **Long-term** (future): Vector embeddings for semantic search across past decisions.
+- Key insights from research or analysis
+- Positions taken and outcomes observed
+- Company-specific knowledge accumulated over time
 
-### Decision Journal
-
-Every saved debate creates a `DecisionRecord` in `data/journal.sqlite`:
-
-```bash
-# View recent decisions
-python3 main.py --journal
-
-# View a specific decision
-python3 main.py --journal --id 42
-
-# Search decisions
-python3 main.py --journal --search "pricing"
-```
-
-Each record includes: topic, all agent positions, CEO decision, rationale, confidence score, reversibility, and timestamp.
-
----
-
-## Using as a Claude Code Skill
-
-The framework ships as a Claude Code skill in `.claude/skills/ai-csuite/SKILL.md`.
-
-### Invocation
-
-```
-/ai-csuite "Should we build SSO or focus on self-serve onboarding?"
-```
-
-### What Happens
-
-Claude Code reads the skill definition and simulates the full debate protocol inline — data layer, rounds, synthesis, CEO decision — all within your conversation. No separate process needed.
-
-### Requirements
-
-- The skill file must be at `.claude/skills/ai-csuite/SKILL.md`
-- `config/company.yaml` should exist (or you'll be prompted for context)
-- The skill uses these tools: Read, Write, Edit, Bash, Glob, Grep, Task, WebSearch, WebFetch
+Memory is scoped per-agent and persists across directives, allowing agents to build context over time.
 
 ---
 
 ## Best Practices
 
-### Framing Good Decision Topics
+### Writing Good Directives
 
-The quality of the debate depends heavily on how you frame the question.
+**Specific and actionable:**
+- "Buy a Mac Studio M4 Ultra 128GB, budget €50"
+- "Should we build SSO first or focus on self-serve onboarding for Q2?"
+- "Hire a freelance React developer for 2 weeks, budget €3,000"
 
-**Good topics** (specific, bounded, actionable):
-- "Should we build SSO or focus on self-serve onboarding for Q2?"
-- "Our biggest competitor just raised $50M. What's our response?"
-- "Should we raise prices 20% and risk churn, or keep prices and extend runway?"
+**Vague (less effective):**
+- "Grow the company" — too broad
+- "Make money" — no constraints
+- "What should we do?" — no context
 
-**Weak topics** (vague, unbounded):
-- "How should we grow?" — too broad, agents will give generic advice
-- "What should we do?" — no context, no constraints
-- "Is our product good?" — not a decision, just a question
+### Tips
 
-### Tips for Better Debates
-
-1. **Add constraints** — "We have $50K budget and 3 months" forces agents to be realistic
-2. **Provide context** — The more your `company.yaml` reflects reality, the better the advice
-3. **Use the human checkpoint** — After Round 1, inject information agents can't know
-4. **Challenge the CEO** — If the decision feels wrong, push back. Re-run with new constraints.
-5. **Review MEMORY.md periodically** — Agents learn from past debates. Check that their accumulated knowledge is accurate.
+1. **Include budget constraints** — Forces the CEO to make realistic plans
+2. **Be specific about acquisitions** — "Buy X" with a price gives the CEO clear parameters
+3. **Use debates for real tradeoffs** — "A vs B" questions produce the best debates
+4. **Check the ledger regularly** — `kompany ledger` shows where AI costs are going
+5. **Start with `solo` stage** — Minimizes debate costs while you're learning the system
 
 ---
 
 ## Troubleshooting
 
 ### "API key not found"
-Set `ANTHROPIC_API_KEY` in your environment or in a `.env` file in the project root.
 
-### "Model not available"
-Your API plan may not include Opus 4.6. The framework will fall back to Sonnet 4.6 for the CEO agent. To force this:
+Set `ANTHROPIC_API_KEY` in your environment or in a `.env` file in the `kompany/` directory.
+
 ```bash
-python3 main.py --ceo-model claude-sonnet-4-6-20250620 "Your topic"
+export ANTHROPIC_API_KEY=your-key-here
 ```
 
-### "Budget exceeded"
-The debate was cut short because it hit the cost ceiling. Options:
-- Increase `max_cost_usd` in `config/profiles.yaml`
-- Use `--solo` mode for cheaper debates
-- Check if an agent is producing unusually long outputs (may indicate a prompt issue)
+### "Company not initialized"
 
-### "No company context found"
-Create `config/company.yaml` with your company details. See the [Configuration](#configuration) section above.
+Run `kompany init` before sending directives:
 
-### Agents are too agreeable
-If all agents agree in Round 1, the CoS will flag potential groupthink. You can also:
-- Make the topic more specific or controversial
-- Add constraints that create real tradeoffs
-- Edit agent SOUL.md files to sharpen their biases
+```bash
+kompany init --name "My Company" --product "My product" --balance 50 --stage solo
+```
+
+### "Model not available"
+
+Your API plan may not include Opus. The CEO agent will need Opus for optimal performance. Check your Anthropic dashboard for model access.
+
+### Database issues
+
+The SQLite database is created at the path specified by `KOMPANY_DB_PATH` (defaults to `./kompany.db` in the current directory). If you run `kompany` from different directories, it may create separate databases. Use an absolute path in `KOMPANY_DB_PATH` to avoid this.
+
+### Tests failing
+
+```bash
+cd kompany
+source .venv/bin/activate
+pip install -e ".[dev]"
+python -m pytest tests/ -v
+```
+
+All 47 tests should pass. If not, ensure you're running Python 3.11+ and have the latest dependencies installed.
