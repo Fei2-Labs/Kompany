@@ -19,10 +19,6 @@
 
 Give Kompany a directive and a budget. The CEO agent conducts the team, delegates tasks, creates revenue projects when funds are short, and **never downgrades your mission**. Every AI cost is tracked as a real business expense. Works standalone via CLI, REST API, MCP, or SDK.
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=clarezoe/AI-C-Suite&type=Date)](https://star-history.com/#clarezoe/AI-C-Suite&Date)
-
 ## Why This Exists
 
 Solo founders make high-stakes decisions daily across product, engineering, finance, marketing, sales, and operations — often without anyone to challenge their thinking. Single-agent AI tools answer questions in isolation. They don't debate, push back, or synthesize cross-functional perspectives.
@@ -707,3 +703,9 @@ If you find Kompany useful, consider supporting the project:
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=clarezoe/AI-C-Suite&type=Date)](https://star-history.com/#clarezoe/AI-C-Suite&Date)
