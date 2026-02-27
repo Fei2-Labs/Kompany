@@ -35,8 +35,8 @@ This guide covers everything you need to operate Kompany, from initializing your
 ### Setup
 
 ```bash
-git clone https://github.com/clarezoe/AI-C-Suite.git
-cd AI-C-Suite/kompany
+git clone https://github.com/Fei2-Labs/Kompany.git
+cd Kompany/kompany
 
 # Create and activate virtual environment
 python3 -m venv .venv

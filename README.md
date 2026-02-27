@@ -4,10 +4,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/clarezoe/AI-C-Suite/stargazers"><img src="https://img.shields.io/github/stars/clarezoe/AI-C-Suite?style=social" alt="GitHub stars"></a>
-  <a href="https://github.com/clarezoe/AI-C-Suite/network/members"><img src="https://img.shields.io/github/forks/clarezoe/AI-C-Suite?style=social" alt="GitHub forks"></a>
-  <a href="https://github.com/clarezoe/AI-C-Suite/issues"><img src="https://img.shields.io/github/issues/clarezoe/AI-C-Suite" alt="GitHub issues"></a>
-  <a href="https://github.com/clarezoe/AI-C-Suite/blob/main/LICENSE"><img src="https://img.shields.io/github/license/clarezoe/AI-C-Suite" alt="License"></a>
+  <a href="https://github.com/Fei2-Labs/Kompany/stargazers"><img src="https://img.shields.io/github/stars/Fei2-Labs/Kompany?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/Fei2-Labs/Kompany/network/members"><img src="https://img.shields.io/github/forks/Fei2-Labs/Kompany?style=social" alt="GitHub forks"></a>
+  <a href="https://github.com/Fei2-Labs/Kompany/issues"><img src="https://img.shields.io/github/issues/Fei2-Labs/Kompany" alt="GitHub issues"></a>
+  <a href="https://github.com/Fei2-Labs/Kompany/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fei2-Labs/Kompany" alt="License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"></a>
 </p>
 
@@ -123,8 +123,8 @@ Intra-squad agents communicate directly; cross-squad goes through the CoS.
 ### Install from Source
 
 ```bash
-git clone https://github.com/clarezoe/AI-C-Suite.git
-cd AI-C-Suite/kompany
+git clone https://github.com/Fei2-Labs/Kompany.git
+cd Kompany/kompany
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -708,4 +708,4 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=clarezoe/AI-C-Suite&type=Date)](https://star-history.com/#clarezoe/AI-C-Suite&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Fei2-Labs/Kompany&type=Date)](https://star-history.com/#Fei2-Labs/Kompany&Date)

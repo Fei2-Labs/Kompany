@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This project is open to improvements a
 
 ### Reporting Issues
 
-- Use [GitHub Issues](https://github.com/clarezoe/AI-C-Suite/issues) for bugs, feature requests, and questions
+- Use [GitHub Issues](https://github.com/Fei2-Labs/Kompany/issues) for bugs, feature requests, and questions
 - Include your company stage profile and the directive that triggered the issue
 - Include the full error output if applicable
 
