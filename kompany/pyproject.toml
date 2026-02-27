@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
     "anthropic>=0.40.0",
+    "openai>=1.40.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "typer[all]>=0.12",

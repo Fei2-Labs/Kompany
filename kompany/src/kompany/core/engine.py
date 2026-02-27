@@ -43,7 +43,7 @@ class KompanyEngine:
         self.autonomy = AutonomyGate()
 
         self.llm = LLMClient(
-            api_key=self.settings.anthropic_api_key,
+            settings=self.settings,
             cost_tracker=self.cost_tracker,
         )
         self.registry = AgentRegistry(

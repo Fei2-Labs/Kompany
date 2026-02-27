@@ -20,6 +20,12 @@ def engine(tmp_path, monkeypatch):
         company_stage = "solo"
         data_dir = tmp_path
         anthropic_api_key = "test-key"
+        openai_api_key = ""
+        gemini_api_key = ""
+        glm_api_key = ""
+        kimi_api_key = ""
+        custom_api_key = ""
+        custom_base_url = ""
         currency = "EUR"
         model_apex = "claude-opus-4-20250514"
         model_primary = "claude-sonnet-4-20250514"
@@ -31,6 +37,16 @@ def engine(tmp_path, monkeypatch):
                 "primary": self.model_primary,
                 "economy": self.model_economy,
             }.get(tier, self.model_primary)
+
+        def get_api_key_for_provider(self, provider):
+            return {
+                "anthropic": self.anthropic_api_key,
+                "openai": self.openai_api_key,
+                "gemini": self.gemini_api_key,
+                "glm": self.glm_api_key,
+                "kimi": self.kimi_api_key,
+                "custom": self.custom_api_key,
+            }.get(provider, "")
 
     from kompany.state.database import Database
     from kompany.state.ledger import Ledger

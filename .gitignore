@@ -41,3 +41,4 @@ data/*.sqlite
 secrets/
 *.pem
 *.key
+AGENTS.md
