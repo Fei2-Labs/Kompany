@@ -30,7 +30,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 ### Prerequisites
 
 - Python 3.11 or higher
-- An [Anthropic API key](https://console.anthropic.com/)
+- An API key for at least one [supported LLM provider](../README.md#multi-provider-llm-support)
 
 ### Setup
 
@@ -68,6 +68,15 @@ Or create a `.env` file in the `kompany/` directory:
 ANTHROPIC_API_KEY=your-key-here
 ```
 
+To use other providers, set their API keys as well:
+
+```bash
+export OPENAI_API_KEY=sk-...       # For GPT-4o, o3, etc.
+export GEMINI_API_KEY=...          # For Gemini models
+export GLM_API_KEY=...             # For GLM (Zhipu AI)
+export KIMI_API_KEY=...            # For Moonshot/Kimi
+```
+
 ### Verify Installation
 
 ```bash
@@ -84,7 +93,13 @@ You should see all 8 commands listed: `init`, `directive`, `status`, `projects`,
 
 | Variable | Description | Required |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Your Anthropic API key | Yes |
+| `ANTHROPIC_API_KEY` | Anthropic API key | Yes (if using Claude models) |
+| `OPENAI_API_KEY` | OpenAI API key | No |
+| `GEMINI_API_KEY` | Google Gemini API key | No |
+| `GLM_API_KEY` | Zhipu AI (GLM) API key | No |
+| `KIMI_API_KEY` | Moonshot (Kimi) API key | No |
+| `CUSTOM_LLM_API_KEY` | Custom endpoint API key | No |
+| `CUSTOM_LLM_BASE_URL` | Custom OpenAI-compatible base URL | No |
 | `KOMPANY_DB_PATH` | SQLite database path | No (defaults to `./kompany.db`) |
 | `KOMPANY_CONFIG_PATH` | YAML config file path | No |
 
@@ -93,9 +108,21 @@ You should see all 8 commands listed: `init`, `directive`, `status`, `projects`,
 You can optionally provide a YAML config file:
 
 ```yaml
-name: "Your Company"
-product: "One-line product description"
-stage: "solo"          # solo | pre-seed | seed | series-a
+company:
+  name: "Your Company"
+  product: "One-line product description"
+  stage: "solo"          # solo | pre-seed | seed | series-a
+
+# Override model tiers (optional)
+models:
+  apex: "claude-opus-4-20250514"
+  primary: "claude-sonnet-4-20250514"
+  economy: "claude-haiku-4-20250414"
+
+# Custom OpenAI-compatible endpoint (optional)
+custom_llm:
+  base_url: "https://my-endpoint.example.com/v1"
+  api_key: "my-key"
 ```
 
 If no config file exists, use `kompany init` to set up your company interactively.
@@ -587,4 +614,4 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-All 47 tests should pass. If not, ensure you're running Python 3.11+ and have the latest dependencies installed.
+All 81 tests should pass. If not, ensure you're running Python 3.11+ and have the latest dependencies installed.
