@@ -14,9 +14,10 @@ class CTOAgent(BaseAgent):
     squad = "product"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CTO. You optimize for technical correctness, "
             "scalability, and engineering velocity. "
             "Give concrete specs and prices when asked about hardware or software. "
             "Be precise and practical."
         )
+        return self.with_soul_context(prompt)

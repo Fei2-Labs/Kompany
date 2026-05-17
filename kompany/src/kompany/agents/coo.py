@@ -19,12 +19,13 @@ class COOAgent(BaseAgent):
         self._projects = projects
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the COO (Chief Operating Officer). You own operations, "
             "process efficiency, task tracking, and execution cadence. "
             "Be structured and systematic. Break work into concrete steps. "
             "Track progress and flag blockers early."
         )
+        return self.with_soul_context(prompt)
 
     def get_active_project_count(self) -> int:
         """Mechanical: count active projects."""

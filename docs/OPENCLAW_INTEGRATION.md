@@ -12,7 +12,7 @@ This guide walks you through using Kompany with [OpenClaw](https://github.com/op
 6. [MCP Server Integration](#mcp-server-integration)
 7. [OpenClaw Native Setup](#openclaw-native-setup)
 8. [Codex / Other Agent Platforms](#codex--other-agent-platforms)
-9. [Squad Architecture](#squad-architecture)
+9. [Agent Communication](#agent-communication)
 10. [Agent Identity System](#agent-identity-system)
 
 ---
@@ -84,7 +84,7 @@ pip install -e .
 ### Available Commands
 
 ```bash
-kompany init --name "Acme" --product "AI tools" --balance 50 --stage solo
+kompany init --name "Acme" --capital 50 --goal "AI tools" --time-horizon "2 years" --exclusions "crypto"
 kompany directive "Your directive here"
 kompany status
 kompany projects
@@ -125,7 +125,7 @@ from kompany import Kompany
 
 # Create and initialize
 k = Kompany()
-k.init(name="Acme SaaS", product="AI invoice tools", balance=50, stage="solo")
+k.init(name="Acme SaaS", capital=50, goal="AI invoice tools")
 
 # Send directives
 result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
@@ -153,7 +153,7 @@ if projects:
 | Method | Returns | Description |
 |---|---|---|
 | `Kompany(config_path=None)` | — | Constructor |
-| `init(name, product, balance, stage)` | `None` | Initialize company |
+| `init(name, capital, goal)` | `None` | Initialize company |
 | `directive(text)` | `dict` | Send a directive |
 | `status()` | `dict` | Company status |
 | `projects()` | `list[dict]` | Active projects |
@@ -177,7 +177,7 @@ uvicorn kompany.interfaces.api:app --host 0.0.0.0 --port 8000
 
 | Method | Endpoint | Body | Description |
 |---|---|---|---|
-| POST | `/init` | `{name, product, balance, stage}` | Initialize company |
+| POST | `/init` | `{name, capital, goal, time_horizon, exclusions}` | Initialize company |
 | POST | `/directive` | `{text}` | Send directive |
 | GET | `/status` | — | Company status |
 | GET | `/projects` | — | List projects |
@@ -221,7 +221,7 @@ Add to your Claude Code MCP settings (`.claude/settings.json` or project setting
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `kompany_init` | `name`\*, `product`\*, `balance`, `stage` | Initialize company |
+| `kompany_init` | `name`\*, `capital`\*, `goal`\* | Initialize company |
 | `kompany_directive` | `text`\* | Send directive |
 | `kompany_status` | — | Company status |
 | `kompany_projects` | — | List projects |
@@ -273,9 +273,9 @@ Each C-suite agent can be registered as an OpenClaw agent. The CLI serves as the
 
 ### 3. Communication Rules
 
-- **Intra-squad**: Agents in the same squad communicate directly
-- **Cross-squad**: Messages route through CoS (Chief of Staff)
-- **Squad leads** always participate in debates; other members join when relevant
+- **Direct calls**: All agents communicate via direct function calls through `KompanyEngine`
+- **Cross-functional**: CoS mediates between agents with different perspectives
+- **Debates**: Independent positions → Rebuttal → Convergence → CoS synthesis → CEO decision
 
 ---
 
@@ -292,21 +292,15 @@ The CLI returns structured output that any agent can parse. All state is persist
 
 ---
 
-## Squad Architecture
+## Agent Communication
 
-Kompany agents are organized into three squads:
+All agents communicate through direct function calls via `KompanyEngine`. There are no separate squads or squad leads — CoS coordinates cross-functional issues and synthesizes decisions.
 
-| Squad | Mission | Members |
-|---|---|---|
-| **Strategy** | Strategic direction & financial health | CEO, CFO, COO, CoS |
-| **Product** | Product-market fit & technical delivery | CTO, CPO, CSA, CISO |
-| **Growth** | Revenue & market expansion | CMO, CRO, CV |
-
-### Communication Model
-
-- **Intra-squad**: Direct agent-to-agent communication
-- **Cross-squad**: Mediated through the Chief of Staff (CoS)
-- **Squad leads**: CFO (Strategy), CPO (Product), CRO (Growth)
+| Pattern | Description |
+|---|---|
+| **Decision chain** | CRO proposes → CFO evaluates → CoS converges → CEO approves → COO plans → AutonomyGate → user approves → execute |
+| **Debates** | Independent positions → Rebuttal → Convergence → CoS synthesis → CEO decision |
+| **Cross-functional** | CoS mediates between agents with different perspectives |
 
 ---
 
@@ -330,12 +324,8 @@ Each agent has persistent memory stored in SQLite (via `AgentMemory`):
 
 Memory is scoped per-agent and persists across sessions.
 
-### Customizing Agents
+### Modifying Agents
 
-To modify an agent's personality, edit their soul file:
-
-```
-kompany/src/kompany/agents/souls/cto.yaml
-```
+Each agent's personality is defined by a `soul.yaml` file. Soul files require a governed change process: CTO + CSA propose modifications → CEO approves → AutonomyGate notifies user → changes recorded in decision journal. Do not edit soul files directly.
 
 The system prompt is assembled at runtime from: `soul.yaml` personality + company context + directive context.

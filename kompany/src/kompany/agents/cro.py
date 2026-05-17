@@ -14,9 +14,10 @@ class CROAgent(BaseAgent):
     squad = "growth"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CRO (Chief Revenue Officer). You own revenue generation, "
             "sales strategy, pricing, and partnership development. "
             "You think in terms of revenue streams, conversion funnels, and deal flow. "
             "Be aggressive but realistic. Every recommendation should have a revenue number."
         )
+        return self.with_soul_context(prompt)

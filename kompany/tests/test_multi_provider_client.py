@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kompany.llm.client import LLMClient
+from kompany.llm.client import LLMClient, LLMResponse
 from kompany.llm.providers import Provider
 
 
@@ -73,3 +73,76 @@ def test_lazy_anthropic_client_not_created_on_init(client):
 
 def test_lazy_openai_clients_empty_on_init(client):
     assert client._openai_clients == {}
+
+
+def test_quota_error_invokes_provider_error_handler():
+    events = []
+    c = LLMClient(
+        settings=FakeSettings(),
+        cost_tracker=None,
+        provider_error_handler=events.append,
+    )
+
+    def fail(*args, **kwargs):
+        error = RuntimeError("rate limit exceeded")
+        error.status_code = 429
+        raise error
+
+    c._call_anthropic = fail
+
+    with pytest.raises(RuntimeError, match="rate limit"):
+        c.call(
+            model="claude-sonnet-4-20250514",
+            system="system",
+            prompt="prompt",
+            agent_name="CEO",
+            directive_id="dir-1",
+        )
+
+    assert events == [{
+        "reason": "quota_exhausted",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "agent_name": "CEO",
+        "directive_id": "dir-1",
+        "error_type": "RuntimeError",
+        "error": "rate limit exceeded",
+    }]
+
+
+def test_non_quota_error_does_not_invoke_provider_error_handler():
+    events = []
+    c = LLMClient(
+        settings=FakeSettings(),
+        cost_tracker=None,
+        provider_error_handler=events.append,
+    )
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("model not found")
+
+    c._call_anthropic = fail
+
+    with pytest.raises(RuntimeError, match="model not found"):
+        c.call("claude-sonnet-4-20250514", "system", "prompt")
+
+    assert events == []
+
+
+def test_successful_call_records_cost_after_provider_response():
+    class FakeCostTracker:
+        def record(self, **kwargs):
+            return 0.25
+
+    c = LLMClient(settings=FakeSettings(), cost_tracker=FakeCostTracker())
+    c._call_anthropic = lambda *args, **kwargs: LLMResponse(
+        text="ok",
+        input_tokens=10,
+        output_tokens=5,
+        cost_usd=0.0,
+        model="claude-sonnet-4-20250514",
+    )
+
+    response = c.call("claude-sonnet-4-20250514", "system", "prompt")
+
+    assert response.cost_usd == 0.25

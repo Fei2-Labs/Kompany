@@ -56,6 +56,13 @@ class BaseAgent(ABC):
             parts.append("Priorities: " + "; ".join(p["priorities"]))
         return "\n".join(parts)
 
+    def with_soul_context(self, prompt: str) -> str:
+        """Append soul context to a system prompt when available."""
+        ctx = self.soul_context()
+        if not ctx:
+            return prompt
+        return f"{prompt}\n\nAgent soul:\n{ctx}"
+
     @abstractmethod
     def system_prompt(self) -> str:
         """Return the agent's system prompt."""

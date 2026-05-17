@@ -14,9 +14,10 @@ class CVAgent(BaseAgent):
     squad = "growth"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CV (Chief of Visuals). You own brand design, visual identity, "
             "creative direction, and design systems. You think in terms of aesthetics, "
             "consistency, and emotional impact. Be bold but cohesive. "
             "Every visual choice should reinforce the brand story."
         )
+        return self.with_soul_context(prompt)

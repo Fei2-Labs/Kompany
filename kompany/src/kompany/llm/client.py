@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Type, TypeVar
 
@@ -14,6 +15,7 @@ from kompany.llm.models import estimate_cost
 from kompany.llm.providers import Provider, PROVIDER_BASE_URLS, detect_provider
 
 T = TypeVar("T", bound=BaseModel)
+ProviderErrorHandler = Callable[[dict[str, Any]], None]
 
 
 @dataclass
@@ -33,9 +35,15 @@ class LLMClient:
     (OpenAI, Gemini, GLM, Kimi, custom) via the openai SDK.
     """
 
-    def __init__(self, settings: Any, cost_tracker: CostTracker):
+    def __init__(
+        self,
+        settings: Any,
+        cost_tracker: CostTracker,
+        provider_error_handler: ProviderErrorHandler | None = None,
+    ):
         self.settings = settings
         self.cost_tracker = cost_tracker
+        self.provider_error_handler = provider_error_handler
         self._anthropic_client = None
         self._openai_clients: dict[Provider, Any] = {}
 
@@ -75,6 +83,43 @@ class LLMClient:
             return Provider.CUSTOM
         return Provider.ANTHROPIC
 
+    def _is_quota_error(self, error: Exception) -> bool:
+        status_code = getattr(error, "status_code", None)
+        if status_code == 429:
+            return True
+        text = str(error).lower().replace("_", "-")
+        return any(
+            marker in text
+            for marker in (
+                "rate limit",
+                "rate-limit",
+                "quota",
+                "insufficient-quota",
+                "too many requests",
+                "resource exhausted",
+            )
+        )
+
+    def _handle_provider_error(
+        self,
+        error: Exception,
+        provider: Provider,
+        model: str,
+        agent_name: str,
+        directive_id: str | None,
+    ) -> None:
+        if not self.provider_error_handler or not self._is_quota_error(error):
+            return
+        self.provider_error_handler({
+            "reason": "quota_exhausted",
+            "provider": provider.value,
+            "model": model,
+            "agent_name": agent_name,
+            "directive_id": directive_id,
+            "error_type": type(error).__name__,
+            "error": str(error),
+        })
+
     def call(
         self,
         model: str,
@@ -86,12 +131,22 @@ class LLMClient:
     ) -> LLMResponse:
         """Make a freeform LLM call, dispatching to the correct provider."""
         provider = self._resolve_provider(model)
-        if provider == Provider.ANTHROPIC:
-            resp = self._call_anthropic(model, system, prompt, max_tokens)
-        else:
-            resp = self._call_openai_compatible(
-                provider, model, system, prompt, max_tokens
+        try:
+            if provider == Provider.ANTHROPIC:
+                resp = self._call_anthropic(model, system, prompt, max_tokens)
+            else:
+                resp = self._call_openai_compatible(
+                    provider, model, system, prompt, max_tokens
+                )
+        except Exception as exc:
+            self._handle_provider_error(
+                exc,
+                provider=provider,
+                model=model,
+                agent_name=agent_name,
+                directive_id=directive_id,
             )
+            raise
 
         cost = self.cost_tracker.record(
             model=model,

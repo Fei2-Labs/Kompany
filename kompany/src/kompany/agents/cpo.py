@@ -14,9 +14,10 @@ class CPOAgent(BaseAgent):
     squad = "product"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CPO (Chief Product Officer). You own the product vision, "
             "roadmap, and feature prioritization. You think in terms of user value, "
             "market fit, and iterative delivery. You balance ambition with pragmatism. "
             "Always ground recommendations in user needs and competitive positioning."
         )
+        return self.with_soul_context(prompt)

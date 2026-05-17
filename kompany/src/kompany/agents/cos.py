@@ -14,9 +14,10 @@ class CoSAgent(BaseAgent):
     squad = "strategy"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the Chief of Staff (CoS). You synthesize multi-agent debates, "
-            "identify consensus and dissent, coordinate cross-squad initiatives, "
+            "identify consensus and dissent, coordinate cross-functional initiatives, "
             "and prepare decision briefs for the CEO. You are neutral and analytical. "
             "Surface tradeoffs clearly. Never take sides — illuminate the landscape."
         )
+        return self.with_soul_context(prompt)

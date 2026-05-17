@@ -21,11 +21,29 @@ class KompanySettings(BaseSettings):
     kimi_api_key: str = Field(default="", alias="KIMI_API_KEY")
     custom_api_key: str = Field(default="", alias="CUSTOM_LLM_API_KEY")
     custom_base_url: str = Field(default="", alias="CUSTOM_LLM_BASE_URL")
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
+    telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
+    mobile_remote_token: str = Field(default="", alias="MOBILE_REMOTE_TOKEN")
+    web_dashboard_token: str = Field(default="", alias="WEB_DASHBOARD_TOKEN")
+    dashboard_session_ttl_seconds: int = Field(
+        default=12 * 60 * 60,
+        alias="DASHBOARD_SESSION_TTL_SECONDS",
+    )
+    vault_key: str = Field(default="", alias="KOMPANY_VAULT_KEY")
+    vault_keychain_service: str = Field(default="kompany", alias="KOMPANY_VAULT_KEYCHAIN_SERVICE")
+    vault_keychain_account: str = Field(default="vault-master-key", alias="KOMPANY_VAULT_KEYCHAIN_ACCOUNT")
+    remote_replay_ttl_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        alias="REMOTE_REPLAY_TTL_SECONDS",
+    )
 
     data_dir: Path = Field(default=Path("~/.kompany").expanduser())
     company_name: str = ""
-    company_product: str = ""
+    company_goal: str = ""
     company_stage: str = "solo"
+    company_time_horizon: str = ""
+    company_exclusions: str = ""
     currency: str = "EUR"
 
     # Model tiers
@@ -62,8 +80,10 @@ class KompanySettings(BaseSettings):
             company = data.get("company", {})
             overrides = {
                 "company_name": company.get("name", ""),
-                "company_product": company.get("product", ""),
+                "company_goal": company.get("goal", ""),
                 "company_stage": company.get("stage", "solo"),
+                "company_time_horizon": company.get("time_horizon", ""),
+                "company_exclusions": company.get("exclusions", ""),
                 "currency": company.get("currency", "EUR"),
             }
             # Model tier overrides from YAML

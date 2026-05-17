@@ -68,12 +68,13 @@ class CEOAgent(BaseAgent):
         self._company_state = company_state or {}
 
     def system_prompt(self) -> str:
-        return _CEO_SYSTEM.format(
+        prompt = _CEO_SYSTEM.format(
             company_name=self._company_state.get("name", "Kompany"),
             balance=self._company_state.get("balance", 0),
             active_projects=self._company_state.get("active_projects", 0),
             stage=self._company_state.get("stage", "solo"),
         )
+        return self.with_soul_context(prompt)
 
     def classify(self, raw_input: str, directive_id: str | None = None) -> DirectiveClassification:
         """Classify a raw directive from the Master."""

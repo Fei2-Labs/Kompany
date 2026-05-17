@@ -50,6 +50,11 @@ class ProjectRunner:
             raise ValueError(f"Project '{project_id}' not found")
 
         result = ProjectRunResult(project_id=project_id)
+        self._engine.audit.record(
+            "project.execution_started",
+            "Started project execution",
+            project_id=project_id,
+        )
 
         # Decompose the project plan into tasks
         tasks = self._decompose(project)
@@ -63,18 +68,71 @@ class ProjectRunner:
             )
             self._engine.projects.create_task(task)
 
-        # Execute each task
-        db_tasks = self._engine.projects.list_tasks(project_id)
+        result = self._run_existing_tasks(project, result)
+
+        self._engine.audit.record(
+            "project.execution_completed",
+            "Completed project execution",
+            detail={
+                "tasks_completed": result.tasks_completed,
+                "tasks_failed": result.tasks_failed,
+                "fully_funded": result.fully_funded,
+            },
+            project_id=project_id,
+        )
+        return result
+
+    def resume(self, project_id: str) -> ProjectRunResult:
+        """Resume an existing project without re-running completed tasks."""
+        project = self._engine.projects.get(project_id)
+        if not project:
+            raise ValueError(f"Project '{project_id}' not found")
+
+        result = ProjectRunResult(project_id=project_id)
+        latest = self._engine.checkpoints.latest(project_id)
+        self._engine.audit.record(
+            "project.resume_started",
+            "Started project resume",
+            detail={"checkpoint_id": latest["id"] if latest else None},
+            project_id=project_id,
+        )
+
+        result = self._run_existing_tasks(project, result, retry_failed=True)
+
+        self._engine.audit.record(
+            "project.resume_completed",
+            "Completed project resume",
+            detail={
+                "tasks_completed": result.tasks_completed,
+                "tasks_failed": result.tasks_failed,
+                "fully_funded": result.fully_funded,
+            },
+            project_id=project_id,
+        )
+        return result
+
+    def _run_existing_tasks(
+        self,
+        project: Project,
+        result: ProjectRunResult,
+        retry_failed: bool = False,
+    ) -> ProjectRunResult:
+        db_tasks = self._engine.projects.list_tasks(project.id)
         for task in db_tasks:
-            if task.status != TaskStatus.PENDING:
+            status = task.status.value if isinstance(task.status, TaskStatus) else task.status
+            if status == TaskStatus.COMPLETED.value:
+                continue
+            if retry_failed and status in {TaskStatus.FAILED.value, TaskStatus.ACTIVE.value}:
+                self._engine.projects.update_task_status(task.id, TaskStatus.PENDING)
+                task.status = TaskStatus.PENDING
+                status = TaskStatus.PENDING.value
+            if status != TaskStatus.PENDING.value:
                 continue
             self._execute_task(task, project, result)
 
-        # Check if project is now fully funded
-        result.fully_funded = self._engine.projects.is_fully_funded(project_id)
+        result.fully_funded = self._engine.projects.is_fully_funded(project.id)
         if result.fully_funded:
-            self._engine.projects.update_status(project_id, ProjectStatus.COMPLETED)
-
+            self._engine.projects.update_status(project.id, ProjectStatus.COMPLETED)
         return result
 
     def _decompose(self, project: Project) -> list[TaskSpec]:
@@ -122,6 +180,15 @@ class ProjectRunner:
         """Execute a single task using the assigned agent."""
         # Mark as active
         self._engine.projects.update_task_status(task.id, TaskStatus.ACTIVE)
+        self._engine.agent_status.set(task.assigned_agent, "working", task.title)
+        self._engine.audit.record(
+            "task.started",
+            "Started task execution",
+            detail={"task_id": task.id, "title": task.title},
+            agent_role=task.assigned_agent,
+            directive_id=project.triggers_directive_id,
+            project_id=project.id,
+        )
 
         try:
             agent = self._engine.registry.get(task.assigned_agent)
@@ -160,10 +227,57 @@ class ProjectRunner:
                 "output": resp.text[:500],
                 "cost": resp.cost_usd,
             })
+            self._engine.checkpoints.save(
+                project_id=project.id,
+                task_id=task.id,
+                step_index=result.tasks_completed + result.tasks_failed,
+                state={
+                    "last_completed_task": task.id,
+                    "tasks_completed": result.tasks_completed,
+                    "tasks_failed": result.tasks_failed,
+                },
+            )
+            self._engine.audit.record(
+                "checkpoint.saved",
+                "Saved checkpoint after task completion",
+                detail={"task_id": task.id},
+                agent_role=task.assigned_agent,
+                directive_id=project.triggers_directive_id,
+                project_id=project.id,
+            )
+            self._engine.audit.record(
+                "task.completed",
+                "Completed task execution",
+                detail={"task_id": task.id, "cost": resp.cost_usd},
+                agent_role=task.assigned_agent,
+                directive_id=project.triggers_directive_id,
+                project_id=project.id,
+            )
 
         except Exception as e:
             self._engine.projects.update_task_status(
                 task.id, TaskStatus.FAILED,
                 result={"error": str(e)},
             )
+            self._engine.checkpoints.save(
+                project_id=project.id,
+                task_id=task.id,
+                step_index=result.tasks_completed + result.tasks_failed,
+                state={
+                    "failed_task": task.id,
+                    "error": str(e),
+                    "tasks_completed": result.tasks_completed,
+                    "tasks_failed": result.tasks_failed + 1,
+                },
+            )
+            self._engine.audit.record(
+                "task.failed",
+                "Task execution failed",
+                detail={"task_id": task.id, "error": str(e)},
+                agent_role=task.assigned_agent,
+                directive_id=project.triggers_directive_id,
+                project_id=project.id,
+            )
             result.tasks_failed += 1
+        finally:
+            self._engine.agent_status.set(task.assigned_agent, "idle")

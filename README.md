@@ -63,7 +63,7 @@ KompanyEngine.process_directive(raw_input)
 | Agent | Role | Type | Optimizes For |
 |---|---|---|---|
 | **CEO** | Final decision-maker & conductor | LLM (Opus) | Vision, strategy, mission integrity |
-| **CFO** | Financial leadership | Mechanical | Budget math, ledger ops — no LLM cost |
+| **CFO** | Financial gatekeeper & cost visibility | LLM (Sonnet) | Budget checks, balance tracking, financial monitoring |
 | **CTO** | Technology leadership | LLM (Sonnet) | Technical correctness, scalability |
 | **CPO** | Product leadership | LLM (Sonnet) | User value, time-to-market, PMF |
 | **CMO** | Marketing leadership | LLM (Sonnet) | Brand equity, top-of-funnel growth |
@@ -72,7 +72,7 @@ KompanyEngine.process_directive(raw_input)
 | **CSA** | Solution architecture | LLM (Sonnet) | Architectural integrity, integrations |
 | **CISO** | Security & compliance | LLM (Sonnet) | Risk mitigation, compliance posture |
 | **CoS** | Debate moderator & synthesizer | LLM (Sonnet) | Neutral facilitation, structured briefs |
-| **CV** | Customer voice | LLM (Sonnet) | Grounds debate in real customer data |
+| **CV** | Brand visuals & visual direction | LLM (Sonnet) | Visual consistency, brand identity |
 
 ### Execution Subagents
 
@@ -84,13 +84,9 @@ KompanyEngine.process_directive(raw_input)
 | **Researcher** | Market research & data gathering |
 | **Writer** | Content creation & copywriting |
 
-### Squad Architecture
+### Communication
 
-- **Strategy Squad**: CEO, CFO, COO, CoS
-- **Product Squad**: CTO, CPO, CSA, CISO
-- **Growth Squad**: CMO, CRO, CV
-
-Intra-squad agents communicate directly; cross-squad goes through the CoS.
+All agents communicate through direct function calls via `KompanyEngine`. CoS coordinates cross-functional issues and helps CEO make final calls. See `docs/context/core-architecture.md` for details.
 
 ---
 
@@ -165,6 +161,8 @@ ANTHROPIC_API_KEY=your-key-here
 ```
 
 To use other providers, set their API keys too (see [Multi-Provider LLM Support](#multi-provider-llm-support)).
+
+For the encrypted credential vault, Kompany will first look for a vault master key in the OS keychain when available, then fall back to `KOMPANY_VAULT_KEY`. You can override the keychain location with `KOMPANY_VAULT_KEYCHAIN_SERVICE` and `KOMPANY_VAULT_KEYCHAIN_ACCOUNT`.
 
 ### Verify Installation
 

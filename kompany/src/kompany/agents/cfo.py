@@ -19,11 +19,12 @@ class CFOAgent(BaseAgent):
         self.ledger = ledger
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CFO. You optimize for financial health, "
             "unit economics, and runway preservation. "
             "Be precise with numbers. No vague answers."
         )
+        return self.with_soul_context(prompt)
 
     def check_budget(self, amount: float) -> dict:
         """Mechanical: check if budget is sufficient."""

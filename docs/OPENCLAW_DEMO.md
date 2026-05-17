@@ -128,7 +128,7 @@ python3 -c "import os; k=os.environ.get('ANTHROPIC_API_KEY',''); print('OK' if k
 ## Step 3 — Initialize a Company
 
 ```bash
-kompany init --name "Demo Corp" --product "AI-powered analytics" --balance 100 --stage solo
+kompany init --name "Demo Corp" --capital 100 --goal "AI-powered analytics" --time-horizon "6 months" --exclusions "none"
 ```
 
 ### Parameters
@@ -136,9 +136,10 @@ kompany init --name "Demo Corp" --product "AI-powered analytics" --balance 100 -
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `--name` | Company name | `"Demo Corp"` |
-| `--product` | One-line product description | `"AI-powered analytics"` |
-| `--balance` | Starting balance in EUR | `100` |
-| `--stage` | Company stage | `solo`, `pre-seed`, `seed`, `series-a` |
+| `--capital` | Starting capital in EUR | `100` |
+| `--goal` | One-line company goal / product description | `"AI-powered analytics"` |
+| `--time-horizon` | Planning time horizon | `"6 months"`, `"1 year"` |
+| `--exclusions` | Domains or activities to exclude | `"none"`, `"gambling, weapons"` |
 
 ### 3.1 Verify initialization
 
@@ -285,10 +286,10 @@ kompany ledger --limit 20
 python -m pytest tests/ -v
 ```
 
-**Expected output**: All 81 tests pass.
+**Expected output**: All tests pass.
 
 ```
-============================= 81 passed in ~2s ==============================
+============================= tests passed in ~2s ==============================
 ```
 
 **If tests fail**, see [Debug: Tests](#debug-tests).
@@ -303,8 +304,10 @@ To use non-Anthropic models for any tier, create or edit
 ```yaml
 company:
   name: "Demo Corp"
-  product: "AI-powered analytics"
-  stage: "solo"
+  capital: 100
+  goal: "AI-powered analytics"
+  time_horizon: "6 months"
+  exclusions: "none"
 
 models:
   apex: "gpt-4o"
@@ -357,7 +360,7 @@ Test with curl:
 # Initialize
 curl -X POST http://localhost:8000/init \
   -H "Content-Type: application/json" \
-  -d '{"name": "Demo Corp", "product": "AI analytics", "balance": 100, "stage": "solo"}'
+  -d '{"name": "Demo Corp", "capital": 100, "goal": "AI analytics", "time_horizon": "6 months", "exclusions": "none"}'
 
 # Send directive
 curl -X POST http://localhost:8000/directive \
@@ -443,7 +446,7 @@ If your OpenClaw agent has Python access:
 from kompany import Kompany
 
 k = Kompany()
-k.init(name="Demo Corp", product="AI analytics", balance=100, stage="solo")
+k.init(name="Demo Corp", capital=100, goal="AI analytics", time_horizon="6 months", exclusions="none")
 result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
 print(result["message"])
 print(f"AI cost: ${result['total_ai_cost']:.4f}")
@@ -557,7 +560,7 @@ echo $CUSTOM_LLM_API_KEY
 
 ```bash
 # Reinitialize
-kompany init --name "Demo Corp" --product "AI analytics" --balance 100 --stage solo
+kompany init --name "Demo Corp" --capital 100 --goal "AI analytics" --time-horizon "6 months" --exclusions "none"
 
 # Check the database exists
 ls -la ~/.kompany/
@@ -571,7 +574,7 @@ echo $KOMPANY_DATA_DIR
 
 ```bash
 # The init command must run before any directive
-kompany init --name "Demo Corp" --product "AI analytics" --balance 100 --stage solo
+kompany init --name "Demo Corp" --capital 100 --goal "AI analytics" --time-horizon "6 months" --exclusions "none"
 
 # Then verify
 kompany status
@@ -605,7 +608,7 @@ python -m pytest tests/test_engine.py -v
 python -m pytest tests/ -v --tb=long
 ```
 
-**Symptom**: 47 tests pass but new provider tests fail
+**Symptom**: Some tests pass but new provider tests fail
 
 ```bash
 # Ensure you have the latest code
@@ -616,7 +619,7 @@ pip install -e ".[dev]"
 
 # Run again
 python -m pytest tests/ -v
-# Expected: 81 passed
+# Expected: all passed
 ```
 
 ---
@@ -692,7 +695,7 @@ export ANTHROPIC_API_KEY="sk-ant-YOUR-KEY-HERE"
 kompany --help
 
 # Initialize company
-kompany init --name "Demo Corp" --product "AI-powered analytics" --balance 100 --stage solo
+kompany init --name "Demo Corp" --capital 100 --goal "AI-powered analytics" --time-horizon "6 months" --exclusions "none"
 
 # Informational directive (free)
 kompany directive "What's our current balance?"
@@ -727,13 +730,13 @@ python -m pytest tests/ -v
 |------|---------|----------|
 | Install | `pip install -e ".[dev]"` | Package and dependencies |
 | API key | `export ANTHROPIC_API_KEY=...` | LLM provider access |
-| Init | `kompany init --name ... --balance 100 --stage solo` | Database and config |
+| Init | `kompany init --name ... --capital 100 --goal ...` | Database and config |
 | Info directive | `kompany directive "What's our balance?"` | Zero-cost pipeline |
 | Strategic directive | `kompany directive "Should we focus on B2B?"` | LLM call + cost tracking |
 | Acquisition directive | `kompany directive "Buy a Mac Studio..."` | Mission integrity + revenue project |
 | Debate | `kompany debate "SSO vs onboarding?"` | Multi-agent protocol |
 | Ledger | `kompany ledger --limit 20` | Full financial transparency |
-| Tests | `python -m pytest tests/ -v` | 81 tests pass |
+| Tests | `python -m pytest tests/ -v` | All tests pass |
 
 All interfaces (CLI, REST API, MCP, Python SDK) call the same
 `KompanyEngine` — same logic, same ledger, same results.

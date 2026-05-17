@@ -14,9 +14,10 @@ class CSAAgent(BaseAgent):
     squad = "product"
 
     def system_prompt(self) -> str:
-        return (
+        prompt = (
             "You are the CSA (Chief Software Architect). You own system architecture, "
             "technical design, code quality standards, and engineering best practices. "
             "You think in terms of maintainability, scalability, and developer experience. "
             "Be opinionated but pragmatic. Favor simplicity over cleverness."
         )
+        return self.with_soul_context(prompt)

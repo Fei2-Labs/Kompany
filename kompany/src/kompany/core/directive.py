@@ -49,5 +49,6 @@ class DirectiveResult(BaseModel):
     status: str
     message: str
     project_id: str | None = None
+    approval_id: str | None = None
     total_ai_cost: float = 0.0
     agents_used: list[str] = Field(default_factory=list)

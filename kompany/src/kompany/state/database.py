@@ -68,10 +68,79 @@ CREATE TABLE IF NOT EXISTS agent_memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     agent_role TEXT NOT NULL,
     category TEXT NOT NULL DEFAULT 'observation',
+    knowledge_type TEXT NOT NULL DEFAULT 'experiential',
     content TEXT NOT NULL,
     context TEXT,
     directive_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    valid_until TEXT
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+    event_type TEXT NOT NULL,
+    agent_role TEXT,
+    action TEXT NOT NULL,
+    detail TEXT,
+    directive_id TEXT,
+    project_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS agent_status (
+    agent_role TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle',
+    current_task TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    task_id TEXT,
+    step_index INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS approval_requests (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending',
+    action_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    directive_id TEXT,
+    project_id TEXT,
+    requested_by TEXT,
+    resolved_by TEXT,
+    resolution_reason TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tool_authorizations (
+    agent_role TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    allowed INTEGER NOT NULL DEFAULT 0,
+    requires_approval INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (agent_role, tool_name)
+);
+
+CREATE TABLE IF NOT EXISTS remote_command_replays (
+    source TEXT NOT NULL,
+    replay_key TEXT NOT NULL,
+    command TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (source, replay_key)
+);
+
+CREATE TABLE IF NOT EXISTS credential_vault (
+    name TEXT PRIMARY KEY,
+    ciphertext TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_agent ON agent_memories(agent_role);
@@ -86,6 +155,7 @@ class Database:
         self.db_path = data_dir / "kompany.db"
         self._conn: sqlite3.Connection | None = None
         self._init_schema()
+        self._migrate()
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -97,6 +167,52 @@ class Database:
 
     def _init_schema(self) -> None:
         self.conn.executescript(_SCHEMA)
+        self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns to existing tables if missing."""
+        for col, defn in [
+            ("knowledge_type", "TEXT NOT NULL DEFAULT 'experiential'"),
+            ("valid_until", "TEXT"),
+        ]:
+            try:
+                self.conn.execute(f"ALTER TABLE agent_memories ADD COLUMN {col} {defn}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS tool_authorizations (
+                   agent_role TEXT NOT NULL,
+                   tool_name TEXT NOT NULL,
+                   allowed INTEGER NOT NULL DEFAULT 0,
+                   requires_approval INTEGER NOT NULL DEFAULT 0,
+                   reason TEXT NOT NULL DEFAULT '',
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   PRIMARY KEY (agent_role, tool_name)
+               )"""
+        )
+        try:
+            self.conn.execute(
+                "ALTER TABLE tool_authorizations ADD COLUMN requires_approval INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS remote_command_replays (
+                   source TEXT NOT NULL,
+                   replay_key TEXT NOT NULL,
+                   command TEXT NOT NULL DEFAULT '',
+                   result TEXT NOT NULL,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   PRIMARY KEY (source, replay_key)
+               )"""
+        )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS credential_vault (
+                   name TEXT PRIMARY KEY,
+                   ciphertext TEXT NOT NULL,
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

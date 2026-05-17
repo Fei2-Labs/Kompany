@@ -110,8 +110,10 @@ You can optionally provide a YAML config file:
 ```yaml
 company:
   name: "Your Company"
-  product: "One-line product description"
-  stage: "solo"          # solo | pre-seed | seed | series-a
+  capital: 50
+  goal: "One-line company goal"
+  time_horizon: "6 months"
+  exclusions: "gambling, weapons"
 
 # Override model tiers (optional)
 models:
@@ -134,21 +136,22 @@ If no config file exists, use `kompany init` to set up your company interactivel
 Before sending any directives, initialize your company:
 
 ```bash
-kompany init --name "Acme SaaS" --product "AI invoice reconciliation" --balance 50 --stage solo
+kompany init --name "Acme SaaS" --capital 50 --goal "AI invoice reconciliation" --time-horizon "6 months" --exclusions "gambling, weapons"
 ```
 
 | Option | Description | Default |
 |---|---|---|
 | `--name` | Company name | *(prompted)* |
-| `--product` | One-line product description | *(prompted)* |
-| `--balance` | Starting balance in euros | *(prompted)* |
-| `--stage` | Company stage: `solo`, `pre-seed`, `seed`, `series-a` | *(prompted)* |
+| `--capital` | Starting capital in euros | *(prompted)* |
+| `--goal` | One-line company goal | *(prompted)* |
+| `--time-horizon` | Planning time horizon | *(prompted)* |
+| `--exclusions` | Sectors or activities to exclude | *(prompted)* |
 
-This creates the SQLite database, sets your starting balance, and records your company profile. If you omit any option, you'll be prompted interactively.
+This creates the SQLite database, sets your starting capital, and records your company profile. If you omit any option, you'll be prompted interactively.
 
 **What happens under the hood:**
 - SQLite database is created with schema (ledger, projects, tasks, decisions, agent memory)
-- Starting balance is recorded as an `income` entry in the ledger
+- Starting capital is recorded as an `income` entry in the ledger
 - Company config is stored in the `company_config` table
 
 ---
@@ -164,7 +167,7 @@ kompany directive "Buy a Mac Studio M4 128GB, budget €50"
 # Strategic — CEO analyzes or triggers full debate
 kompany directive "Should we pivot from B2C to B2B?"
 
-# Operational — CEO delegates to squad
+# Operational — CEO delegates to the appropriate agent via KompanyEngine
 kompany directive "Set up a CI/CD pipeline for the main repo"
 
 # Informational — no AI cost, mechanical response
@@ -173,12 +176,12 @@ kompany directive "What's our current balance?"
 
 **What happens under the hood:**
 
-1. The CEO agent classifies the directive (type, urgency, estimated cost, squad, agents needed, approval tier)
+1. The CEO agent classifies the directive (type, urgency, estimated cost, agents needed, approval tier)
 2. The autonomy gate checks the approval tier
 3. The directive is routed to the appropriate handler
 4. For ACQUISITION: CFO checks budget → shortfall triggers revenue project creation
 5. For STRATEGIC: CEO analysis or full multi-agent debate
-6. For OPERATIONAL: CEO breaks into steps and delegates
+6. For OPERATIONAL: CEO breaks into steps and delegates via KompanyEngine. CoS coordinates cross-functional issues.
 7. For INFORMATIONAL: CFO responds mechanically (no LLM cost)
 8. All AI costs are recorded in the ledger
 9. Result is displayed with cost transparency
@@ -213,7 +216,7 @@ kompany directive "Should we raise a Series A or extend runway through revenue?"
 
 Triggered by: "Set up X", "Configure Y", "Deploy Z", "Create X"
 
-The CEO breaks the directive into action steps and delegates to the appropriate squad.
+The CEO breaks the directive into action steps and delegates to the appropriate agent via KompanyEngine. CoS coordinates cross-functional issues.
 
 ```bash
 kompany directive "Set up monitoring and alerting for our production API"
@@ -240,7 +243,7 @@ kompany status
 ```
 
 Output includes:
-- Company name and product
+- Company name and goal
 - Current balance
 - Total income, expenses, and AI costs
 - Number of active projects
@@ -287,7 +290,7 @@ The debate follows a structured multi-round protocol:
 Each agent argues from their domain without seeing other positions. Output includes domain-specific analysis, a recommendation, and confidence level.
 
 **Round 2 — Rebuttal & Challenge**
-Each agent sees all Round 1 positions. They must acknowledge valid points, challenge disagreements, and update their position if warranted. Intra-squad agents address each other directly.
+Each agent sees all Round 1 positions. They must acknowledge valid points, challenge disagreements, and update their position if warranted.
 
 **Round 3 — Convergence** *(3-round mode only)*
 Agents move toward consensus. They state concessions and any non-negotiable hard lines. Skipped in 2-round mode (solo/pre-seed stages).
@@ -303,8 +306,8 @@ The CEO reviews everything and makes the final call: decision, rationale, tradeo
 | Stage | Agents | Rounds | Max Cost |
 |---|---|---|---|
 | Solo | CEO, CTO, CPO, CFO, CoS | 2 | ~$0.50 |
-| Pre-seed | CEO, CTO, CPO, CoS, CV | 2 | ~$0.75 |
-| Seed | CEO, CTO, CPO, CMO, CRO, CoS, CV | 3 | ~$1.50 |
+| Pre-seed | CEO, CTO, CPO, CoS, CV (Brand visuals & visual direction) | 2 | ~$0.75 |
+| Seed | CEO, CTO, CPO, CMO, CRO, CoS, CV (Brand visuals & visual direction) | 3 | ~$1.50 |
 | Series A | All 11 agents | 3 | ~$2.00 |
 
 ---
@@ -379,7 +382,7 @@ The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8
 # Initialize
 curl -X POST http://localhost:8000/init \
   -H "Content-Type: application/json" \
-  -d '{"name": "Acme", "product": "AI tools", "balance": 50, "stage": "solo"}'
+  -d '{"name": "Acme", "capital": 50, "goal": "AI tools", "time_horizon": "6 months", "exclusions": "gambling"}'
 
 # Send a directive
 curl -X POST http://localhost:8000/directive \
@@ -409,7 +412,7 @@ python -m kompany.interfaces.mcp_server
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `kompany_init` | `name`\*, `product`\*, `balance`, `stage` | Initialize a new company |
+| `kompany_init` | `name`\*, `capital`, `goal`\*, `time_horizon`, `exclusions` | Initialize a new company |
 | `kompany_directive` | `text`\* | Send a natural language directive |
 | `kompany_status` | *(none)* | Get company status |
 | `kompany_projects` | *(none)* | List active projects |
@@ -444,7 +447,7 @@ from kompany import Kompany
 
 # Initialize
 k = Kompany()
-k.init(name="Acme", product="AI tools", balance=50, stage="solo")
+k.init(name="Acme", capital=50, goal="AI tools", time_horizon="6 months", exclusions="gambling")
 
 # Send a directive
 result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
@@ -478,7 +481,7 @@ result = k.execute_project("abc12345")
 | Method | Returns | Description |
 |---|---|---|
 | `Kompany(config_path=None)` | — | Constructor |
-| `init(name, product, balance=0.0, stage="solo")` | `None` | Initialize a new company |
+| `init(name, capital=0.0, goal="", time_horizon="", exclusions="")` | `None` | Initialize a new company |
 | `directive(text)` | `dict` | Send a directive, get the result |
 | `status()` | `dict` | Company status |
 | `projects()` | `list[dict]` | All active projects |
@@ -594,7 +597,7 @@ export ANTHROPIC_API_KEY=your-key-here
 Run `kompany init` before sending directives:
 
 ```bash
-kompany init --name "My Company" --product "My product" --balance 50 --stage solo
+kompany init --name "My Company" --capital 50 --goal "My product" --time-horizon "6 months" --exclusions "none"
 ```
 
 ### "Model not available"
@@ -614,4 +617,4 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-All 81 tests should pass. If not, ensure you're running Python 3.11+ and have the latest dependencies installed.
+All tests should pass. If not, ensure you're running Python 3.11+ and have the latest dependencies installed.

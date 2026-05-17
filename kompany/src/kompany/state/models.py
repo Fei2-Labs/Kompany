@@ -68,6 +68,202 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class ApprovalStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ApprovalRequest(BaseModel):
+    id: str = Field(default_factory=_short_id)
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    action_type: str
+    summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    directive_id: str | None = None
+    project_id: str | None = None
+    requested_by: str | None = None
+    resolved_by: str | None = None
+    resolution_reason: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    resolved_at: datetime | None = None
+
+
+class RevenueProposal(BaseModel):
+    owner: str = "cro"
+    summary: str
+    target_amount: float | None = None
+    shortfall: float = 0.0
+    proposed_paths: list[str] = Field(default_factory=list)
+
+
+class FinancialEvaluation(BaseModel):
+    owner: str = "cfo"
+    current_balance: float
+    target_amount: float | None = None
+    shortfall: float = 0.0
+    viable: bool
+    rationale: str
+
+
+class DecisionSynthesis(BaseModel):
+    owner: str = "cos"
+    consensus: str
+    risks: list[str] = Field(default_factory=list)
+    recommendation: str
+
+
+class CEOApprovalPacket(BaseModel):
+    owner: str = "ceo"
+    approved_direction: str
+    rationale: str
+    requires_user_approval: bool = True
+
+
+class COOExecutionPlan(BaseModel):
+    owner: str = "coo"
+    steps: list[str] = Field(default_factory=list)
+    assigned_agents: list[str] = Field(default_factory=list)
+
+
+class DecisionChainPacket(BaseModel):
+    id: str = Field(default_factory=_short_id)
+    raw_input: str
+    revenue_proposal: RevenueProposal
+    financial_evaluation: FinancialEvaluation
+    synthesis: DecisionSynthesis
+    ceo_approval: CEOApprovalPacket
+    execution_plan: COOExecutionPlan
+    approval_id: str | None = None
+    status: str = "awaiting_approval"
+
+
+class CLevelReview(BaseModel):
+    owner: str
+    verdict: str  # "approved" | "needs_revision" | "rejected"
+    notes: str = ""
+
+
+class ExecutionReport(BaseModel):
+    project_id: str
+    approval_id: str
+    packet_id: str
+    status: str  # "awaiting_delivery_approval" | "needs_revision"
+    tasks_completed: int = 0
+    tasks_failed: int = 0
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+    reviews: list[CLevelReview] = Field(default_factory=list)
+    delivery_approval_id: str | None = None
+    total_ai_cost: float = 0.0
+
+
+class RuntimeState(BaseModel):
+    state: str = "running"  # "running" | "suspended"
+    reason: str | None = None
+    since: datetime | None = None
+
+
+class NotificationEvent(BaseModel):
+    kind: str
+    severity: str = "info"
+    summary: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HeartbeatReport(BaseModel):
+    status: str = "ok"
+    runtime: dict[str, Any]
+    pending_approvals: int = 0
+    active_projects: int = 0
+    notifications: list[NotificationEvent] = Field(default_factory=list)
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class BackupRecord(BaseModel):
+    id: str
+    label: str = "manual"
+    kind: str = "manual"  # "manual" | "auto"
+    path: str
+    size_bytes: int = 0
+    created_at: datetime
+
+
+class ToolAuthorizationPolicy(BaseModel):
+    agent_role: str
+    tool_name: str
+    allowed: bool = False
+    requires_approval: bool = False
+    reason: str = ""
+    updated_at: datetime | str | None = None
+
+
+class ToolAuthorizationResult(BaseModel):
+    agent_role: str
+    tool_name: str
+    allowed: bool
+    status: str  # "allowed" | "denied" | "approval_required" | "executed" | "failed"
+    reason: str = ""
+    approval_id: str | None = None
+    result: dict[str, Any] | None = None
+
+
+class RPGCharacter(BaseModel):
+    role: str
+    room: str
+    status: str = "idle"
+    current_task: str = ""
+    updated_at: str | None = None
+
+
+class RPGOfficeRoom(BaseModel):
+    name: str
+    purpose: str
+    characters: list[RPGCharacter] = Field(default_factory=list)
+
+
+class ObservabilitySnapshot(BaseModel):
+    status: str = "ok"
+    company: dict[str, Any]
+    runtime: dict[str, Any]
+    finance: dict[str, Any]
+    approvals: dict[str, Any]
+    projects: dict[str, Any]
+    agents: dict[str, Any]
+    tools: dict[str, Any]
+    notifications: list[NotificationEvent] = Field(default_factory=list)
+    office: dict[str, Any]
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class Reflection(BaseModel):
+    agent_role: str
+    content: str
+
+
+class Retrospective(BaseModel):
+    project_id: str
+    status: str  # "recorded" | "already_recorded" | "skipped_no_project"
+    summary: str = ""
+    tasks_completed: int = 0
+    tasks_failed: int = 0
+    reflections: list[Reflection] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class DeliveryPackage(BaseModel):
+    approval_id: str
+    project_id: str | None = None
+    packet_id: str | None = None
+    status: str  # "delivered" | "already_delivered" | "needs_revision"
+    tasks_completed: int = 0
+    tasks_failed: int = 0
+    outputs: list[dict[str, Any]] = Field(default_factory=list)
+    reviews: list[CLevelReview] = Field(default_factory=list)
+    released_at: datetime | None = None
+    released_by: str | None = None
+    notes: str = ""
+
+
 class Task(BaseModel):
     id: str = Field(default_factory=_short_id)
     project_id: str
@@ -96,10 +292,12 @@ class Decision(BaseModel):
 class CompanySnapshot(BaseModel):
     """Current state of the company for agent context."""
     name: str
-    product: str
+    goal: str
     stage: str
     balance: float
     active_project_count: int
+    time_horizon: str = ""
+    exclusions: str = ""
     total_revenue: float = 0.0
     total_expenses: float = 0.0
     total_ai_costs: float = 0.0

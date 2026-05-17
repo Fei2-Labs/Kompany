@@ -42,3 +42,6 @@ secrets/
 *.pem
 *.key
 AGENTS.md
+
+# Trellis — per-developer identity only; track structure and spec
+.trellis/.developer
