@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kompany",
+  "version": "0.1.0",
+  "identifier": "com.kompany.desktop",
+  "build": {
+    "frontendDist": "dist",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "msi", "appimage"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Autonomous business operating system",
+    "longDescription": "Kompany runs an autonomous C-suite for solo founders. The desktop app spawns a local Python sidecar and shows the cyberpunk dashboard in a native window.",
+    "resources": [
+      "binaries/**/*"
+    ]
+  }
+}

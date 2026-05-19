@@ -42,16 +42,35 @@ fn pick_free_port() -> std::io::Result<u16> {
 }
 
 fn sidecar_binary_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-    // Tauri 2.x resolves bundled sidecar binaries via the resource
-    // directory; in dev mode we fall back to the repo-local path.
+    // Tauri 2.x bundles `resources/...` into the app. The Python sidecar
+    // is shipped as a PyInstaller --onedir directory, so we look for an
+    // inner executable whose name matches its parent dir.
     let resource_dir = app.path().resource_dir().ok()?;
-    let candidates = [
-        resource_dir.join("binaries").join("kompany-server"),
+    let bin_root = resource_dir.join("binaries");
+
+    // Direct hit (single-file form).
+    for direct in [
+        bin_root.join("kompany-server"),
         resource_dir.join("kompany-server"),
-    ];
-    for candidate in &candidates {
-        if candidate.exists() {
-            return Some(candidate.clone());
+    ] {
+        if direct.is_file() {
+            return Some(direct);
+        }
+    }
+
+    // PyInstaller --onedir form: `binaries/kompany-server-<triple>/kompany-server-<triple>`.
+    if let Ok(entries) = std::fs::read_dir(&bin_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.starts_with("kompany-server") {
+                    let inner = path.join(name);
+                    if inner.is_file() {
+                        return Some(inner);
+                    }
+                }
+            }
         }
     }
     None

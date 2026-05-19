@@ -73,7 +73,7 @@ fi
 # Stage 3 — cargo tauri build.
 # ---------------------------------------------------------------------
 echo "==> [3/3] Running cargo tauri build..."
-cd "${REPO_ROOT}/tauri"
+cd "${REPO_ROOT}/tauri/src-tauri"
 cargo tauri build
 
 echo
