@@ -84,6 +84,13 @@ class OnboardingCompleteRequest(BaseModel):
     template_id: str = Field(..., min_length=1)
     directive: str | None = None
     base_url: str | None = None
+    # Mission-targets task (05-19): the four quantitative onboarding
+    # knobs. All optional — the engine falls back to the template
+    # manifest's presets when these are missing.
+    initial_budget: float | None = Field(default=None, ge=0.0)
+    revenue_target: float | None = Field(default=None, ge=0.0)
+    customer_target: int | None = Field(default=None, ge=0)
+    deadline: str | None = None  # ISO 8601 string (YYYY-MM-DD ok)
 
 
 class OnboardingCompleteResponse(BaseModel):
@@ -96,6 +103,8 @@ class OnboardingCompleteResponse(BaseModel):
     provider: str | None = None
     message: str | None = None
     code: str | None = None
+    # Approval id of the team's feasibility review (when one fired).
+    targets_review_id: str | None = None
 
 
 def _resolved_data_dir() -> Path:
@@ -143,6 +152,10 @@ def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteRes
             template_id=req.template_id,
             directive=req.directive,
             base_url=req.base_url,
+            initial_budget=req.initial_budget,
+            revenue_target=req.revenue_target,
+            customer_target=req.customer_target,
+            deadline=req.deadline,
         )
     except OnboardError as exc:
         return OnboardingCompleteResponse(
@@ -159,6 +172,7 @@ def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteRes
         template_id=result.template_id,
         provider=result.provider,
         message=None,
+        targets_review_id=result.targets_review_id,
     )
 
 
@@ -468,6 +482,129 @@ def apply_template(
         message = str(exc)
         status = 404 if "not found" in message else 409
         raise HTTPException(status_code=status, detail=message) from exc
+
+
+# ---------------------------------------------------------------------------
+# Company targets (mission-targets task 05-19)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/targets")
+def get_targets() -> dict[str, Any]:
+    """Return the founder / team_proposal / agreed targets trio.
+
+    Used by the cyberpunk header (``ledger.js``) to render the
+    ``rev: $X / $Y`` and ``days: N/M`` stats. Always returns a payload —
+    the founder slot is populated even on a fresh install (all zeros).
+    """
+    bundle = get_engine().get_targets_bundle()
+    return {
+        "founder": bundle.founder.model_dump(mode="json"),
+        "proposal": (
+            bundle.proposal.model_dump(mode="json")
+            if bundle.proposal is not None
+            else None
+        ),
+        "agreed": (
+            bundle.agreed.model_dump(mode="json")
+            if bundle.agreed is not None
+            else None
+        ),
+        "review_thread_id": bundle.review_thread_id,
+        # Convenience: the authoritative numbers downstream readers want
+        # without picking the right key themselves.
+        "authoritative": get_engine().get_targets().model_dump(mode="json"),
+    }
+
+
+@app.post("/targets/review")
+def post_targets_review() -> dict[str, Any]:
+    """Re-run the team feasibility review on demand.
+
+    Creates a fresh ``approval_request(action_type='target_feasibility')``
+    and returns its payload. Returns ``404`` if no founder targets are
+    set yet — the founder must complete onboarding first.
+    """
+    payload = get_engine().run_target_feasibility_review()
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No founder targets set; complete onboarding first.",
+        )
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Company glossary (glossary-and-drift-detection task 05-19)
+# ---------------------------------------------------------------------------
+
+
+class GlossaryWriteRequest(BaseModel):
+    """Body for ``POST /glossary`` / ``PATCH /glossary/<term>``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    term: str | None = Field(default=None, min_length=1)
+    definition: str | None = Field(default=None, min_length=1)
+    forbidden_synonyms: list[str] | None = None
+
+
+@app.get("/glossary")
+def list_glossary() -> list[dict[str, Any]]:
+    """Return every glossary entry."""
+    return get_engine().list_glossary()
+
+
+@app.get("/glossary/{term}")
+def show_glossary_term(term: str) -> dict[str, Any]:
+    """Look up one term (case-insensitive). Returns 404 when missing."""
+    entry = get_engine().get_glossary_term(term)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Term not found: {term!r}")
+    return entry
+
+
+@app.post("/glossary")
+def create_glossary_term(req: GlossaryWriteRequest) -> dict[str, Any]:
+    """Insert a brand-new glossary term (founder-sourced)."""
+    if not req.term or not req.definition:
+        raise HTTPException(
+            status_code=422,
+            detail="term and definition are required to create a glossary entry",
+        )
+    try:
+        return get_engine().add_glossary_term(
+            term=req.term,
+            definition=req.definition,
+            forbidden_synonyms=req.forbidden_synonyms,
+            added_by="founder",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.patch("/glossary/{term}")
+def patch_glossary_term(term: str, req: GlossaryWriteRequest) -> dict[str, Any]:
+    """Update an existing glossary term's definition or forbidden synonyms."""
+    try:
+        return get_engine().update_glossary_term(
+            term=term,
+            definition=req.definition,
+            forbidden_synonyms=req.forbidden_synonyms,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/glossary/{term}")
+def delete_glossary_term(term: str) -> dict[str, Any]:
+    """Drop a glossary term. Returns ``{"removed": bool}``."""
+    removed = get_engine().remove_glossary_term(term)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Term not found: {term!r}")
+    return {"removed": True, "term": term}
 
 
 @app.get("/episodes")

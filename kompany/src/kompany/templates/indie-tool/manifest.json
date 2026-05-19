@@ -4,6 +4,8 @@
   "mission_title": "Ship a paid indie tool to $10k MRR",
   "mission_md_path": "mission.md",
   "initial_budget": 1000.0,
+  "revenue_target": 2000.0,
+  "customer_target": 200,
   "enabled_agents": [
     "ceo", "cfo", "cto", "cpo", "cro", "coo", "cos"
   ],
@@ -16,5 +18,27 @@
     "Ship the MVP and put it behind a Gumroad paywall",
     "Launch on Product Hunt with a clear demo video"
   ],
-  "rpg_theme": "home_office_garage"
+  "rpg_theme": "home_office_garage",
+  "glossary": [
+    {
+      "term": "customer",
+      "definition": "anyone who has paid us at least once for the tool",
+      "forbidden_synonyms": ["user", "downloader", "fan"]
+    },
+    {
+      "term": "MRR",
+      "definition": "monthly recurring revenue from paid plans",
+      "forbidden_synonyms": ["ARR", "monthly sales"]
+    },
+    {
+      "term": "launch",
+      "definition": "the day the product first appears on a public marketplace",
+      "forbidden_synonyms": ["release", "go-live", "drop"]
+    },
+    {
+      "term": "freemium",
+      "definition": "a free tier with a clear paid upgrade path",
+      "forbidden_synonyms": ["free trial", "free plan", "free version"]
+    }
+  ]
 }

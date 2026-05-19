@@ -61,6 +61,26 @@ def onboard(
         "--data-dir",
         help="Override the data directory (defaults to ~/.kompany).",
     ),
+    budget: float = typer.Option(
+        None,
+        "--budget",
+        help="Override the template's default initial_budget (USD).",
+    ),
+    revenue_target: float = typer.Option(
+        None,
+        "--revenue-target",
+        help="Override the template's revenue target (USD).",
+    ),
+    customer_target: int = typer.Option(
+        None,
+        "--customer-target",
+        help="Override the template's customer target (integer, optional).",
+    ),
+    deadline: str = typer.Option(
+        None,
+        "--deadline",
+        help="ISO 8601 deadline (YYYY-MM-DD or full timestamp).",
+    ),
 ):
     """One-line install: run the four-step onboarding wizard.
 
@@ -80,6 +100,10 @@ def onboard(
         template=template,
         directive=directive,
         data_dir=_Path(data_dir) if data_dir else None,
+        initial_budget=budget,
+        revenue_target=revenue_target,
+        customer_target=customer_target,
+        deadline=deadline,
         console=console,
     )
     if result.status == "cancelled":
@@ -1496,6 +1520,253 @@ def template_apply(
         + (f"[yellow]Force mode: overwrote previous template.[/yellow]\n"
            if result.get("force") else ""),
         title="Kompany template apply",
+    ))
+
+
+glossary_app = typer.Typer(
+    name="glossary",
+    help="Manage the company glossary (canonical terms + forbidden synonyms).",
+    no_args_is_help=True,
+)
+app.add_typer(glossary_app, name="glossary")
+
+
+def _parse_forbid(value: str | None) -> list[str] | None:
+    """Split a comma-separated ``--forbid`` value into a clean list.
+
+    Returns ``None`` when the option wasn't supplied (so the engine
+    treats it as "leave forbidden_synonyms unchanged" on update) and
+    ``[]`` when an empty string was supplied (an explicit clear).
+    """
+    if value is None:
+        return None
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+@glossary_app.command("list")
+def glossary_list_cmd(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """List every glossary term."""
+    engine = _get_engine(config)
+    rows = engine.list_glossary()
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        console.print("[dim]No glossary terms configured.[/dim]")
+        return
+    table = Table(title="Company Glossary")
+    table.add_column("Term", style="cyan")
+    table.add_column("Definition", style="white")
+    table.add_column("Forbidden synonyms", style="magenta")
+    table.add_column("Source", style="green")
+    for row in rows:
+        forbids = ", ".join(row.get("forbidden_synonyms") or []) or "—"
+        table.add_row(
+            row["term"],
+            row.get("definition", ""),
+            forbids,
+            row.get("added_by", "founder"),
+        )
+    console.print(table)
+
+
+@glossary_app.command("show")
+def glossary_show_cmd(
+    term: str = typer.Argument(..., help="Canonical term to look up"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Show one glossary entry."""
+    engine = _get_engine(config)
+    entry = engine.get_glossary_term(term)
+    if entry is None:
+        console.print(f"[red]Term not found: {term!r}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(entry)
+        return
+    forbids = ", ".join(entry.get("forbidden_synonyms") or []) or "(none)"
+    console.print(Panel(
+        f"Term: {entry['term']}\n"
+        f"Definition: {entry['definition']}\n"
+        f"Forbidden synonyms: {forbids}\n"
+        f"Added by: {entry.get('added_by', 'founder')}\n"
+        f"Added at: {entry.get('added_at', '')}",
+        title=f"Glossary: {entry['term']}",
+    ))
+
+
+@glossary_app.command("add")
+def glossary_add_cmd(
+    term: str = typer.Argument(..., help="Canonical term"),
+    definition: str = typer.Option(..., "--def", "--definition", help="Short definition"),
+    forbid: str = typer.Option(
+        None,
+        "--forbid",
+        help="Comma-separated list of forbidden synonyms (e.g. 'user,lead,prospect').",
+    ),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Add a new glossary term (founder-sourced)."""
+    engine = _get_engine(config)
+    try:
+        result = engine.add_glossary_term(
+            term=term,
+            definition=definition,
+            forbidden_synonyms=_parse_forbid(forbid),
+            added_by="founder",
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if as_json:
+        _emit_json(result)
+        return
+    console.print(Panel(
+        f"[green]Added glossary term {result['term']!r}.[/green]\n"
+        f"Definition: {result['definition']}\n"
+        f"Forbidden synonyms: "
+        f"{', '.join(result.get('forbidden_synonyms') or []) or '(none)'}",
+        title="kompany glossary add",
+    ))
+
+
+@glossary_app.command("update")
+def glossary_update_cmd(
+    term: str = typer.Argument(..., help="Term to update"),
+    definition: str = typer.Option(
+        None, "--def", "--definition", help="New definition (omit to leave unchanged)"
+    ),
+    forbid: str = typer.Option(
+        None,
+        "--forbid",
+        help="Comma-separated forbidden synonyms (pass '' to clear, omit to keep)",
+    ),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Update an existing glossary term."""
+    engine = _get_engine(config)
+    try:
+        result = engine.update_glossary_term(
+            term=term,
+            definition=definition,
+            forbidden_synonyms=_parse_forbid(forbid),
+        )
+    except LookupError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if as_json:
+        _emit_json(result)
+        return
+    console.print(Panel(
+        f"[green]Updated glossary term {result['term']!r}.[/green]\n"
+        f"Definition: {result['definition']}\n"
+        f"Forbidden synonyms: "
+        f"{', '.join(result.get('forbidden_synonyms') or []) or '(none)'}",
+        title="kompany glossary update",
+    ))
+
+
+@glossary_app.command("remove")
+def glossary_remove_cmd(
+    term: str = typer.Argument(..., help="Term to drop"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Remove a glossary term."""
+    engine = _get_engine(config)
+    removed = engine.remove_glossary_term(term)
+    if as_json:
+        _emit_json({"removed": removed, "term": term})
+        return
+    if not removed:
+        console.print(f"[yellow]Term not found: {term!r}[/yellow]")
+        raise typer.Exit(1)
+    console.print(f"[green]Removed glossary term {term!r}.[/green]")
+
+
+target_app = typer.Typer(
+    name="target",
+    help="Inspect or refresh the company's agreed targets.",
+    no_args_is_help=True,
+)
+app.add_typer(target_app, name="target")
+
+
+@target_app.command("show")
+def target_show(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Show the founder / team_proposal / agreed targets trio.
+
+    Mission-targets task (05-19). ``agreed`` is the authoritative version
+    every agent + the watchdog read.
+    """
+    engine = _get_engine(config)
+    bundle = engine.get_targets_bundle()
+    payload = {
+        "founder": bundle.founder.model_dump(mode="json"),
+        "proposal": (
+            bundle.proposal.model_dump(mode="json")
+            if bundle.proposal is not None
+            else None
+        ),
+        "agreed": (
+            bundle.agreed.model_dump(mode="json")
+            if bundle.agreed is not None
+            else None
+        ),
+        "review_thread_id": bundle.review_thread_id,
+    }
+    if as_json:
+        _emit_json(payload)
+        return
+    console.print(Panel(
+        f"founder:   {payload['founder']}\n"
+        f"proposal:  {payload['proposal']}\n"
+        f"agreed:    {payload['agreed']}\n"
+        f"review:    {payload['review_thread_id'] or '(no open review)'}",
+        title="Company targets",
+    ))
+
+
+@target_app.command("review")
+def target_review(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Re-run the team feasibility review against the current founder targets.
+
+    Creates a fresh ``approval_request(action_type='target_feasibility')``
+    so the founder can revise / approve / reject the recommendation. The
+    review thread id is mirrored to ``company_config['targets.review_thread_id']``
+    and surfaced in ``kompany target show``.
+    """
+    engine = _get_engine(config)
+    payload = engine.run_target_feasibility_review()
+    if payload is None:
+        console.print(
+            "[yellow]No founder targets are set yet — "
+            "run `kompany onboard` first.[/yellow]"
+        )
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(payload)
+        return
+    console.print(Panel(
+        f"Review id: {payload.get('id')}\n"
+        f"Status: {payload.get('status')}\n"
+        f"Summary: {payload.get('summary')}",
+        title="Target feasibility review",
     ))
 
 

@@ -41,7 +41,13 @@ class _FakeCoS:
         self.calls = 0
         self.last_summaries: list[dict[str, Any]] | None = None
 
-    def distill(self, summaries, max_tokens: int = 4096):
+    def distill(
+        self,
+        summaries,
+        max_tokens: int = 4096,
+        targets_summary=None,
+        glossary_summary=None,
+    ):
         self.calls += 1
         self.last_summaries = summaries
         parsed = DistillationOutput(

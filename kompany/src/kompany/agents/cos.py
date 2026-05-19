@@ -34,6 +34,8 @@ class CoSAgent(BaseAgent):
         self,
         episode_summaries: list[dict[str, Any]],
         max_tokens: int = 4096,
+        targets_summary: str | None = None,
+        glossary_summary: str | None = None,
     ) -> LLMResponse:
         """Run the cross-episode distillation LLM call.
 
@@ -42,11 +44,20 @@ class CoSAgent(BaseAgent):
         the LLM round-trip itself so the engine can wrap the surrounding
         DB writes / audit events in a single ``run_scope``.
 
+        ``glossary_summary`` is injected so distillation honours
+        founder-defined terminology when describing patterns (e.g. a
+        proposal pattern mentions ``customer`` instead of ``user`` to
+        match the canonical glossary).
+
         The returned :class:`LLMResponse` carries the parsed
         :class:`DistillationOutput` on ``.parsed``. The watchdog +
         run-id-aware client wrapper handles silent-run / retry semantics.
         """
-        user_prompt = build_distillation_user_prompt(episode_summaries)
+        user_prompt = build_distillation_user_prompt(
+            episode_summaries,
+            targets_summary=targets_summary,
+            glossary_summary=glossary_summary,
+        )
         model = self.settings.get_model_for_tier(self.model_tier)
         resp = self.llm.call_structured(
             model=model,

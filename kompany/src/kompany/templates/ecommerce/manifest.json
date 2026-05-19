@@ -4,6 +4,8 @@
   "mission_title": "Launch a DTC ecommerce brand",
   "mission_md_path": "mission.md",
   "initial_budget": 4000.0,
+  "revenue_target": 8000.0,
+  "customer_target": 100,
   "enabled_agents": [
     "ceo", "cfo", "cpo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"
   ],
@@ -16,5 +18,37 @@
     "Design and launch the Shopify store",
     "Run the first paid ad test with a $200 budget cap"
   ],
-  "rpg_theme": "warehouse_loft"
+  "rpg_theme": "warehouse_loft",
+  "glossary": [
+    {
+      "term": "order",
+      "definition": "a confirmed purchase regardless of fulfillment status",
+      "forbidden_synonyms": ["sale", "transaction", "cart"]
+    },
+    {
+      "term": "SKU",
+      "definition": "one stock-keeping unit (a unique product variant)",
+      "forbidden_synonyms": ["product", "item", "variant"]
+    },
+    {
+      "term": "AOV",
+      "definition": "average order value, total revenue divided by order count",
+      "forbidden_synonyms": ["average cart", "average sale"]
+    },
+    {
+      "term": "CAC",
+      "definition": "customer acquisition cost, paid spend divided by new customers",
+      "forbidden_synonyms": ["ad cost", "marketing cost", "acquisition spend"]
+    },
+    {
+      "term": "return",
+      "definition": "an order shipped back by the customer for a refund",
+      "forbidden_synonyms": ["refund", "send-back", "exchange"]
+    },
+    {
+      "term": "fulfillment",
+      "definition": "the warehouse process of picking, packing, and shipping",
+      "forbidden_synonyms": ["shipping", "delivery", "logistics"]
+    }
+  ]
 }

@@ -635,6 +635,86 @@ TOOLS = [
             "required": ["template_id"],
         },
     ),
+    # Mission-targets task (05-19) — quantitative onboarding contract.
+    Tool(
+        name="kompany_targets_show",
+        description=(
+            "Show the company's founder / team_proposal / agreed targets trio. "
+            "Returns the three states + the review approval thread id."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_targets_review",
+        description=(
+            "Re-run the team feasibility review on the founder's targets. "
+            "Creates one approval_request(action_type='target_feasibility') "
+            "carrying the team's recommendation. Returns the approval payload."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    # Glossary-and-drift-detection task (05-19) — founder-defined
+    # canonical terms + forbidden synonyms.
+    Tool(
+        name="kompany_glossary_list",
+        description="Return every glossary entry (canonical term + forbidden synonyms).",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_glossary_show",
+        description="Look up one glossary term (case-insensitive).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "term": {"type": "string", "description": "Canonical term to look up"},
+            },
+            "required": ["term"],
+        },
+    ),
+    Tool(
+        name="kompany_glossary_add",
+        description="Insert a brand-new glossary term (founder-sourced).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "term": {"type": "string"},
+                "definition": {"type": "string"},
+                "forbidden_synonyms": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "default": [],
+                },
+            },
+            "required": ["term", "definition"],
+        },
+    ),
+    Tool(
+        name="kompany_glossary_update",
+        description="Update an existing glossary term's definition or forbidden synonyms.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "term": {"type": "string"},
+                "definition": {"type": "string"},
+                "forbidden_synonyms": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": ["term"],
+        },
+    ),
+    Tool(
+        name="kompany_glossary_remove",
+        description="Drop one glossary term. Returns {removed: bool}.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "term": {"type": "string"},
+            },
+            "required": ["term"],
+        },
+    ),
 ]
 async def list_tools() -> list[Tool]:
     return TOOLS
@@ -1034,6 +1114,70 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except ValueError as exc:
             return _json_response({"error": str(exc)})
         return _json_response(result)
+
+    # Mission-targets task (05-19) — surface the four-knob contract.
+    if name == "kompany_targets_show":
+        bundle = engine.get_targets_bundle()
+        return _json_response({
+            "founder": bundle.founder.model_dump(mode="json"),
+            "proposal": (
+                bundle.proposal.model_dump(mode="json")
+                if bundle.proposal is not None
+                else None
+            ),
+            "agreed": (
+                bundle.agreed.model_dump(mode="json")
+                if bundle.agreed is not None
+                else None
+            ),
+            "review_thread_id": bundle.review_thread_id,
+            "authoritative": engine.get_targets().model_dump(mode="json"),
+        })
+
+    if name == "kompany_targets_review":
+        payload = engine.run_target_feasibility_review()
+        if payload is None:
+            return _json_response({
+                "error": "No founder targets set; complete onboarding first.",
+            })
+        return _json_response(payload)
+
+    # Glossary-and-drift-detection task (05-19).
+    if name == "kompany_glossary_list":
+        return _json_response({"entries": engine.list_glossary()})
+
+    if name == "kompany_glossary_show":
+        entry = engine.get_glossary_term(arguments["term"])
+        if entry is None:
+            return _json_response({"error": f"term not found: {arguments['term']!r}"})
+        return _json_response(entry)
+
+    if name == "kompany_glossary_add":
+        try:
+            return _json_response(engine.add_glossary_term(
+                term=arguments["term"],
+                definition=arguments["definition"],
+                forbidden_synonyms=arguments.get("forbidden_synonyms"),
+                added_by="founder",
+            ))
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+
+    if name == "kompany_glossary_update":
+        try:
+            return _json_response(engine.update_glossary_term(
+                term=arguments["term"],
+                definition=arguments.get("definition"),
+                forbidden_synonyms=arguments.get("forbidden_synonyms"),
+            ))
+        except LookupError as exc:
+            return _json_response({"error": str(exc)})
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+
+    if name == "kompany_glossary_remove":
+        removed = engine.remove_glossary_term(arguments["term"])
+        return _json_response({"removed": removed, "term": arguments["term"]})
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 

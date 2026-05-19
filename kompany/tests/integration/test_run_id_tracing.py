@@ -252,7 +252,13 @@ def test_trace_run_reconstructs_directive_chain(tmp_path):
     from kompany.core.directive import DirectiveResult
 
     class FakeCEO:
-        def classify(self, raw_input, directive_id=None):
+        def classify(
+            self,
+            raw_input,
+            directive_id=None,
+            targets_summary=None,
+            glossary_summary=None,
+        ):
             return DirectiveClassification(
                 directive_type="informational",
                 reasoning="status query",
@@ -320,7 +326,13 @@ def test_distinct_directives_get_distinct_run_ids(tmp_path):
     from kompany.agents.ceo import DirectiveClassification
 
     class FakeCEO:
-        def classify(self, raw_input, directive_id=None):
+        def classify(
+            self,
+            raw_input,
+            directive_id=None,
+            targets_summary=None,
+            glossary_summary=None,
+        ):
             return DirectiveClassification(
                 directive_type="informational",
                 reasoning="status",

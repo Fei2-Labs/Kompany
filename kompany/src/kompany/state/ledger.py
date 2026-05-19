@@ -79,3 +79,24 @@ class Ledger:
             "SELECT * FROM ledger ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def recent_burn_rate(self, window_hours: int = 24) -> float:
+        """Return burn (USD/hour) averaged over the last ``window_hours``.
+
+        Burn is computed from negative ``amount`` rows (expenses) inside
+        the window, divided by the window length. Returns ``0.0`` when no
+        expenses are recorded — callers (e.g. the watchdog's runway
+        scanner) treat ``0.0`` as "not enough signal yet".
+        """
+        if window_hours <= 0:
+            raise ValueError("window_hours must be > 0")
+        row = self.db.execute(
+            """SELECT COALESCE(SUM(amount), 0.0) AS total
+               FROM ledger
+               WHERE amount < 0
+                 AND timestamp >= datetime('now', ?)""",
+            (f"-{int(window_hours)} hours",),
+        ).fetchone()
+        total_expense = float(row["total"] or 0.0) if row else 0.0
+        # Expenses are negative; flip to a positive burn magnitude.
+        return abs(total_expense) / float(window_hours)

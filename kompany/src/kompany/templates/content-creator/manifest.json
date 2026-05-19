@@ -4,6 +4,8 @@
   "mission_title": "Build a media studio (channel + newsletter)",
   "mission_md_path": "mission.md",
   "initial_budget": 2000.0,
+  "revenue_target": 3000.0,
+  "customer_target": 1000,
   "enabled_agents": [
     "ceo", "cfo", "cpo", "cmo", "cro", "coo", "cos", "cv"
   ],
@@ -16,5 +18,27 @@
     "Schedule and publish the first 4 posts on a fixed cadence",
     "Launch a paid newsletter with a free + paid tier"
   ],
-  "rpg_theme": "creator_studio"
+  "rpg_theme": "creator_studio",
+  "glossary": [
+    {
+      "term": "subscriber",
+      "definition": "a person on our newsletter or channel list (free or paid)",
+      "forbidden_synonyms": ["follower", "fan", "viewer"]
+    },
+    {
+      "term": "newsletter",
+      "definition": "the recurring email publication we ship to subscribers",
+      "forbidden_synonyms": ["blog post", "email blast", "mailout"]
+    },
+    {
+      "term": "audience",
+      "definition": "the total reachable population across channels",
+      "forbidden_synonyms": ["fans", "followers", "community"]
+    },
+    {
+      "term": "sponsor",
+      "definition": "a paying advertiser featured inside our content",
+      "forbidden_synonyms": ["partner", "advertiser", "client"]
+    }
+  ]
 }

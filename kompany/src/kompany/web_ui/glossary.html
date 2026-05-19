@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kompany // Glossary</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+  <style>
+    /* Glossary-specific scaffolding. Kept inline so the file stays
+       self-contained alongside the existing cyberpunk style.css. */
+    .glossary-page { padding: 16px; }
+    .glossary-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(0, 1fr) 320px;
+    }
+    .glossary-table { width: 100%; border-collapse: collapse; }
+    .glossary-table th,
+    .glossary-table td {
+      text-align: left;
+      padding: 6px 10px;
+      border-bottom: 1px solid rgba(120, 255, 214, .12);
+      vertical-align: top;
+      font-size: 13px;
+    }
+    .glossary-table th { color: #78ffd6; text-transform: uppercase; }
+    .glossary-form input,
+    .glossary-form textarea {
+      width: 100%;
+      background: rgba(0, 0, 0, .35);
+      color: #f6f7fb;
+      border: 1px solid #2a3347;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font: inherit;
+      margin-bottom: 8px;
+    }
+    .glossary-form button {
+      background: #20283a;
+      color: #78ffd6;
+      border: 1px solid #78ffd6;
+      padding: 6px 10px;
+      cursor: pointer;
+      font: inherit;
+      margin-right: 6px;
+    }
+    .glossary-form button:hover { background: #78ffd6; color: #10131a; }
+    .glossary-msg { color: #ffd6a5; font-size: 12px; margin-top: 6px; min-height: 14px; }
+    .row-actions button {
+      background: transparent;
+      border: 1px solid #2a3347;
+      color: #80d8ff;
+      padding: 2px 6px;
+      cursor: pointer;
+      font-size: 11px;
+      margin-right: 4px;
+    }
+    .row-actions button:hover { border-color: #78ffd6; color: #78ffd6; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">&#9612;KOMPANY//GLOSSARY <span class="blink">&#9608;</span></div>
+    <div class="stats">
+      <a href="/ui/" style="color:#78ffd6;text-decoration:none;">[back to terminal]</a>
+    </div>
+  </div>
+
+  <div class="glossary-page">
+    <div class="frame" data-label="COMPANY GLOSSARY">
+      <div class="glossary-grid">
+        <div>
+          <table class="glossary-table" id="glossary-table">
+            <thead>
+              <tr>
+                <th>Term</th>
+                <th>Definition</th>
+                <th>Forbidden synonyms</th>
+                <th>Source</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="glossary-rows">
+              <tr><td colspan="5" style="color:#a8b3cf;">loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="glossary-form">
+          <h3 style="margin-top:0;color:#78ffd6;">Add / Update term</h3>
+          <label>Term</label>
+          <input id="form-term" placeholder="customer">
+          <label>Definition</label>
+          <textarea id="form-definition" rows="3" placeholder="a paying account..."></textarea>
+          <label>Forbidden synonyms (comma-separated)</label>
+          <input id="form-forbid" placeholder="user, lead, prospect">
+          <div>
+            <button id="form-add" type="button">Add</button>
+            <button id="form-update" type="button">Update</button>
+            <button id="form-clear" type="button">Clear</button>
+          </div>
+          <div id="form-msg" class="glossary-msg"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/ui/static/modules/ui/glossary.js"></script>
+</body>
+</html>

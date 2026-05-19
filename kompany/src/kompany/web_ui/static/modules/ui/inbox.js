@@ -16,6 +16,27 @@ function severityClass(sev) {
   return "severity-high";
 }
 
+// For glossary_review approvals, render the per-drift excerpts inline so
+// the founder sees exactly which agent used what forbidden synonym.
+function renderGlossaryDrifts(row) {
+  if (row.action_type !== "glossary_review") return "";
+  const payload = row.payload || {};
+  const drifts = Array.isArray(payload.drifts) ? payload.drifts : [];
+  if (!drifts.length) return "";
+  const lines = drifts.slice(0, 6).map((d) => {
+    const term = escapeHTML(d.term || "");
+    const syn = escapeHTML(d.drifted_synonym || "");
+    const agent = escapeHTML((d.agent_role || "?").toUpperCase());
+    const count = d.count != null ? `×${d.count}` : "";
+    const excerpt = d.sample_excerpt
+      ? `<span class="drift-excerpt">${escapeHTML(d.sample_excerpt).slice(0, 200)}</span>`
+      : "";
+    return `<div class="body-line drift-line">› ${agent} used <b>${syn}</b> ${count} — canonical: <b>${term}</b>${excerpt ? "<br>" + excerpt : ""}</div>`;
+  });
+  const more = drifts.length > 6 ? `<div class="body-line dim">… ${drifts.length - 6} more drift(s)</div>` : "";
+  return lines.join("") + more;
+}
+
 async function reload() {
   try {
     const rows = await api.inbox();
@@ -100,6 +121,7 @@ export function renderInbox(rows) {
       <div class="id-line">[#${escapeHTML(idShort)}] ${escapeHTML(requestedBy)} :: ${escapeHTML(r.action_type)} :: severity=${escapeHTML(r.severity || "high")}</div>
       <div class="body-line">${escapeHTML(r.summary || "")}</div>
       ${r.status === "snoozed" ? `<div class="body-line">› snoozed until ${escapeHTML(r.snoozed_until || "")}</div>` : ""}
+      ${renderGlossaryDrifts(r)}
       <div class="actions">
         <button class="key" data-action="approve">[y] approve</button>
         <button class="key danger" data-action="reject">[n] reject</button>

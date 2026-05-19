@@ -52,6 +52,8 @@ KIND_RECOVERED = "recovered"
 KIND_RETRY_EXHAUSTED = "retry_exhausted"
 KIND_STRANDED_IN_PROGRESS = "stranded_in_progress"
 KIND_STRANDED_TODO = "stranded_todo"
+KIND_RUNWAY_ALERT = "runway_alert"
+KIND_GLOSSARY_DRIFT_ALERT = "glossary_drift_alert"
 
 
 class Watchdog:
@@ -66,6 +68,7 @@ class Watchdog:
         stale_threshold_seconds: int = 600,
         clock: Callable[[], float] | None = None,
         approvals: ApprovalRequests | None = None,
+        runway_provider: Callable[[], dict[str, Any] | None] | None = None,
     ):
         self.health_events = health_events
         self.projects = projects
@@ -74,6 +77,12 @@ class Watchdog:
         # without an approvals store keep working. The snooze scanner
         # silently no-ops when ``approvals`` is None.
         self.approvals = approvals
+        # ``runway_provider`` returns a dict with keys ``cash``, ``burn_rate``
+        # (USD/hour), ``deadline`` (ISO 8601 string or None), ``targets``
+        # (raw model_dump). Returning ``None`` disables the scan for one
+        # tick. We use a callable rather than direct ledger/engine refs
+        # so this module stays free of upward dependencies.
+        self.runway_provider = runway_provider
         self.scan_interval_seconds = max(1, int(scan_interval_seconds))
         self.stale_threshold_seconds = max(1, int(stale_threshold_seconds))
         # ``clock`` is only used by tests that want to run scans without
@@ -244,9 +253,9 @@ class Watchdog:
 
         Public so tests can drive it without waiting for the asyncio
         timer. Safe to call from any thread/task. Also drives the
-        snooze-expiry sweep for approval requests — its return value is
-        intentionally only the stranded-task events, so existing callers
-        and tests keep their assertion shape.
+        snooze-expiry sweep for approval requests + the runway scan —
+        its return value is intentionally only the stranded-task events,
+        so existing callers and tests keep their assertion shape.
         """
         # Approval snooze expiry sweep: separate try/except so a failure
         # here cannot break stranded-task detection (the more critical
@@ -255,6 +264,14 @@ class Watchdog:
             self._scan_snoozed_approvals()
         except Exception:  # noqa: BLE001
             log.exception("watchdog._scan_snoozed_approvals failed")
+
+        # Runway scan: same defensive boundary. Mission-targets task
+        # (05-19) added this so a deadline-vs-burn check runs every
+        # scanner tick.
+        try:
+            self._scan_runway()
+        except Exception:  # noqa: BLE001
+            log.exception("watchdog._scan_runway failed")
 
         stale_tasks = self.projects.list_stale_in_progress(
             stale_seconds=self.stale_threshold_seconds
@@ -356,6 +373,136 @@ class Watchdog:
                 return body[len("snoozed for "):]
         return "snooze window"
 
+    # ------------------------------------------------------------------
+    # Runway scan (mission-targets task 05-19)
+    # ------------------------------------------------------------------
+
+    def record_runway_alert(
+        self,
+        detail: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Write one ``runway_alert`` health event.
+
+        Exposed publicly so tests + the engine's manual ``targets review``
+        path can fire an alert without going through the timed scanner.
+        """
+        event = self.health_events.record(
+            kind=KIND_RUNWAY_ALERT,
+            detail=detail or {},
+        )
+        self._mirror_audit("health.runway_alert", event)
+        return event
+
+    def record_glossary_drift(
+        self,
+        episode_id: str | None,
+        drifts: list[Any],
+        project_id: str | None = None,
+        approval_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Write one ``glossary_drift_alert`` health event.
+
+        Called from the CoS retrospective drift-scan hook (see
+        :mod:`kompany.agents.cos_glossary_scan`). ``drifts`` is the
+        list of :class:`DriftHit` Pydantic models the scanner produced
+        — we serialise them through ``model_dump`` so the JSON column
+        round-trips cleanly. ``approval_id`` carries the matching
+        ``glossary_review`` approval request id (set after the engine
+        creates the approval row).
+        """
+        serialised: list[dict[str, Any]] = []
+        for hit in drifts:
+            if hasattr(hit, "model_dump"):
+                serialised.append(hit.model_dump(mode="json"))
+            elif isinstance(hit, dict):
+                serialised.append(hit)
+        detail: dict[str, Any] = {
+            "episode_id": episode_id,
+            "drift_count": len(serialised),
+            "drifts": serialised,
+        }
+        if approval_id is not None:
+            detail["approval_id"] = approval_id
+        event = self.health_events.record(
+            kind=KIND_GLOSSARY_DRIFT_ALERT,
+            project_id=project_id,
+            detail=detail,
+        )
+        self._mirror_audit("health.glossary_drift_alert", event)
+        return event
+
+    def _scan_runway(self) -> dict[str, Any] | None:
+        """Check whether projected burn through ``deadline`` exceeds cash.
+
+        Hot loop:
+
+        1. Pull ``cash`` + ``burn_rate`` + ``deadline`` + raw ``targets``
+           from :attr:`runway_provider`. ``None`` disables the scan for
+           this tick (engine hasn't wired it yet, no agreed targets
+           exist, ledger unavailable, etc.).
+        2. Skip when ``burn_rate <= 0`` (not enough signal yet) or no
+           deadline is set.
+        3. Compute projected burn = ``burn_rate * hours_remaining``.
+           If that exceeds ``cash`` AND there isn't already an open
+           ``runway_alert`` row, write one.
+
+        Returns the freshly-written event row, or ``None`` if nothing was
+        emitted this tick.
+        """
+        if self.runway_provider is None:
+            return None
+        try:
+            snapshot = self.runway_provider()
+        except Exception:  # noqa: BLE001
+            log.debug("watchdog.runway_provider raised", exc_info=True)
+            return None
+        if not snapshot:
+            return None
+        try:
+            cash = float(snapshot.get("cash") or 0.0)
+            burn_rate = float(snapshot.get("burn_rate") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        deadline_raw = snapshot.get("deadline")
+        if not deadline_raw or burn_rate <= 0:
+            return None
+        from datetime import datetime, timezone
+
+        try:
+            deadline = datetime.fromisoformat(str(deadline_raw))
+        except (TypeError, ValueError):
+            return None
+        now = datetime.now(deadline.tzinfo) if deadline.tzinfo else datetime.utcnow()
+        try:
+            hours_remaining = (deadline - now).total_seconds() / 3600.0
+        except TypeError:
+            return None
+        # Already past deadline → no actionable alert (the watchdog can't
+        # un-spend money). A separate "deadline expired" signal can be
+        # added later; v1 stays narrowly scoped.
+        if hours_remaining <= 0:
+            return None
+        projected_burn = burn_rate * hours_remaining
+        if projected_burn <= cash:
+            return None
+        # Skip if an open alert already exists — we don't want to spam
+        # the inbox each scanner tick. Match by ``(kind, task_id=None)``
+        # because runway alerts are company-scoped, not task-scoped.
+        existing = self.health_events.list(kind=KIND_RUNWAY_ALERT, status="open", limit=1)
+        if existing:
+            return None
+        detail: dict[str, Any] = {
+            "cash": cash,
+            "burn_rate_per_hour": burn_rate,
+            "hours_remaining": hours_remaining,
+            "projected_burn": projected_burn,
+            "deadline": str(deadline_raw),
+        }
+        targets = snapshot.get("targets")
+        if isinstance(targets, dict):
+            detail["targets"] = targets
+        return self.record_runway_alert(detail=detail)
+
     async def _run_scanner_loop(self) -> None:
         """Background task: sleep + scan + repeat until cancelled."""
         log.debug(
@@ -447,8 +594,10 @@ class LLMUnavailable(RuntimeError):
 __all__ = [
     "LLMUnavailable",
     "Watchdog",
+    "KIND_GLOSSARY_DRIFT_ALERT",
     "KIND_RECOVERED",
     "KIND_RETRY_EXHAUSTED",
+    "KIND_RUNWAY_ALERT",
     "KIND_SILENT_RUN",
     "KIND_STRANDED_IN_PROGRESS",
     "KIND_STRANDED_TODO",

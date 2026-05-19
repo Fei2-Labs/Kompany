@@ -117,6 +117,11 @@ class OnboardResult:
     api_key_storage: str | None = None  # "vault" | "env" | "reused" | None
     ping_status: str | None = None  # "ok" | "skipped" | "skipped_test_mode" | "failed"
     notes: list[str] = field(default_factory=list)
+    # Mission-targets task (05-19). ``targets_review_id`` is the
+    # approval_request id created by ``engine.run_target_feasibility_review``
+    # after onboarding completes, so callers (CLI, REST) can deep-link to
+    # the team's recommendation.
+    targets_review_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +539,10 @@ def _step_template(
     engine: Any,
     result: OnboardResult,
     reused: bool,
+    initial_budget: float | None = None,
+    revenue_target: float | None = None,
+    customer_target: int | None = None,
+    deadline: str | None = None,
 ) -> None:
     _emit_step(console, 3, "Choose a starter company")
 
@@ -584,14 +593,30 @@ def _step_template(
                 )
 
     # Apply --------------------------------------------------------------
+    # Mission-targets task (05-19): pass the four overrides so an
+    # explicit ``--budget`` / ``--revenue-target`` etc. beats the
+    # template manifest's presets.
+    overrides_present = any(
+        v is not None
+        for v in (initial_budget, revenue_target, customer_target, deadline)
+    )
     try:
         applied_id = engine.templates.is_applied()
-        if applied_id == template_id:
+        if applied_id == template_id and not overrides_present:
             console.print(f"      [dim]template {template_id!r} already applied[/dim]")
             result.template_id = template_id
             return
         force = applied_id is not None
-        engine.apply_template(template_id, force=force)
+        apply_kwargs: dict[str, Any] = {"force": force}
+        if initial_budget is not None:
+            apply_kwargs["override_budget"] = float(initial_budget)
+        if revenue_target is not None:
+            apply_kwargs["override_revenue_target"] = float(revenue_target)
+        if customer_target is not None:
+            apply_kwargs["override_customer_target"] = int(customer_target)
+        if deadline is not None and deadline != "":
+            apply_kwargs["override_deadline"] = str(deadline)
+        engine.apply_template(template_id, **apply_kwargs)
     except ValueError as exc:
         console.print(f"[red]Template error: {exc}[/red]")
         raise typer.Exit(2) from exc
@@ -718,6 +743,10 @@ def run_onboard(
     template: str | None = None,
     directive: str | None = None,
     data_dir: Path | None = None,
+    initial_budget: float | None = None,
+    revenue_target: float | None = None,
+    customer_target: int | None = None,
+    deadline: str | None = None,
     console: Console | None = None,
     engine_factory: Callable[[], Any] | None = None,
 ) -> OnboardResult:
@@ -790,7 +819,28 @@ def run_onboard(
             engine=engine,
             result=result,
             reused=reused,
+            initial_budget=initial_budget,
+            revenue_target=revenue_target,
+            customer_target=customer_target,
+            deadline=deadline,
         )
+
+        # ----- Step 3.5 (team target feasibility review) -------------
+        # Mission-targets task (05-19): fires once on fresh installs.
+        # Failures don't block onboarding; the founder can still send
+        # the first directive and re-run review later.
+        if not reused:
+            try:
+                review_payload = engine.run_target_feasibility_review()
+            except Exception as exc:  # noqa: BLE001
+                result.notes.append(f"target feasibility review skipped: {exc}")
+            else:
+                if review_payload and isinstance(review_payload, dict):
+                    result.targets_review_id = review_payload.get("id")
+                    cons.print(
+                        f"      [green]✓[/green] team feasibility review "
+                        f"[dim]({result.targets_review_id})[/dim]"
+                    )
 
         # ----- Step 4 (first directive) ------------------------------
         _step_directive(
@@ -842,6 +892,10 @@ def onboard_headless(
     directive: str | None = None,
     base_url: str | None = None,
     *,
+    initial_budget: float | None = None,
+    revenue_target: float | None = None,
+    customer_target: int | None = None,
+    deadline: str | None = None,
     engine_factory: Callable[[], Any] | None = None,
 ) -> OnboardResult:
     """Run a fully-headless onboarding pass.
@@ -956,19 +1010,60 @@ def onboard_headless(
                 raise OnboardError("ping_failed", f"{provider} ping failed: {detail}")
 
         # ----- Template apply -------------------------------------------
+        # Mission-targets task (05-19): the four override knobs flow
+        # through to ``engine.apply_template`` so the founder's
+        # explicit numbers beat the template manifest's presets.
+        # Priority (set in ``Templates.apply``): override > manifest >
+        # unset (0.0 / None).
         if reused:
             applied = engine.templates.is_applied()
             result.template_id = applied or template_id
         else:
             try:
                 applied_id = engine.templates.is_applied()
-                if applied_id == template_id:
+                if applied_id == template_id and not any(
+                    v is not None
+                    for v in (
+                        initial_budget,
+                        revenue_target,
+                        customer_target,
+                        deadline,
+                    )
+                ):
                     result.template_id = template_id
                 else:
-                    engine.apply_template(template_id, force=applied_id is not None)
+                    # Use ``apply_template`` with the four overrides. The
+                    # engine routes them through Templates.apply, which
+                    # persists the founder-state targets snapshot.
+                    apply_kwargs: dict[str, Any] = {
+                        "force": applied_id is not None,
+                    }
+                    if initial_budget is not None:
+                        apply_kwargs["override_budget"] = float(initial_budget)
+                    if revenue_target is not None:
+                        apply_kwargs["override_revenue_target"] = float(revenue_target)
+                    if customer_target is not None:
+                        apply_kwargs["override_customer_target"] = int(customer_target)
+                    if deadline is not None and deadline != "":
+                        apply_kwargs["override_deadline"] = str(deadline)
+                    engine.apply_template(template_id, **apply_kwargs)
                     result.template_id = template_id
             except ValueError as exc:
                 raise OnboardError("template_error", str(exc)) from exc
+
+        # ----- Kick off team target feasibility review -------------------
+        # Non-blocking: failure here is informational — onboarding still
+        # succeeds. The review writes one approval_request the founder
+        # can act on later via ``kompany target review`` /
+        # ``/approvals/<id>/approve``.
+        if not reused:
+            try:
+                review_payload = engine.run_target_feasibility_review()
+            except Exception as exc:  # noqa: BLE001
+                result.notes.append(f"target feasibility review skipped: {exc}")
+            else:
+                if review_payload and isinstance(review_payload, dict):
+                    result.targets_review_id = review_payload.get("id")
 
         # ----- First directive (optional) -------------------------------
         if directive and directive.strip():

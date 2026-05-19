@@ -27,6 +27,12 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     "silent_run",
     "recovered",
     "retry_exhausted",
+    # Fires when projected burn through ``deadline`` exceeds available cash.
+    "runway_alert",
+    # Fires when CoS retrospective detects forbidden-synonym usage against
+    # the company glossary. See ``cos_glossary_scan`` + the
+    # ``glossary_review`` approval flow.
+    "glossary_drift_alert",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

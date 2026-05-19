@@ -409,7 +409,13 @@ class _FakeCoSAgent:
         self._cost = cost
         self.calls = 0
 
-    def distill(self, summaries: list[dict[str, Any]], max_tokens: int = 4096):
+    def distill(
+        self,
+        summaries: list[dict[str, Any]],
+        max_tokens: int = 4096,
+        targets_summary: str | None = None,
+        glossary_summary: str | None = None,
+    ):
         from kompany.llm.client import LLMResponse
 
         self.calls += 1

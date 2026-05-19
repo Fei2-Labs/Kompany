@@ -177,6 +177,60 @@ class HealthEvent(_Strict):
     snoozed_until: str | None = None
 
 
+class TargetsSnapshot(_Strict):
+    """One captured ``CompanyTargets`` state inside an episode payload.
+
+    Mirrors :class:`kompany.state.targets.CompanyTargets` but stays
+    declared locally so the episode schema doesn't import from
+    higher-level packages. All four numeric fields default to safe
+    "no target set" values; older payloads that pre-date mission-targets
+    (task 05-19) simply omit the parent ``targets`` slot entirely.
+    """
+
+    initial_budget: float = 0.0
+    revenue_target: float = 0.0
+    customer_target: int | None = None
+    deadline: str | None = None
+    source: str = "founder"
+
+
+class GlossaryDriftEntry(_Strict):
+    """One drift hit captured during the CoS retrospective scan.
+
+    Mirrors :class:`kompany.agents.cos_glossary_scan.DriftHit` but stays
+    declared locally so the episode schema doesn't import from
+    higher-level packages. The list lives in the top-level
+    ``glossary_drift`` slot (additive, defaults to ``None`` for older
+    payloads); distillation later pattern-matches "founder pushed back
+    on X repeatedly" by reading this slot.
+    """
+
+    term: str
+    drifted_synonym: str
+    agent_role: str
+    count: int = 0
+    sample_excerpt: str = ""
+    source: str = "reflection"
+
+
+class TargetsBundleEntry(_Strict):
+    """Three-state targets snapshot persisted into the episode payload.
+
+    Lets distillation see the full negotiation: what the founder set,
+    what the team recommended, and what the founder ultimately agreed
+    to. Filled in by ``Episodes.materialize`` from
+    :func:`kompany.state.targets.get_bundle`. All four sub-fields are
+    optional so projects that pre-date mission-targets (task 05-19) can
+    still materialise (the slot will simply be ``None`` at the top
+    level).
+    """
+
+    founder: TargetsSnapshot | None = None
+    proposal: TargetsSnapshot | None = None
+    agreed: TargetsSnapshot | None = None
+    review_thread_id: str | None = None
+
+
 class EpisodePayloadV1(BaseModel):
     """Frozen v1 contract for ``project_episodes.payload_json``.
 
@@ -186,6 +240,12 @@ class EpisodePayloadV1(BaseModel):
     keys are **rejected** (``extra="forbid"``) to enforce schema discipline;
     forward-compatible extensions live under ``ext`` namespaced by task slug
     (e.g. ``ext["approval-thread-and-rpg"] = {...}``).
+
+    ``targets`` is **additive** — added by mission-targets (task 05-19).
+    ``schema_version`` stays ``"1.0"`` because no existing field changed
+    meaning; readers that don't know about ``targets`` simply ignore the
+    key, and payloads materialised before the field existed default it
+    to ``None``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -204,6 +264,24 @@ class EpisodePayloadV1(BaseModel):
     reflections: list[ReflectionEntry] = Field(default_factory=list)
     approval_events: list[ApprovalEvent] = Field(default_factory=list)
     health_events: list[HealthEvent] = Field(default_factory=list)
+    targets: TargetsBundleEntry | None = Field(
+        default=None,
+        description=(
+            "Three-state company targets snapshot (founder / team_proposal / "
+            "agreed) + the review approval thread id. Filled in by "
+            "Episodes.materialize via kompany.state.targets.get_bundle. "
+            "Added by mission-targets task 05-19."
+        ),
+    )
+    glossary_drift: list[GlossaryDriftEntry] | None = Field(
+        default=None,
+        description=(
+            "Forbidden-synonym hits the CoS retrospective scanner found "
+            "this episode. ``None`` means scan didn't run (empty "
+            "glossary, older payload); ``[]`` means scan ran but found "
+            "nothing. Added by glossary-and-drift-detection task 05-19."
+        ),
+    )
     ext: dict[str, Any] = Field(
         default_factory=dict,
         description="Namespace-by-task-slug escape hatch for forward-compatible additions.",
@@ -217,10 +295,13 @@ __all__ = [
     "AuditEvent",
     "DecisionEntry",
     "EpisodePayloadV1",
+    "GlossaryDriftEntry",
     "HealthEvent",
     "LedgerSummary",
     "LifecycleEvent",
     "ProjectMeta",
     "ReflectionEntry",
+    "TargetsBundleEntry",
+    "TargetsSnapshot",
     "TaskEntry",
 ]

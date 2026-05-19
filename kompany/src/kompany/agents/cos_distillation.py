@@ -82,6 +82,23 @@ class DistilledPattern(BaseModel):
         default_factory=list,
         description="Project ids of the episodes that support this pattern.",
     )
+    category: str = Field(
+        default="experiential",
+        description="Memory category. Defaults to ``experiential`` for "
+        "cross-episode patterns. Distillation may emit "
+        "``glossary_proposal`` when the LLM spots a repeated drift it "
+        "thinks the founder should canonicalise — those rows surface in "
+        "the inbox for founder approval instead of silently shaping "
+        "agent prompts. Glossary-and-drift-detection task 05-19.",
+    )
+
+    @field_validator("category")
+    @classmethod
+    def _normalize_category(cls, value: str) -> str:
+        stripped = value.strip().lower()
+        if not stripped:
+            return "experiential"
+        return stripped
 
     @field_validator("target_agent_role")
     @classmethod
@@ -310,14 +327,37 @@ DISTILLATION_SYSTEM_PROMPT = (
 )
 
 
-def build_distillation_user_prompt(summaries: list[dict[str, Any]]) -> str:
-    """Assemble the user-side prompt body from per-episode summaries."""
-    parts: list[str] = [
+def build_distillation_user_prompt(
+    summaries: list[dict[str, Any]],
+    targets_summary: str | None = None,
+    glossary_summary: str | None = None,
+) -> str:
+    """Assemble the user-side prompt body from per-episode summaries.
+
+    ``targets_summary`` is the one-paragraph render of the company's
+    agreed targets (mission-targets task 05-19). When present it's
+    injected at the top so CoS distillation can pattern-match around
+    "what worked for this revenue/customer/deadline shape" rather than
+    pure cross-episode signal.
+
+    ``glossary_summary`` is the company glossary block (canonical terms
+    + forbidden synonyms). When present it's injected above the targets
+    so distillation language adopts founder-defined terminology. Added
+    by glossary-and-drift-detection task 05-19.
+    """
+    parts: list[str] = []
+    if glossary_summary:
+        parts.append(glossary_summary)
+        parts.append("")
+    if targets_summary:
+        parts.append(targets_summary)
+        parts.append("")
+    parts.extend([
         "Review the following project episodes and extract durable patterns.",
         f"Total episodes: {len(summaries)}.",
         "",
         "EPISODES:",
-    ]
+    ])
     for idx, summary in enumerate(summaries, start=1):
         block = json.dumps(summary, indent=2, ensure_ascii=False)
         block = _truncate(block, PER_EPISODE_CHAR_BUDGET)

@@ -185,6 +185,12 @@ def test_constants_match_prd():
         "silent_run",
         "recovered",
         "retry_exhausted",
+        # Added by 05-19-mission-targets-and-deadline: watchdog fires this
+        # when projected burn through deadline exceeds available cash.
+        "runway_alert",
+        # Added by 05-19-glossary-and-drift-detection: CoS retrospective
+        # writes this when it spots forbidden synonyms in agent output.
+        "glossary_drift_alert",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

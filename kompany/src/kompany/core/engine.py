@@ -64,6 +64,22 @@ from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
+from kompany.state.glossary import (
+    CompanyGlossary,
+    GlossaryEntry,
+    GlossaryService,
+    load_from_config as load_glossary_from_config,
+)
+from kompany.state.targets import (
+    CompanyTargets,
+    TargetsBundle,
+    compose_summary as compose_targets_summary,
+    get_bundle as get_targets_bundle,
+    get_state as get_targets_state,
+    get_targets as get_company_targets,
+    set_review_thread_id as set_targets_review_thread_id,
+    set_targets as set_company_targets,
+)
 from kompany.state.templates import (
     Templates,
     TemplateAlreadyApplied,
@@ -101,6 +117,7 @@ class KompanyEngine:
             projects=self.projects,
             audit=self.audit,
         )
+        self.glossary = GlossaryService(self.db)
         self.backups = BackupManager(self.settings.data_dir)
         self.cost_tracker = CostTracker(self.ledger)
         self.autonomy = AutonomyGate()
@@ -119,6 +136,11 @@ class KompanyEngine:
                 "task_stale_threshold_seconds", default=600
             ),
             approvals=self.approvals,
+            # Wire the runway provider so each scanner tick can compare
+            # projected burn against the agreed targets. Wrapped in a
+            # try/except so a transient ledger error never breaks the
+            # tick — see ``Watchdog._scan_runway`` for the contract.
+            runway_provider=self._runway_snapshot,
         )
 
         self.llm = LLMClient(
@@ -147,6 +169,21 @@ class KompanyEngine:
             str,
             Callable[[ApprovalRequest, str], ApprovalRequest],
         ] = {}
+        # The target_feasibility action_type uses a dedicated revision
+        # handler so a founder counter-proposal carries the parsed numbers
+        # forward into the successor approval (not just a hint string).
+        self.register_revision_handler(
+            "target_feasibility",
+            self._target_feasibility_revision_handler,
+        )
+        # Glossary review revisions: founder can accept a subset of the
+        # proposed corrections by leaving them in the payload and dropping
+        # the rest in the ``revision_hint``. See
+        # ``_glossary_review_revision_handler`` for the full contract.
+        self.register_revision_handler(
+            "glossary_review",
+            self._glossary_review_revision_handler,
+        )
 
     def _resolve_vault_key(self) -> None:
         vault_key, source = resolve_vault_key(
@@ -746,6 +783,25 @@ class KompanyEngine:
             project_id=project_id,
         )
 
+        # Glossary drift scan (glossary-and-drift-detection task 05-19).
+        # Runs *after* reflections land in agent_memories but *before*
+        # episode materialization so the resulting health event + drift
+        # rows are already on disk when ``Episodes.materialize`` reads
+        # them. Wrapped in try/except: a drift-scan bug must never block
+        # the canonical retrospective output.
+        try:
+            self._run_glossary_drift_scan(
+                project_id=project_id,
+                reflections=reflections,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            self.audit.record(
+                "glossary.drift_scan_failed",
+                "Glossary drift scan failed",
+                detail={"project_id": project_id, "error": str(exc)},
+                project_id=project_id,
+            )
+
         # Materialize the structured episode record + enforce retention.
         # Wrapped in try/except so that a materialization bug never blocks
         # a retrospective from being written (reflections are the user-visible
@@ -905,6 +961,9 @@ class KompanyEngine:
         force: bool = False,
         override_budget: float | None = None,
         override_directive: str | None = None,
+        override_revenue_target: float | None = None,
+        override_customer_target: int | None = None,
+        override_deadline: str | None = None,
     ) -> dict[str, Any]:
         """Apply a ready-to-play template to the current company.
 
@@ -919,12 +978,18 @@ class KompanyEngine:
                     force=force,
                     override_budget=override_budget,
                     override_directive=override_directive,
+                    override_revenue_target=override_revenue_target,
+                    override_customer_target=override_customer_target,
+                    override_deadline=override_deadline,
                 )
         return self._apply_template_inner(
             template_id,
             force=force,
             override_budget=override_budget,
             override_directive=override_directive,
+            override_revenue_target=override_revenue_target,
+            override_customer_target=override_customer_target,
+            override_deadline=override_deadline,
         )
 
     def _apply_template_inner(
@@ -934,6 +999,9 @@ class KompanyEngine:
         force: bool,
         override_budget: float | None,
         override_directive: str | None,
+        override_revenue_target: float | None = None,
+        override_customer_target: int | None = None,
+        override_deadline: str | None = None,
     ) -> dict[str, Any]:
         try:
             result = self.templates.apply(
@@ -941,6 +1009,9 @@ class KompanyEngine:
                 force=force,
                 override_budget=override_budget,
                 override_directive=override_directive,
+                override_revenue_target=override_revenue_target,
+                override_customer_target=override_customer_target,
+                override_deadline=override_deadline,
             )
         except TemplateNotFound as exc:
             raise ValueError(str(exc)) from exc
@@ -1177,7 +1248,14 @@ class KompanyEngine:
         # silent-run detection, and retry on transient failure.
         cos_agent = self.registry.get("cos")
         try:
-            resp = cos_agent.distill(summaries)
+            # Inject the agreed-target summary so distillation can
+            # pattern-match around the company's revenue/customer/
+            # deadline shape (mission-targets task 05-19).
+            resp = cos_agent.distill(
+                summaries,
+                targets_summary=self._compose_targets_summary(),
+                glossary_summary=self._compose_glossary_summary(),
+            )
         except Exception as exc:
             self.audit.record(
                 "learning.distillation_failed",
@@ -1218,13 +1296,25 @@ class KompanyEngine:
                     "confidence": pattern.confidence,
                     "evidence_episode_ids": list(pattern.evidence_episode_ids),
                 }
+                # Distillation usually emits ``experiential`` patterns; the
+                # glossary-and-drift-detection task (05-19) allows CoS to
+                # tag a pattern ``glossary_proposal`` when it spots a
+                # repeated drift worth canonicalising. The founder then
+                # approves the new term via the inbox before it shapes
+                # any future agent prompt.
+                memory_category = pattern.category or "experiential"
+                knowledge_type = (
+                    "glossary_proposal"
+                    if memory_category == "glossary_proposal"
+                    else "experiential"
+                )
                 upsert = self.memory.upsert_by_pattern_key(
                     agent_role=pattern.target_agent_role,
                     pattern_key=pattern.pattern_key,
                     content=pattern.pattern_summary,
                     metadata=action_meta,
-                    category="experiential",
-                    knowledge_type="experiential",
+                    category=memory_category,
+                    knowledge_type=knowledge_type,
                     run_id=run_id,
                 )
                 written.append({
@@ -2173,7 +2263,16 @@ class KompanyEngine:
         try:
             self.agent_status.set("ceo", "thinking", "classifying directive")
             ceo = self.registry.get("ceo", company_state=state)
-            classification = ceo.classify(raw_input, directive_id=directive.id)
+            # Inject the agreed-target summary so CEO classify weighs the
+            # ask against the company's explicit revenue/customer/deadline
+            # commitments (mission-targets task 05-19). Falls back to an
+            # innocuous default when no targets are set.
+            classification = ceo.classify(
+                raw_input,
+                directive_id=directive.id,
+                targets_summary=self._compose_targets_summary(),
+                glossary_summary=self._compose_glossary_summary(),
+            )
             self.audit.record(
                 "directive.classified",
                 "CEO classified directive",
@@ -2471,6 +2570,12 @@ class KompanyEngine:
                 directive_id=request.directive_id,
                 project_id=request.project_id,
             )
+            # Action-type-specific post-resolve hook. Keep this list short
+            # and inline so new action_types are easy to spot.
+            if request.action_type == "target_feasibility":
+                self._finalize_target_feasibility(request, outcome="approved")
+            if request.action_type == "glossary_review":
+                self._finalize_glossary_review(request, outcome="approved")
             return request.model_dump(mode="json")
         return None
 
@@ -2500,6 +2605,10 @@ class KompanyEngine:
                 directive_id=request.directive_id,
                 project_id=request.project_id,
             )
+            if request.action_type == "target_feasibility":
+                self._finalize_target_feasibility(request, outcome="rejected")
+            if request.action_type == "glossary_review":
+                self._finalize_glossary_review(request, outcome="rejected")
             return request.model_dump(mode="json")
         return None
 
@@ -2705,6 +2814,700 @@ class KompanyEngine:
             by_id=by_id,
         )
         return comment.model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Company targets + team feasibility review
+    # ------------------------------------------------------------------
+
+    def get_targets(self) -> CompanyTargets:
+        """Return the authoritative targets (``agreed`` > founder fallback)."""
+        return get_company_targets(self.db)
+
+    def get_targets_bundle(self) -> TargetsBundle:
+        """Return all three states + the review approval id."""
+        return get_targets_bundle(self.db)
+
+    def set_targets(self, targets: CompanyTargets) -> CompanyTargets:
+        """Persist a target snapshot keyed by ``targets.source``."""
+        return set_company_targets(self.db, targets)
+
+    def _compose_targets_summary(self) -> str:
+        """One-paragraph string injected into CEO/CFO/CoS system prompts.
+
+        Reads the authoritative targets + current cash so the agent sees
+        the same numbers the watchdog uses to fire ``runway_alert``.
+        """
+        try:
+            cash = self.ledger.get_balance()
+        except Exception:  # pragma: no cover — ledger errors don't kill prompts
+            cash = None
+        return compose_targets_summary(self.get_targets(), cash=cash)
+
+    def _compose_glossary_summary(self) -> str:
+        """Render the company glossary as a system-prompt block.
+
+        Returns ``""`` when the glossary is empty so callers can splice
+        the value into prompts unconditionally without an awkward blank
+        section. Used by CEO classify / CFO target review / CoS distill
+        / CoS retrospect prompts. Reads via the cached
+        :class:`GlossaryService` so concurrent edits don't tear the snapshot.
+
+        Glossary-and-drift-detection task 05-19.
+        """
+        try:
+            glossary = self.glossary.load()
+        except Exception:  # pragma: no cover — never let glossary kill prompts
+            return ""
+        return glossary.compose_summary()
+
+    # ------------------------------------------------------------------
+    # Company glossary (glossary-and-drift-detection task 05-19)
+    # ------------------------------------------------------------------
+
+    def list_glossary(self) -> list[dict[str, Any]]:
+        """Return every glossary entry as a JSON-ready dict."""
+        return [
+            entry.model_dump(mode="json") for entry in self.glossary.list_terms()
+        ]
+
+    def get_glossary_term(self, term: str) -> dict[str, Any] | None:
+        """Look up one term (case-insensitive). Returns ``None`` if missing."""
+        entry = self.glossary.get(term)
+        return entry.model_dump(mode="json") if entry is not None else None
+
+    def add_glossary_term(
+        self,
+        term: str,
+        definition: str,
+        forbidden_synonyms: list[str] | None = None,
+        added_by: str = "founder",
+        source_episode_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Insert a new glossary term. Raises ``ValueError`` if it exists."""
+        # The service uses Literal["founder","cos_proposal","template"]; we
+        # validate the string here so callers get a clear error instead of
+        # a deep Pydantic ValidationError.
+        valid_sources = {"founder", "cos_proposal", "template"}
+        if added_by not in valid_sources:
+            raise ValueError(
+                f"added_by must be one of {sorted(valid_sources)}, got {added_by!r}"
+            )
+        entry = self.glossary.add(
+            term=term,
+            definition=definition,
+            forbidden_synonyms=forbidden_synonyms,
+            added_by=added_by,  # type: ignore[arg-type]
+            source_episode_id=source_episode_id,
+        )
+        self.audit.record(
+            event_type="glossary.term_added",
+            action=f"Added glossary term {entry.term!r}",
+            detail={
+                "term": entry.term,
+                "added_by": entry.added_by,
+                "forbidden_synonyms": entry.forbidden_synonyms,
+                "source_episode_id": entry.source_episode_id,
+            },
+        )
+        return entry.model_dump(mode="json")
+
+    def update_glossary_term(
+        self,
+        term: str,
+        definition: str | None = None,
+        forbidden_synonyms: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Mutate an existing glossary entry."""
+        entry = self.glossary.update(
+            term,
+            definition=definition,
+            forbidden_synonyms=forbidden_synonyms,
+        )
+        self.audit.record(
+            event_type="glossary.term_updated",
+            action=f"Updated glossary term {entry.term!r}",
+            detail={
+                "term": entry.term,
+                "definition": entry.definition,
+                "forbidden_synonyms": entry.forbidden_synonyms,
+            },
+        )
+        return entry.model_dump(mode="json")
+
+    def remove_glossary_term(self, term: str) -> bool:
+        """Drop one glossary term. Returns ``True`` if a row was deleted."""
+        removed = self.glossary.remove(term)
+        if removed:
+            self.audit.record(
+                event_type="glossary.term_removed",
+                action=f"Removed glossary term {term!r}",
+                detail={"term": term},
+            )
+        return removed
+
+    def _runway_snapshot(self) -> dict[str, Any] | None:
+        """Build the dict the watchdog's runway scanner consumes.
+
+        Returns ``None`` when no agreed/founder deadline is set, when the
+        ledger or targets table is unreachable, or when burn rate hasn't
+        produced enough signal yet. The watchdog treats ``None`` as
+        "skip this tick"; it never raises.
+        """
+        try:
+            targets = self.get_targets()
+        except Exception:  # noqa: BLE001
+            return None
+        if not targets.deadline:
+            return None
+        try:
+            cash = self.ledger.get_balance()
+        except Exception:  # noqa: BLE001
+            cash = 0.0
+        try:
+            burn_rate = self.ledger.recent_burn_rate(window_hours=24)
+        except Exception:  # noqa: BLE001
+            burn_rate = 0.0
+        return {
+            "cash": float(cash),
+            "burn_rate": float(burn_rate),
+            "deadline": targets.deadline,
+            "targets": targets.model_dump(mode="json"),
+        }
+
+    def run_target_feasibility_review(
+        self,
+        *,
+        skip_llm: bool | None = None,
+    ) -> dict[str, Any] | None:
+        """Run a CEO+CFO+CoS feasibility pass on the founder's targets.
+
+        Produces one ``approval_request(action_type='target_feasibility',
+        severity='high')`` carrying a ``TargetReview`` payload:
+
+            {
+                "cfo_view": "...",
+                "cos_view": "...",
+                "ceo_proposal": "...",
+                "rationale": "...",
+                "original_targets": {...},
+                "recommended_targets": {...}
+            }
+
+        The founder then approves (adopt recommended), rejects (keep
+        original), or revises (counter-proposal flow) the request.
+
+        ``skip_llm`` short-circuits the three LLM calls and falls back to
+        a heuristic recommendation. Defaults to ``True`` when
+        ``KOMPANY_TEST_MODE=1`` so tests don't need a live API key.
+        Returns ``None`` if no founder targets are set yet.
+        """
+        import os
+
+        founder = get_targets_state(self.db, "founder")
+        if founder is None:
+            return None
+
+        if skip_llm is None:
+            skip_llm = os.environ.get("KOMPANY_TEST_MODE", "") == "1"
+
+        try:
+            cash = self.ledger.get_balance()
+        except Exception:  # pragma: no cover
+            cash = founder.initial_budget
+
+        # Compute the heuristic recommendation up-front — even when LLMs
+        # run, we use it as the baseline numeric proposal so the approval
+        # payload always has parseable numbers.
+        recommended = self._heuristic_recommend(founder, cash=cash)
+
+        cfo_view = ""
+        cos_view = ""
+        ceo_proposal = ""
+        rationale = ""
+
+        if skip_llm:
+            cfo_view = (
+                f"At current cash ${cash:,.0f} and template defaults, "
+                f"initial_budget ${founder.initial_budget:,.0f} is workable."
+            )
+            cos_view = (
+                f"Revenue target ${founder.revenue_target:,.0f} is "
+                f"{'ambitious' if founder.revenue_target > 5000 else 'reachable'} "
+                f"in the proposed window."
+            )
+            ceo_proposal = (
+                f"Compromise: revenue ${recommended.revenue_target:,.0f}, "
+                f"deadline {recommended.deadline or 'unset'}."
+            )
+            rationale = "test-mode heuristic"
+        else:
+            try:
+                cfo_view, cos_view, ceo_proposal, rationale = (
+                    self._llm_target_review(founder, cash=cash, recommended=recommended)
+                )
+            except Exception as exc:  # noqa: BLE001
+                # Never let a flaky LLM kill onboarding; fall back to the
+                # heuristic with a note so the founder sees a useful
+                # approval anyway.
+                cfo_view = f"(LLM unavailable: {exc})"
+                cos_view = "Falling back to heuristic recommendation."
+                ceo_proposal = (
+                    f"Heuristic compromise: revenue "
+                    f"${recommended.revenue_target:,.0f}."
+                )
+                rationale = "llm_error_fallback"
+
+        payload: dict[str, Any] = {
+            "cfo_view": cfo_view,
+            "cos_view": cos_view,
+            "ceo_proposal": ceo_proposal,
+            "rationale": rationale,
+            "original_targets": founder.model_dump(mode="json"),
+            "recommended_targets": recommended.model_dump(mode="json"),
+        }
+        summary = (
+            f"Team feasibility review for ${founder.revenue_target:,.0f} "
+            f"revenue / "
+            f"{founder.customer_target if founder.customer_target is not None else '—'} "
+            f"customers / "
+            f"{founder.deadline or 'no deadline'}"
+        )
+        request = ApprovalRequest(
+            action_type="target_feasibility",
+            summary=summary,
+            payload=payload,
+            severity="high",
+            requested_by="ceo",
+        )
+        created = self.approvals.create(request)
+        set_targets_review_thread_id(self.db, created.id)
+        # Mirror the recommendation as a ``team_proposal`` snapshot so the
+        # founder can read ``kompany target show`` and see the trio.
+        self.set_targets(
+            CompanyTargets(
+                initial_budget=recommended.initial_budget,
+                revenue_target=recommended.revenue_target,
+                customer_target=recommended.customer_target,
+                deadline=recommended.deadline,
+                source="team_proposal",
+            )
+        )
+        self.audit.record(
+            event_type="company.target_feasibility_requested",
+            action="Team produced feasibility recommendation",
+            detail={
+                "approval_id": created.id,
+                "original": payload["original_targets"],
+                "recommended": payload["recommended_targets"],
+            },
+        )
+        return created.model_dump(mode="json")
+
+    def _heuristic_recommend(
+        self,
+        founder: CompanyTargets,
+        *,
+        cash: float | None,
+    ) -> CompanyTargets:
+        """Produce a numerically conservative counter-proposal.
+
+        Heuristic: if revenue_target > 5x initial_budget, recommend 60%
+        of revenue_target. Pass deadline + customer_target through
+        unchanged.
+        """
+        rev = founder.revenue_target
+        if (
+            founder.initial_budget > 0
+            and rev > founder.initial_budget * 5
+        ):
+            rev = round(founder.revenue_target * 0.6, 2)
+        return CompanyTargets(
+            initial_budget=founder.initial_budget,
+            revenue_target=rev,
+            customer_target=founder.customer_target,
+            deadline=founder.deadline,
+            source="team_proposal",
+        )
+
+    def _llm_target_review(
+        self,
+        founder: CompanyTargets,
+        *,
+        cash: float,
+        recommended: CompanyTargets,
+    ) -> tuple[str, str, str, str]:
+        """Run CFO+CoS+CEO LLM perspectives in sequence.
+
+        Each call is intentionally short (max_tokens=300) — the prompt is
+        narrow ("one sentence") so total cost stays under a few cents
+        even for apex-tier providers.
+        """
+        # The trio share a common header so the LLM has identical context.
+        # Glossary is injected first so the CFO/CoS/CEO calls reuse the
+        # founder's canonical terminology in their feedback.
+        glossary_block = self._compose_glossary_summary()
+        header_parts: list[str] = []
+        if glossary_block:
+            header_parts.append(glossary_block)
+            header_parts.append("")
+        header_parts.append("Founder's onboarding targets:")
+        header_parts.append(f"- initial_budget: ${founder.initial_budget:,.0f}")
+        header_parts.append(f"- revenue_target: ${founder.revenue_target:,.0f}")
+        header_parts.append(f"- customer_target: {founder.customer_target}")
+        header_parts.append(f"- deadline: {founder.deadline or 'unset'}")
+        header_parts.append(f"- current cash: ${cash:,.0f}")
+        header = "\n".join(header_parts) + "\n"
+        cfo = self.registry.get("cfo")
+        cos = self.registry.get("cos")
+        ceo = self.registry.get(
+            "ceo", company_state=self.get_company_state()
+        )
+        cfo_resp = cfo.call(
+            prompt=(
+                header
+                + "\nAs CFO, one sentence: does the initial_budget cover "
+                "expected burn through the deadline?"
+            ),
+            max_tokens=300,
+        )
+        cos_resp = cos.call(
+            prompt=(
+                header
+                + "\nAs Chief of Staff, one sentence: is the revenue/customer "
+                "target realistic for a cold start in this timeframe?"
+            ),
+            max_tokens=300,
+        )
+        ceo_resp = ceo.call(
+            prompt=(
+                header
+                + f"\nTeam's heuristic recommendation: revenue "
+                f"${recommended.revenue_target:,.0f}.\n"
+                "As CEO, one sentence: propose a compromise revenue target "
+                "and (optionally) a different deadline."
+            ),
+            max_tokens=300,
+        )
+        return (
+            (cfo_resp.text or "").strip(),
+            (cos_resp.text or "").strip(),
+            (ceo_resp.text or "").strip(),
+            "llm_review",
+        )
+
+    def _target_feasibility_revision_handler(
+        self,
+        original: ApprovalRequest,
+        hint: str,
+    ) -> ApprovalRequest:
+        """Founder counter-proposal: replace recommended_targets with founder numbers.
+
+        The ``hint`` text is the founder's verbal counter. We do *not*
+        try to parse it into numbers here — the parsing would be fragile
+        and the next approval still gives the founder a chance to refine.
+        Instead we copy the original payload, stamp the hint into a new
+        ``revision_hint`` field, and re-submit ``pending`` so the
+        approve/reject paths still write the right ``agreed`` state.
+        """
+        new_payload = {**(original.payload or {}), "revision_hint": hint}
+        successor = ApprovalRequest(
+            action_type=original.action_type,
+            summary=f"[Revised] {original.summary}",
+            payload=new_payload,
+            directive_id=original.directive_id,
+            project_id=original.project_id,
+            requested_by=original.requested_by,
+            severity=original.severity,
+            predecessor_id=original.id,
+        )
+        created = self.approvals.create(successor)
+        # Update the review thread pointer so ``targets show`` and the
+        # episode payload reflect the latest approval.
+        set_targets_review_thread_id(self.db, created.id)
+        return created
+
+    def _finalize_target_feasibility(
+        self,
+        request: ApprovalRequest,
+        *,
+        outcome: str,
+    ) -> None:
+        """Hook called after approve_request/reject_request resolves a
+        ``target_feasibility`` row.
+
+        On approve → write recommended_targets as ``agreed``.
+        On reject → write original_targets (founder's) as ``agreed``.
+        """
+        payload = request.payload or {}
+        try:
+            if outcome == "approved":
+                src = payload.get("recommended_targets") or {}
+            else:
+                src = payload.get("original_targets") or {}
+            agreed = CompanyTargets(
+                initial_budget=float(src.get("initial_budget", 0.0) or 0.0),
+                revenue_target=float(src.get("revenue_target", 0.0) or 0.0),
+                customer_target=src.get("customer_target"),
+                deadline=src.get("deadline"),
+                source="agreed",
+            )
+        except Exception:
+            return
+        self.set_targets(agreed)
+        self.audit.record(
+            event_type="company.targets_agreed",
+            action="Founder finalized target feasibility review",
+            detail={
+                "approval_id": request.id,
+                "outcome": outcome,
+                "agreed": agreed.model_dump(mode="json"),
+            },
+        )
+
+    def _finalize_glossary_review(
+        self,
+        request: ApprovalRequest,
+        *,
+        outcome: str,
+    ) -> None:
+        """Post-resolve hook for ``glossary_review`` approvals.
+
+        On approve → close the matching ``glossary_drift_alert`` health
+        events as resolved and write a ``glossary.drift_resolved`` audit
+        event. No glossary mutation occurs by default — the founder is
+        acknowledging that the drift was real and the canonical terms
+        are correct as-is; if they wanted to change the canonical word
+        they would edit the glossary directly.
+
+        On reject → also close the health events, but the audit detail
+        tags the outcome as ``"dismissed_false_positive"`` so distillation
+        learns this synonym pair is fine in practice.
+        """
+        payload = request.payload or {}
+        project_id = request.project_id
+        drift_count = 0
+        drifts = payload.get("drifts")
+        if isinstance(drifts, list):
+            drift_count = len(drifts)
+
+        # Close matching open ``glossary_drift_alert`` rows. We match by
+        # ``project_id`` + ``approval_id`` to avoid clobbering unrelated
+        # drift alerts on the same project.
+        closed = 0
+        if project_id is not None:
+            try:
+                events = self.health_events.list_for_project(project_id)
+            except Exception:  # pragma: no cover - defensive
+                events = []
+            for ev in events:
+                if ev.get("kind") != "glossary_drift_alert":
+                    continue
+                if ev.get("status") != "open":
+                    continue
+                detail = ev.get("detail") if isinstance(ev.get("detail"), dict) else {}
+                if detail.get("approval_id") and detail.get("approval_id") != request.id:
+                    continue
+                try:
+                    self.health_events.resolve(
+                        event_id=ev["id"],
+                        action="continue" if outcome == "approved" else "dismiss",
+                        resolved_by="founder",
+                    )
+                    closed += 1
+                except Exception:  # pragma: no cover - defensive
+                    continue
+
+        self.audit.record(
+            event_type=(
+                "glossary.drift_resolved"
+                if outcome == "approved"
+                else "glossary.drift_dismissed"
+            ),
+            action=(
+                f"Founder {'accepted' if outcome == 'approved' else 'dismissed'} "
+                f"{drift_count} drift hit(s) for approval {request.id}"
+            ),
+            detail={
+                "approval_id": request.id,
+                "outcome": outcome,
+                "drift_count": drift_count,
+                "events_closed": closed,
+            },
+            project_id=project_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Glossary drift scan + approval (glossary-and-drift-detection 05-19)
+    # ------------------------------------------------------------------
+
+    def _run_glossary_drift_scan(
+        self,
+        *,
+        project_id: str,
+        reflections: list[Any],
+    ) -> dict[str, Any] | None:
+        """Detect glossary drift on the just-finished retrospective output.
+
+        Pulls the audit events tied to this project (for stringified
+        ``detail`` scans) and the project's decisions, then defers to
+        :func:`kompany.agents.cos_glossary_scan.scan_drift`.
+
+        If any drift is detected:
+
+        * Write one ``glossary_drift_alert`` health event via
+          :meth:`Watchdog.record_glossary_drift`.
+        * Create one ``approval_request(action_type='glossary_review')``
+          carrying ``drifts`` + ``suggested_corrections``.
+        * Mirror an audit event for the timeline.
+
+        Returns a summary dict ``{"drift_count", "approval_id"}`` or
+        ``None`` when the scan was a no-op (empty glossary or zero hits).
+        """
+        from kompany.agents.cos_glossary_scan import (
+            build_suggested_corrections,
+            scan_drift,
+        )
+
+        glossary = self.glossary.load()
+        if len(glossary) == 0:
+            return None
+
+        # Pull decisions and audit events tied to the project. We use the
+        # raw DB rows (rather than the materialised episode payload)
+        # because materialisation hasn't happened yet — that's the point
+        # of running the scan first.
+        decisions_rows = self.db.execute(
+            "SELECT id, agents_involved, result FROM decisions "
+            "WHERE result LIKE ? ORDER BY timestamp",
+            (f"%{project_id}%",),
+        ).fetchall()
+        decisions: list[dict[str, Any]] = []
+        for row in decisions_rows:
+            try:
+                result_obj = (
+                    __import__("json").loads(row["result"]) if row["result"] else {}
+                )
+            except (TypeError, ValueError):
+                result_obj = {}
+            try:
+                agents_involved = __import__("json").loads(row["agents_involved"])
+                if not isinstance(agents_involved, list):
+                    agents_involved = []
+            except (TypeError, ValueError):
+                agents_involved = []
+            summary_text = (
+                result_obj.get("message")
+                if isinstance(result_obj, dict) and "message" in result_obj
+                else str(result_obj)
+            )
+            decisions.append({
+                "summary": str(summary_text or ""),
+                "agents_involved": agents_involved,
+            })
+
+        audit_rows = self.db.execute(
+            "SELECT event_type, detail FROM audit_log WHERE project_id = ? "
+            "ORDER BY id",
+            (project_id,),
+        ).fetchall()
+        audit_events: list[dict[str, Any]] = []
+        for row in audit_rows:
+            detail_obj: dict[str, Any] = {}
+            if row["detail"]:
+                try:
+                    parsed = __import__("json").loads(row["detail"])
+                    if isinstance(parsed, dict):
+                        detail_obj = parsed
+                    else:
+                        detail_obj = {"value": parsed}
+                except (TypeError, ValueError):
+                    detail_obj = {"raw": row["detail"]}
+            audit_events.append({
+                "type": row["event_type"],
+                "detail": detail_obj,
+            })
+
+        drifts = scan_drift(
+            glossary=glossary,
+            reflections=reflections,
+            decisions=decisions,
+            audit_events=audit_events,
+        )
+        if not drifts:
+            return None
+
+        suggestions = build_suggested_corrections(drifts, glossary)
+        payload = {
+            "project_id": project_id,
+            "drifts": [d.model_dump(mode="json") for d in drifts],
+            "suggested_corrections": suggestions,
+        }
+        # Build a short founder-facing summary line for the inbox.
+        roles_seen = ", ".join(sorted({d.agent_role for d in drifts}))
+        summary = (
+            f"Glossary drift in episode {project_id}: "
+            f"{len(drifts)} hit(s) across {roles_seen or 'unknown agents'}."
+        )
+        approval = self.approvals.create(
+            ApprovalRequest(
+                action_type="glossary_review",
+                summary=summary,
+                payload=payload,
+                project_id=project_id,
+                severity="medium",
+                requested_by="cos",
+            )
+        )
+        # Record the matching health event after the approval exists so we
+        # can cross-link them in both directions.
+        self.watchdog.record_glossary_drift(
+            episode_id=project_id,
+            drifts=drifts,
+            project_id=project_id,
+            approval_id=approval.id,
+        )
+        self.audit.record(
+            event_type="glossary.drift_detected",
+            action=f"CoS detected {len(drifts)} glossary drift hit(s)",
+            detail={
+                "project_id": project_id,
+                "drift_count": len(drifts),
+                "approval_id": approval.id,
+                "roles": sorted({d.agent_role for d in drifts}),
+            },
+            project_id=project_id,
+        )
+        return {
+            "drift_count": len(drifts),
+            "approval_id": approval.id,
+        }
+
+    def _glossary_review_revision_handler(
+        self,
+        original: ApprovalRequest,
+        hint: str,
+    ) -> ApprovalRequest:
+        """Founder counter-proposal on a glossary drift alert.
+
+        Copies the payload, stamps the hint into ``revision_hint`` and
+        re-issues as ``pending``. The founder can then approve a slimmer
+        list ("just the customer correction, drop the MRR one") on the
+        next pass. We deliberately don't try to parse partial-accept
+        instructions from free-form text — the founder gets another
+        round of approve / reject / revise on the successor.
+        """
+        new_payload = {**(original.payload or {}), "revision_hint": hint}
+        successor = ApprovalRequest(
+            action_type=original.action_type,
+            summary=f"[Revised] {original.summary}",
+            payload=new_payload,
+            directive_id=original.directive_id,
+            project_id=original.project_id,
+            requested_by=original.requested_by,
+            severity=original.severity,
+            predecessor_id=original.id,
+        )
+        return self.approvals.create(successor)
 
     def _handle_acquisition(self, directive, classification, ceo) -> DirectiveResult:
         """Handle ACQUISITION directives — must deliver, never downgrade."""

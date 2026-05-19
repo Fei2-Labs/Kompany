@@ -100,6 +100,12 @@ def test_complete_with_valid_body_returns_ready(
         template_id: str,
         directive: str | None = None,
         base_url: str | None = None,
+        # Mission-targets task (05-19) — four optional knobs added to the
+        # headless contract.
+        initial_budget: float | None = None,
+        revenue_target: float | None = None,
+        customer_target: int | None = None,
+        deadline: str | None = None,
     ) -> OnboardResult:
         captured["call"] = {
             "provider": provider,
@@ -108,6 +114,10 @@ def test_complete_with_valid_body_returns_ready(
             "directive": directive,
             "base_url": base_url,
             "data_dir": str(data_dir),
+            "initial_budget": initial_budget,
+            "revenue_target": revenue_target,
+            "customer_target": customer_target,
+            "deadline": deadline,
         }
         return OnboardResult(
             status="completed",

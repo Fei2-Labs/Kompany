@@ -4,6 +4,8 @@
   "mission_title": "Run a consulting firm on retainers",
   "mission_md_path": "mission.md",
   "initial_budget": 3000.0,
+  "revenue_target": 15000.0,
+  "customer_target": 5,
   "enabled_agents": [
     "ceo", "cfo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"
   ],
@@ -16,5 +18,27 @@
     "Land our first 3 paying retainer clients",
     "Set up monthly retainer billing and a client onboarding doc"
   ],
-  "rpg_theme": "professional_office_suite"
+  "rpg_theme": "professional_office_suite",
+  "glossary": [
+    {
+      "term": "client",
+      "definition": "an organization paying us under a signed engagement",
+      "forbidden_synonyms": ["customer", "user", "buyer"]
+    },
+    {
+      "term": "engagement",
+      "definition": "a scoped piece of work with a defined start, end, and fee",
+      "forbidden_synonyms": ["project", "gig", "contract"]
+    },
+    {
+      "term": "retainer",
+      "definition": "a recurring monthly fee for guaranteed access to our team",
+      "forbidden_synonyms": ["subscription", "monthly fee", "stipend"]
+    },
+    {
+      "term": "deliverable",
+      "definition": "a concrete artifact handed to the client to close a milestone",
+      "forbidden_synonyms": ["output", "result", "thing"]
+    }
+  ]
 }

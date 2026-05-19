@@ -37,14 +37,18 @@ from kompany.state.episode_payload import (
     AuditEvent,
     DecisionEntry,
     EpisodePayloadV1,
+    GlossaryDriftEntry,
     HealthEvent,
     LedgerSummary,
     LifecycleEvent,
     ProjectMeta,
     ReflectionEntry,
+    TargetsBundleEntry,
+    TargetsSnapshot,
     TaskEntry,
 )
 from kompany.state.health_events import HealthEvents
+from kompany.state.targets import get_bundle as _get_targets_bundle
 
 
 # Audit event types that are deliberately *included* in episode payloads.
@@ -117,6 +121,8 @@ class Episodes:
         reflections = self._collect_reflections(project_id)
         health_events = self._collect_health_events(project_id)
         approval_events = self._collect_approval_events(project_id)
+        targets_bundle = self._collect_targets_bundle()
+        glossary_drift = self._collect_glossary_drift(health_events)
 
         return EpisodePayloadV1(
             project_meta=project_meta,
@@ -129,6 +135,8 @@ class Episodes:
             run_ids=run_ids,
             health_events=health_events,
             approval_events=approval_events,
+            targets=targets_bundle,
+            glossary_drift=glossary_drift,
         )
 
     # ------------------------------------------------------------------
@@ -564,6 +572,93 @@ class Episodes:
             )
             for row in rows
         ]
+
+    def _collect_glossary_drift(
+        self,
+        health_events: list[HealthEvent],
+    ) -> list[GlossaryDriftEntry] | None:
+        """Surface glossary drift hits this project recorded for distillation.
+
+        Drift hits are written by the CoS retrospective scanner as part of
+        the ``glossary_drift_alert`` health event's ``detail.drifts`` list.
+        We aggregate every alert tied to the project into one flat list so
+        distillation can scan the slot without re-walking ``health_events``.
+        Returns ``None`` (not ``[]``) when no alerts exist so older payloads
+        remain byte-equivalent on rebuild.
+        """
+        collected: list[GlossaryDriftEntry] = []
+        for ev in health_events:
+            if ev.kind != "glossary_drift_alert":
+                continue
+            drifts = ev.detail.get("drifts") if isinstance(ev.detail, dict) else None
+            if not isinstance(drifts, list):
+                continue
+            for raw in drifts:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    collected.append(GlossaryDriftEntry.model_validate(raw))
+                except Exception:  # noqa: BLE001 — skip individual bad rows
+                    continue
+        if not collected:
+            return None
+        return collected
+
+    def _collect_targets_bundle(self) -> TargetsBundleEntry | None:
+        """Snapshot the three target states + the review approval thread id.
+
+        Reads via :func:`kompany.state.targets.get_bundle`. Returns
+        ``None`` only when no founder/proposal/agreed row and no review
+        thread id exist — that keeps payloads materialised against
+        legacy data unchanged.
+        """
+        try:
+            bundle = _get_targets_bundle(self.db)
+        except Exception:  # noqa: BLE001 — never let targets break materialize
+            return None
+
+        def _to_snapshot(model) -> TargetsSnapshot | None:
+            if model is None:
+                return None
+            return TargetsSnapshot(
+                initial_budget=float(model.initial_budget),
+                revenue_target=float(model.revenue_target),
+                customer_target=model.customer_target,
+                deadline=model.deadline,
+                source=model.source,
+            )
+
+        founder_snap = _to_snapshot(bundle.founder)
+        proposal_snap = _to_snapshot(bundle.proposal)
+        agreed_snap = _to_snapshot(bundle.agreed)
+        review_thread_id = bundle.review_thread_id
+
+        # If absolutely nothing has been written, return None so older
+        # payloads stay byte-equivalent.
+        # ``get_bundle`` returns a default founder snapshot (all zeros)
+        # even when no row exists, so we check for *any* non-default
+        # signal: a non-zero number, a non-None deadline, a proposal /
+        # agreed row, or a review thread id.
+        meaningful_founder = founder_snap is not None and (
+            founder_snap.initial_budget > 0
+            or founder_snap.revenue_target > 0
+            or founder_snap.customer_target is not None
+            or founder_snap.deadline is not None
+        )
+        if (
+            not meaningful_founder
+            and proposal_snap is None
+            and agreed_snap is None
+            and review_thread_id is None
+        ):
+            return None
+
+        return TargetsBundleEntry(
+            founder=founder_snap if meaningful_founder else None,
+            proposal=proposal_snap,
+            agreed=agreed_snap,
+            review_thread_id=review_thread_id,
+        )
 
     def _build_summary(self, payload: EpisodePayloadV1) -> str:
         """One-line human summary kept even after a row is trimmed."""

@@ -124,6 +124,61 @@
         </div>
       </div>
 
+      <div class="onb-field onb-targets" data-label="COMPANY TARGETS">
+        <label class="onb-targets-label">// COMPANY TARGETS</label>
+        <div class="onb-targets-grid">
+          <div class="onb-target-cell">
+            <label for="onb-budget">initial budget ($)</label>
+            <input
+              id="onb-budget"
+              name="initial_budget"
+              type="number"
+              min="0"
+              step="100"
+              autocomplete="off"
+              placeholder="5000"
+            >
+          </div>
+          <div class="onb-target-cell">
+            <label for="onb-revenue-target">revenue target ($)</label>
+            <input
+              id="onb-revenue-target"
+              name="revenue_target"
+              type="number"
+              min="0"
+              step="100"
+              autocomplete="off"
+              placeholder="10000"
+            >
+          </div>
+          <div class="onb-target-cell">
+            <label for="onb-customer-target">customer target (optional)</label>
+            <input
+              id="onb-customer-target"
+              name="customer_target"
+              type="number"
+              min="0"
+              step="1"
+              autocomplete="off"
+              placeholder="50"
+            >
+          </div>
+          <div class="onb-target-cell">
+            <label for="onb-deadline">deadline</label>
+            <input
+              id="onb-deadline"
+              name="deadline"
+              type="date"
+              autocomplete="off"
+              class="onb-date"
+            >
+          </div>
+        </div>
+        <p class="onb-hint">
+          Defaults follow your starter template. Deadline defaults to today + 90 days.
+        </p>
+      </div>
+
       <div class="onb-field">
         <label for="onb-directive">// FIRST DIRECTIVE (OPTIONAL)</label>
         <textarea

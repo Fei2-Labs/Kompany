@@ -1,4 +1,9 @@
-// Header stats: cash, burn, run, episode count, brand.
+// Header stats: cash, burn, rev, days, run, episode count, brand.
+//
+// Mission-targets task (05-19) added the ``rev`` and ``days`` slots so
+// the cyberpunk header surfaces the agreed revenue target + remaining
+// runway alongside cash on hand. Data flows from ``GET /targets``;
+// failures degrade to ``--`` rather than blocking the header render.
 
 function fmtCash(v) {
   const n = Number(v || 0);
@@ -13,6 +18,94 @@ function fmtBurn(v) {
   return `$${Number(v).toFixed(2)}/h`;
 }
 
+function fmtMoney(v) {
+  const n = Number(v || 0);
+  return `$${n.toFixed(0)}`;
+}
+
+// ``revenue_so_far`` isn't tracked as a first-class metric yet — we
+// derive it from the running ``total_income`` until a richer revenue
+// stream model lands. For now ``rev: $X / $Y`` shows current income
+// against the agreed revenue target so the cyberpunk header still
+// renders the right kind of progress bar.
+function renderTargets(targetsPayload, status) {
+  const revEl = document.getElementById("stat-rev");
+  const daysEl = document.getElementById("stat-days");
+  if (!targetsPayload) {
+    if (revEl) revEl.textContent = "--";
+    if (daysEl) daysEl.textContent = "--";
+    return;
+  }
+  const auth = targetsPayload.authoritative || {};
+  const revTarget = Number(auth.revenue_target || 0);
+  // Prefer status.total_income (already a positive number in /status)
+  // and fall back to balance for installs that pre-date that field.
+  const revSoFar = Number(
+    (status && (status.total_income != null ? status.total_income : status.balance)) || 0,
+  );
+  if (revEl) {
+    if (revTarget > 0) {
+      revEl.textContent = `${fmtMoney(revSoFar)} / ${fmtMoney(revTarget)}`;
+    } else {
+      revEl.textContent = "--";
+    }
+  }
+
+  if (daysEl) {
+    const deadline = auth.deadline;
+    if (!deadline) {
+      daysEl.textContent = "--";
+      return;
+    }
+    const dl = new Date(deadline);
+    if (Number.isNaN(dl.getTime())) {
+      daysEl.textContent = "--";
+      return;
+    }
+    const now = new Date();
+    const totalMs = dl - now;
+    const totalDays = Math.max(0, Math.ceil(totalMs / (1000 * 60 * 60 * 24)));
+    // We don't have "duration from start" persisted; show N remaining
+    // out of N + days elapsed since the founder set the deadline. The
+    // founder's company-creation timestamp comes from status.created_at
+    // when available.
+    let denom = totalDays;
+    if (status && status.created_at) {
+      const start = new Date(status.created_at);
+      if (!Number.isNaN(start.getTime())) {
+        const elapsed = Math.max(
+          0,
+          Math.floor((now - start) / (1000 * 60 * 60 * 24)),
+        );
+        denom = totalDays + elapsed;
+      }
+    }
+    daysEl.textContent = denom > 0 ? `${totalDays}/${denom}` : `${totalDays}`;
+  }
+}
+
+let _targetsCache = null;
+let _targetsLastFetch = 0;
+const _TARGETS_TTL_MS = 30_000;
+
+async function fetchTargets() {
+  const now = Date.now();
+  if (_targetsCache && now - _targetsLastFetch < _TARGETS_TTL_MS) {
+    return _targetsCache;
+  }
+  try {
+    const res = await fetch("/targets", {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return _targetsCache;
+    _targetsCache = await res.json();
+    _targetsLastFetch = now;
+    return _targetsCache;
+  } catch (_) {
+    return _targetsCache;
+  }
+}
+
 export function renderLedger(status) {
   const brand = document.getElementById("brand-name");
   const cash = document.getElementById("stat-cash");
@@ -25,4 +118,8 @@ export function renderLedger(status) {
   if (burn) burn.textContent = fmtBurn(status.burn_rate);
   if (run) run.textContent = status.run_id ? String(status.run_id).slice(0, 10) + "..." : "--";
   if (eps) eps.textContent = status.episode_count != null ? String(status.episode_count) : String(status.active_projects || 0);
+
+  // Targets is async — render best-effort. Failures keep the existing
+  // dashes in place rather than disturbing the header layout.
+  fetchTargets().then((payload) => renderTargets(payload, status));
 }

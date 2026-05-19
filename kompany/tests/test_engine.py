@@ -159,7 +159,13 @@ def test_process_directive_writes_audit_events_and_status(engine):
     from kompany.core.directive import DirectiveResult
 
     class FakeCEO:
-        def classify(self, raw_input, directive_id=None):
+        def classify(
+            self,
+            raw_input,
+            directive_id=None,
+            targets_summary=None,
+            glossary_summary=None,
+        ):
             return DirectiveClassification(
                 directive_type="informational",
                 reasoning="status query",

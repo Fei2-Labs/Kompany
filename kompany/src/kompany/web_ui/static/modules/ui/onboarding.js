@@ -12,6 +12,64 @@ const providerInput = document.getElementById("onb-provider"); // hidden
 const baseUrlField = document.getElementById("onb-base-url-field");
 const baseUrlInput = document.getElementById("onb-base-url");
 
+// Mission-targets task (05-19): the four quantitative target fields.
+const budgetInput = document.getElementById("onb-budget");
+const revenueInput = document.getElementById("onb-revenue-target");
+const customerInput = document.getElementById("onb-customer-target");
+const deadlineInput = document.getElementById("onb-deadline");
+
+// Default the deadline to today + 90 days so a fresh founder isn't
+// staring at an empty date picker. They can edit before submit.
+function setDefaultDeadline() {
+  if (!deadlineInput || deadlineInput.value) return;
+  const d = new Date();
+  d.setDate(d.getDate() + 90);
+  // ``toISOString`` is UTC; we only want YYYY-MM-DD for the date input.
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  deadlineInput.value = `${yyyy}-${mm}-${dd}`;
+}
+
+// Whenever the template radio changes, fetch that template's manifest
+// and populate budget / revenue / customer placeholders (and values, if
+// they're still empty). Founder edits are preserved — we never
+// overwrite a value the user typed.
+async function syncTemplateDefaults(templateId) {
+  if (!templateId) return;
+  let manifest;
+  try {
+    const res = await fetch(
+      `/templates/${encodeURIComponent(templateId)}`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) return;
+    manifest = await res.json();
+  } catch (_) {
+    return;
+  }
+  if (!manifest || typeof manifest !== "object") return;
+  if (budgetInput && manifest.initial_budget != null) {
+    const v = String(manifest.initial_budget);
+    budgetInput.placeholder = v;
+    if (!budgetInput.value) budgetInput.value = v;
+  }
+  if (revenueInput && manifest.revenue_target != null) {
+    const v = String(manifest.revenue_target);
+    revenueInput.placeholder = v;
+    if (!revenueInput.value) revenueInput.value = v;
+  }
+  if (customerInput) {
+    if (manifest.customer_target != null) {
+      const v = String(manifest.customer_target);
+      customerInput.placeholder = v;
+      if (!customerInput.value) customerInput.value = v;
+    } else {
+      customerInput.placeholder = "(optional)";
+    }
+  }
+}
+
 function syncBaseUrlVisibility() {
   const isCustom = providerInput.value === "custom";
   baseUrlField.hidden = !isCustom;
@@ -103,6 +161,19 @@ initCombobox("onb-provider-combobox");
 providerInput.addEventListener("change", syncBaseUrlVisibility);
 syncBaseUrlVisibility();
 
+// Mission-targets bootstrap: set the 90-day default + populate from the
+// currently-selected starter template (whichever radio was pre-checked).
+setDefaultDeadline();
+const initialTemplate = form.querySelector(
+  'input[name="template_id"]:checked',
+);
+if (initialTemplate) syncTemplateDefaults(initialTemplate.value);
+form.querySelectorAll('input[name="template_id"]').forEach((radio) => {
+  radio.addEventListener("change", (evt) => {
+    if (evt.target.checked) syncTemplateDefaults(evt.target.value);
+  });
+});
+
 let spinnerTimer = null;
 const spinnerFrames = ["█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
 
@@ -159,6 +230,18 @@ async function handleSubmit(evt) {
   if (directive) body.directive = directive;
   const baseUrl = (data.get("base_url") || "").toString().trim();
   if (baseUrl) body.base_url = baseUrl;
+
+  // Mission-targets task (05-19): the four quantitative fields. Empty
+  // strings stay omitted so the server's "fall back to template
+  // manifest" path stays the default.
+  const budgetRaw = (data.get("initial_budget") || "").toString().trim();
+  if (budgetRaw) body.initial_budget = Number(budgetRaw);
+  const revRaw = (data.get("revenue_target") || "").toString().trim();
+  if (revRaw) body.revenue_target = Number(revRaw);
+  const custRaw = (data.get("customer_target") || "").toString().trim();
+  if (custRaw) body.customer_target = Number(custRaw);
+  const deadlineRaw = (data.get("deadline") || "").toString().trim();
+  if (deadlineRaw) body.deadline = deadlineRaw;
 
   if (!body.provider || !body.api_key || !body.template_id) {
     showError("provider, api_key, and template_id are required");

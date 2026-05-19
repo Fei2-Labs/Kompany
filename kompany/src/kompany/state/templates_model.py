@@ -26,6 +26,27 @@ KNOWN_AGENT_ROLES: frozenset[str] = frozenset({
 })
 
 
+class TemplateGlossaryEntry(BaseModel):
+    """One canonical term shipped inside a template manifest.
+
+    Templates ship a curated set of company-specific terminology so the
+    founder lands on day one with a baseline glossary instead of an
+    empty drift scanner. The runtime stamps each row with
+    ``added_at=now`` + ``added_by="template"`` when the template is
+    applied — see :meth:`kompany.state.glossary.GlossaryService.bulk_install_from_template`.
+
+    Kept structurally identical to :class:`kompany.state.glossary.GlossaryEntry`
+    minus the audit columns (added by the service) so manifest authors
+    don't need to know about per-row timestamps.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    term: str = Field(..., min_length=1)
+    definition: str = Field(..., min_length=1)
+    forbidden_synonyms: list[str] = Field(default_factory=list)
+
+
 class CompanyTemplate(BaseModel):
     """A ready-to-play company preset.
 
@@ -41,10 +62,21 @@ class CompanyTemplate(BaseModel):
     mission_title: str = Field(..., min_length=1)
     mission_md_path: str = Field(..., min_length=1)
     initial_budget: float = Field(..., ge=0.0)
+    # Quantitative target presets — additive to the v1 manifest schema so
+    # older community templates without these fields still parse.
+    # ``customer_target = None`` means "revenue-only goal".
+    revenue_target: float = Field(default=0.0, ge=0.0)
+    customer_target: int | None = Field(default=None, ge=0)
     enabled_agents: list[str] = Field(default_factory=list)
     agent_config_overrides: dict[str, Any] = Field(default_factory=dict)
     suggested_directives: list[str] = Field(default_factory=list)
     rpg_theme: str = ""
+    # Pre-populated company glossary (founder-defined canonical terms +
+    # forbidden synonyms). Optional + additive — community templates that
+    # pre-date this field simply load with an empty glossary, and the
+    # founder can curate via ``kompany glossary add`` afterwards. Added
+    # by glossary-and-drift-detection task (05-19).
+    glossary: list[TemplateGlossaryEntry] = Field(default_factory=list)
 
     @field_validator("enabled_agents")
     @classmethod

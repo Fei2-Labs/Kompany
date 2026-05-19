@@ -76,9 +76,36 @@ class CEOAgent(BaseAgent):
         )
         return self.with_soul_context(prompt)
 
-    def classify(self, raw_input: str, directive_id: str | None = None) -> DirectiveClassification:
-        """Classify a raw directive from the Master."""
+    def classify(
+        self,
+        raw_input: str,
+        directive_id: str | None = None,
+        targets_summary: str | None = None,
+        glossary_summary: str | None = None,
+    ) -> DirectiveClassification:
+        """Classify a raw directive from the Master.
+
+        ``targets_summary`` is a one-paragraph render of the agreed
+        company targets (revenue / customer / deadline). The engine
+        injects it so CEO classification can weigh budget asks against
+        the explicit revenue goal — produced by
+        :meth:`kompany.core.engine.KompanyEngine._compose_targets_summary`.
+
+        ``glossary_summary`` is a multi-line render of the company
+        glossary (canonical term + forbidden synonyms) so the CEO's
+        classification text adopts founder-defined terminology. Produced
+        by :meth:`kompany.core.engine.KompanyEngine._compose_glossary_summary`.
+        Empty string when no glossary is configured.
+        """
+        glossary_block = (
+            f"{glossary_summary}\n\n" if glossary_summary else ""
+        )
+        target_block = (
+            f"{targets_summary}\n\n" if targets_summary else ""
+        )
         prompt = (
+            f"{glossary_block}"
+            f"{target_block}"
             f"The Master has given this directive:\n\n"
             f'"{raw_input}"\n\n'
             f"Classify this directive. Consider:\n"

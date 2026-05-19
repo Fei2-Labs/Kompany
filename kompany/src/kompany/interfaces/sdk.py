@@ -220,6 +220,26 @@ class Kompany:
         return _TemplatesNamespace(self._engine)
 
     @property
+    def targets(self) -> "_TargetsNamespace":
+        """Company-target operations: ``show``, ``review``.
+
+        Mission-targets task (05-19). Surfaces the founder / proposal /
+        agreed triple and the team feasibility review hook.
+        """
+        return _TargetsNamespace(self._engine)
+
+    @property
+    def glossary(self) -> "_GlossaryNamespace":
+        """Company-glossary operations: ``list``, ``show``, ``add``,
+        ``update``, ``remove``.
+
+        Glossary-and-drift-detection task (05-19). Returns the founder-
+        defined canonical terms + forbidden synonyms the CoS retrospective
+        scans for drift.
+        """
+        return _GlossaryNamespace(self._engine)
+
+    @property
     def episodes(self) -> "_EpisodesNamespace":
         """Project-episode operations: ``list``, ``get``, ``rebuild``."""
         return _EpisodesNamespace(self._engine)
@@ -408,6 +428,97 @@ class _TemplatesNamespace:
             override_budget=override_budget,
             override_directive=override_directive,
         )
+
+
+class _TargetsNamespace:
+    """SDK sub-namespace for the four-knob mission-targets contract.
+
+    ``show()`` returns the founder / team_proposal / agreed triple plus
+    the review approval id. ``review()`` re-runs the CEO+CFO+CoS
+    feasibility pass and returns the freshly-created approval payload.
+    """
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def show(self) -> dict[str, Any]:
+        """Return the three-state targets snapshot."""
+        bundle = self._engine.get_targets_bundle()
+        return {
+            "founder": bundle.founder.model_dump(mode="json"),
+            "proposal": (
+                bundle.proposal.model_dump(mode="json")
+                if bundle.proposal is not None
+                else None
+            ),
+            "agreed": (
+                bundle.agreed.model_dump(mode="json")
+                if bundle.agreed is not None
+                else None
+            ),
+            "review_thread_id": bundle.review_thread_id,
+            "authoritative": self._engine.get_targets().model_dump(mode="json"),
+        }
+
+    def review(self) -> dict[str, Any] | None:
+        """Kick off a fresh team feasibility review.
+
+        Returns ``None`` if no founder targets are set yet (the founder
+        must complete onboarding first).
+        """
+        return self._engine.run_target_feasibility_review()
+
+
+class _GlossaryNamespace:
+    """SDK sub-namespace for the company glossary CRUD surface.
+
+    All methods round-trip through the engine so the audit log, the
+    SSE event stream, and the CoS retrospective scanner see the same
+    glossary the SDK caller does. Glossary-and-drift-detection task
+    (05-19).
+    """
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def list(self) -> list[dict[str, Any]]:
+        """Return every glossary entry."""
+        return self._engine.list_glossary()
+
+    def show(self, term: str) -> dict[str, Any] | None:
+        """Look up one term (case-insensitive). Returns ``None`` if missing."""
+        return self._engine.get_glossary_term(term)
+
+    def add(
+        self,
+        term: str,
+        definition: str,
+        forbidden_synonyms: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Insert a brand-new glossary entry (founder-sourced)."""
+        return self._engine.add_glossary_term(
+            term=term,
+            definition=definition,
+            forbidden_synonyms=forbidden_synonyms,
+            added_by="founder",
+        )
+
+    def update(
+        self,
+        term: str,
+        definition: str | None = None,
+        forbidden_synonyms: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Mutate an existing glossary entry's definition or synonyms."""
+        return self._engine.update_glossary_term(
+            term=term,
+            definition=definition,
+            forbidden_synonyms=forbidden_synonyms,
+        )
+
+    def remove(self, term: str) -> dict[str, Any]:
+        """Drop a glossary entry. Returns ``{"removed": bool}``."""
+        return {"removed": self._engine.remove_glossary_term(term)}
 
 
 class _EpisodesNamespace:

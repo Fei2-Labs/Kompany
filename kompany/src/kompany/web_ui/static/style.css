@@ -323,6 +323,8 @@ body.onboarding-body { padding-bottom: 40px; }
 #onboarding-form input[type="url"],
 #onboarding-form input[type="email"],
 #onboarding-form input[type="search"],
+#onboarding-form input[type="number"],
+#onboarding-form input[type="date"],
 #onboarding-form textarea {
   background: rgba(0, 255, 65, 0.04);
   border: 1px solid rgba(0, 255, 65, 0.35);
@@ -520,4 +522,82 @@ body.onboarding-body { padding-bottom: 40px; }
   color: #ff4444;
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+/* Mission-targets task (05-19) — COMPANY TARGETS frame */
+.onb-targets {
+  border: 1px dashed rgba(0, 255, 65, 0.3);
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.onb-targets-label {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.7);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.onb-targets-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin-top: 10px;
+}
+
+.onb-target-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.onb-target-cell > label {
+  font-size: 10px;
+  color: rgba(0, 255, 65, 0.55);
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+}
+
+/* Cyberpunk-tinted native date picker. ``appearance:none`` already in
+   the shared input block; this block tightens the picker icon + spinner
+   so it sits on the green palette instead of the browser default. */
+#onboarding-form input[type="date"].onb-date {
+  color-scheme: dark;
+  font-variant-numeric: tabular-nums;
+}
+
+#onboarding-form input[type="date"].onb-date::-webkit-calendar-picker-indicator {
+  filter: invert(82%) sepia(99%) saturate(2280%) hue-rotate(74deg) brightness(1.1) contrast(1.1);
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+#onboarding-form input[type="number"]::-webkit-outer-spin-button,
+#onboarding-form input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#onboarding-form input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Glossary drift excerpts inside inbox cards. */
+.drift-line {
+  color: rgba(255, 170, 0, 0.85);
+  border-left: 2px solid rgba(255, 170, 0, 0.5);
+  padding-left: 8px;
+  margin-top: 4px;
+}
+.drift-line b {
+  color: #ffaa00;
+}
+.drift-excerpt {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 2px 6px;
+  background: rgba(255, 170, 0, 0.08);
+  border: 1px dashed rgba(255, 170, 0, 0.3);
+  color: rgba(0, 255, 65, 0.75);
+  font-size: 11px;
 }

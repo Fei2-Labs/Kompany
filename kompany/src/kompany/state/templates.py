@@ -137,6 +137,9 @@ class Templates:
         force: bool = False,
         override_budget: float | None = None,
         override_directive: str | None = None,
+        override_revenue_target: float | None = None,
+        override_customer_target: int | None = None,
+        override_deadline: str | None = None,
     ) -> TemplateApplyResult:
         """Apply a template to the current company.
 
@@ -158,6 +161,16 @@ class Templates:
             if override_budget is not None
             else float(tpl.initial_budget)
         )
+        revenue_target = (
+            float(override_revenue_target)
+            if override_revenue_target is not None
+            else float(tpl.revenue_target or 0.0)
+        )
+        customer_target: int | None
+        if override_customer_target is not None:
+            customer_target = int(override_customer_target)
+        else:
+            customer_target = tpl.customer_target
 
         # ------------------------------------------------------------------
         # 1. company_config
@@ -174,6 +187,32 @@ class Templates:
                 json.dumps(tpl.agent_config_overrides),
             )
         self.db.commit()
+
+        # Persist the founder-state targets snapshot. We do this in the
+        # template service (rather than in the engine) so any caller —
+        # including direct ``Templates.apply`` invocations — writes a
+        # consistent baseline that ``targets.get_targets`` can read.
+        from kompany.state.targets import CompanyTargets, set_targets
+
+        founder_targets = CompanyTargets(
+            initial_budget=budget,
+            revenue_target=revenue_target,
+            customer_target=customer_target,
+            deadline=override_deadline or None,
+            source="founder",
+        )
+        set_targets(self.db, founder_targets)
+
+        # Install the template-shipped glossary entries (additive — never
+        # clobbers terms the founder may have curated by hand between
+        # template applications). Glossary-and-drift-detection task 05-19.
+        glossary_installed = 0
+        if tpl.glossary:
+            from kompany.state.glossary import GlossaryService
+
+            glossary_installed = GlossaryService(self.db).bulk_install_from_template(
+                [g.model_dump(mode="python") for g in tpl.glossary]
+            )
 
         # ------------------------------------------------------------------
         # 2. Ledger — initial capital
@@ -229,11 +268,15 @@ class Templates:
                 "name": tpl.name,
                 "mission_title": tpl.mission_title,
                 "initial_budget": budget,
+                "revenue_target": revenue_target,
+                "customer_target": customer_target,
+                "deadline": override_deadline or None,
                 "enabled_agents": tpl.enabled_agents,
                 "project_ids": project_ids,
                 "force": bool(force and existing),
                 "override_budget": override_budget,
                 "override_directive": override_directive,
+                "glossary_terms_installed": glossary_installed,
             },
         )
 
