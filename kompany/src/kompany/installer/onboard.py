@@ -813,3 +813,204 @@ def run_onboard(
             os.environ.pop("KOMPANY_DATA_DIR", None)
         else:
             os.environ["KOMPANY_DATA_DIR"] = prior_env
+
+
+# ---------------------------------------------------------------------------
+# Headless entry point (no typer / no rich) — used by REST + Tauri shell.
+# ---------------------------------------------------------------------------
+
+
+class OnboardError(Exception):
+    """Raised by :func:`onboard_headless` for any caller-visible failure.
+
+    Carries a short machine-friendly ``code`` plus a human ``message``.
+    REST callers map this onto a 200 response with ``status='error'`` so
+    the in-window onboarding form can surface the message inline.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+def onboard_headless(
+    data_dir: Path | str,
+    provider: str,
+    api_key: str,
+    template_id: str,
+    directive: str | None = None,
+    *,
+    engine_factory: Callable[[], Any] | None = None,
+) -> OnboardResult:
+    """Run a fully-headless onboarding pass.
+
+    Pure function with no typer / rich dependency — callable from the
+    REST endpoint, the Tauri shell, or any test. The wizard's branching
+    UX (prompts, retry/abort, idempotency dialog) collapses to a clean
+    contract:
+
+    * If the data dir already contains a usable ``kompany.db``, we treat
+      that as a reuse: no overwrite, no re-ping. Returned result has
+      ``status='reused'``.
+    * Otherwise (fresh or partial), we apply the supplied template and
+      stash the API key in the vault.
+    * Any failure raises :class:`OnboardError` with a code the caller
+      can render verbatim.
+
+    The :class:`OnboardResult` returned matches the CLI's contract so
+    tests can assert on the same dataclass either way.
+    """
+    if not provider:
+        raise OnboardError("missing_provider", "provider is required")
+    if provider not in SUPPORTED_PROVIDERS:
+        raise OnboardError(
+            "unknown_provider",
+            f"unknown provider {provider!r}; "
+            f"choose one of: {', '.join(SUPPORTED_PROVIDERS)}",
+        )
+    if not api_key:
+        raise OnboardError("missing_api_key", "api_key is required")
+    if not template_id:
+        raise OnboardError("missing_template", "template_id is required")
+
+    data_dir = Path(data_dir).expanduser().resolve()
+    ok, msg = _ensure_data_dir(data_dir)
+    if not ok:
+        raise OnboardError("data_dir_error", msg)
+
+    # Idempotency: if the DB exists with a template applied, reuse.
+    state = _existing_install_state(data_dir)
+    reused = bool(state["db_exists"]) and not state["partial"]
+
+    # The downstream engine reads ``KOMPANY_DATA_DIR`` from the
+    # environment, exactly like the CLI wizard. Save/restore so we don't
+    # leak across long-running REST processes.
+    prior_env = os.environ.get("KOMPANY_DATA_DIR")
+    os.environ["KOMPANY_DATA_DIR"] = str(data_dir)
+
+    result = OnboardResult(
+        status="reused" if reused else "completed",
+        data_dir=data_dir,
+    )
+    try:
+        if engine_factory is not None:
+            engine = engine_factory()
+        else:
+            from kompany.core.engine import KompanyEngine
+
+            engine = KompanyEngine()
+
+        # ----- Provider + API key + ping ---------------------------------
+        result.provider = provider
+        vault_field = PROVIDER_VAULT_KEYS.get(provider)
+
+        if reused:
+            result.api_key_storage = "reused"
+            result.ping_status = "skipped"
+        else:
+            storage = "env"
+            if vault_field and getattr(engine.settings, "vault_key", ""):
+                try:
+                    engine.credentials.set(vault_field, api_key)
+                    storage = "vault"
+                except Exception as exc:  # noqa: BLE001
+                    result.notes.append(f"vault write failed ({exc}); using process env only")
+            else:
+                result.notes.append(
+                    f"vault key not configured; set {PROVIDER_ENV_VARS.get(provider, '?')} "
+                    "in your environment for persistent storage"
+                )
+            if vault_field:
+                setattr(engine.settings, vault_field, api_key)
+            result.api_key_storage = storage
+
+            ok, detail = _ping_llm(
+                provider,
+                api_key,
+                settings_factory=lambda: engine.settings,
+            )
+            if ok and detail == "skipped_test_mode":
+                result.ping_status = "skipped_test_mode"
+            elif ok:
+                result.ping_status = "ok"
+            else:
+                # Surface as an error so the wizard form can retry.
+                raise OnboardError("ping_failed", f"{provider} ping failed: {detail}")
+
+        # ----- Template apply -------------------------------------------
+        if reused:
+            applied = engine.templates.is_applied()
+            result.template_id = applied or template_id
+        else:
+            try:
+                applied_id = engine.templates.is_applied()
+                if applied_id == template_id:
+                    result.template_id = template_id
+                else:
+                    engine.apply_template(template_id, force=applied_id is not None)
+                    result.template_id = template_id
+            except ValueError as exc:
+                raise OnboardError("template_error", str(exc)) from exc
+
+        # ----- First directive (optional) -------------------------------
+        if directive and directive.strip():
+            result.directive_text = directive
+            try:
+                outcome = engine.process_directive(directive)
+            except Exception as exc:  # noqa: BLE001
+                result.directive_status = "error"
+                result.directive_message = str(exc)
+                result.notes.append(f"first directive failed: {exc}")
+            else:
+                result.directive_status = getattr(outcome, "status", None)
+                result.directive_message = getattr(outcome, "message", "") or ""
+
+        return result
+    finally:
+        if prior_env is None:
+            os.environ.pop("KOMPANY_DATA_DIR", None)
+        else:
+            os.environ["KOMPANY_DATA_DIR"] = prior_env
+
+
+def is_onboarded(data_dir: Path | str) -> dict[str, Any]:
+    """Return a snapshot describing whether onboarding has been done.
+
+    Read-only — safe to call from a REST handler on every request. The
+    function inspects ``kompany.db`` directly (no engine spin-up) so a
+    fresh install can answer this in microseconds.
+    """
+    data_dir = Path(data_dir).expanduser()
+    state = _existing_install_state(data_dir)
+    if not state["db_exists"] or state["partial"]:
+        return {"onboarded": False, "template_id": None, "provider": None}
+
+    template_id = state.get("template_id")
+    provider: str | None = None
+    if state.get("has_vault_rows"):
+        import sqlite3
+
+        try:
+            conn = sqlite3.connect(str(data_dir / "kompany.db"))
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT name FROM credential_vault"
+                ).fetchall()
+            finally:
+                conn.close()
+            stored = {row["name"] for row in rows}
+            for prov, vault_key in PROVIDER_VAULT_KEYS.items():
+                if vault_key in stored:
+                    provider = prov
+                    break
+        except sqlite3.Error:
+            provider = None
+
+    onboarded = template_id is not None
+    return {
+        "onboarded": bool(onboarded),
+        "template_id": template_id,
+        "provider": provider,
+    }

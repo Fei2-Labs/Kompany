@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 from kompany.state.models import (
@@ -50,6 +51,17 @@ class IllegalApprovalTransition(ValueError):
     Subclass of ``ValueError`` so existing callers that catch ``ValueError``
     (engine ``raise ValueError(...)`` patterns) keep working.
     """
+
+
+def _publish_inbox_updated(reason: str, request_id: str | None = None) -> None:
+    """Best-effort SSE push that the inbox state changed."""
+    try:
+        get_event_hub().publish(
+            "inbox.updated",
+            {"reason": reason, "approval_id": request_id},
+        )
+    except Exception:  # pragma: no cover — best-effort live feed
+        pass
 
 
 class ApprovalRequests:
@@ -103,6 +115,7 @@ class ApprovalRequests:
             ),
         )
         self.db.commit()
+        _publish_inbox_updated("created", request.id)
         return request
 
     # ------------------------------------------------------------------
@@ -227,6 +240,7 @@ class ApprovalRequests:
             ),
         )
         self.db.commit()
+        _publish_inbox_updated("revision_requested", request_id)
         return self.get(request_id)
 
     def snooze(
@@ -269,6 +283,7 @@ class ApprovalRequests:
             by_type=by_type,
             by_id=by_id,
         )
+        _publish_inbox_updated("snoozed", request_id)
         return self.get(request_id)
 
     def cancel(
@@ -305,6 +320,7 @@ class ApprovalRequests:
             by_type=by_type,
             by_id=by_id,
         )
+        _publish_inbox_updated("cancelled", request_id)
         return self.get(request_id)
 
     def unsnooze(self, request_id: str, by: str = "system") -> ApprovalRequest | None:
@@ -327,6 +343,7 @@ class ApprovalRequests:
             (ApprovalStatus.PENDING.value, request_id),
         )
         self.db.commit()
+        _publish_inbox_updated("unsnoozed", request_id)
         return self.get(request_id)
 
     # ------------------------------------------------------------------
@@ -505,6 +522,7 @@ class ApprovalRequests:
             (status.value, resolved_by, reason, request_id),
         )
         self.db.commit()
+        _publish_inbox_updated(f"resolved.{status.value}", request_id)
         return self.get(request_id)
 
     @staticmethod

@@ -52,7 +52,7 @@ The engine runs a configurable heartbeat loop so the system operates autonomousl
 ## deployment
 Initially runs as a local long-running process; containerized cloud deployment deferred to multi-tenant phase.
 
-**Meaning:** `kompany serve` starts a background process with heartbeat scheduler. Users interact via CLI/API/SDK locally. Process crash triggers automatic restart and checkpoint recovery. No Docker needed at single-user stage — it adds complexity without benefit. Supports systemd/launchd registration for auto-start and crash recovery. Containerization and PostgreSQL migration happen together when multi-tenancy is needed.
+**Meaning:** `kompany heartbeat-loop` starts a background heartbeat scheduler; `kompany serve` boots the FastAPI server + cyberpunk web UI (see `web_ui/`). Users interact via CLI / API / SDK / MCP / Web locally. Process crash triggers automatic restart and checkpoint recovery. No Docker needed at single-user stage — it adds complexity without benefit. Supports systemd/launchd registration for auto-start and crash recovery. Containerization and PostgreSQL migration happen together when multi-tenancy is needed.
 
 **Implication:** Keep deployment simple. The system must be resilient to restarts through checkpoint-and-resume, not through infrastructure complexity.
 

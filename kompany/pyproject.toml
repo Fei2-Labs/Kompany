@@ -25,6 +25,10 @@ dependencies = [
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["mcp>=1.0"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+# Desktop bundle build: PyInstaller produces the sidecar binary that
+# the Tauri shell spawns. Pillow only needed to render the placeholder
+# icon — designer assets bypass it. See kompany/build_desktop.sh.
+desktop = ["pyinstaller>=6", "pillow>=10"]
 
 [project.scripts]
 kompany = "kompany.interfaces.cli:app"
@@ -40,6 +44,10 @@ include = [
     "src/kompany/**/*.py",
     "src/kompany/templates/**/*.json",
     "src/kompany/templates/**/*.md",
+    "src/kompany/web_ui/**/*.html",
+    "src/kompany/web_ui/**/*.js",
+    "src/kompany/web_ui/**/*.css",
+    "src/kompany/web_ui/**/*.ttf",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -47,6 +55,10 @@ include = [
     "src/kompany/**/*.py",
     "src/kompany/templates/**/*.json",
     "src/kompany/templates/**/*.md",
+    "src/kompany/web_ui/**/*.html",
+    "src/kompany/web_ui/**/*.js",
+    "src/kompany/web_ui/**/*.css",
+    "src/kompany/web_ui/**/*.ttf",
     "tests/**/*.py",
     "README.md",
     "pyproject.toml",

@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import hmac
+import json
+import os
 import time
+from pathlib import Path
 from secrets import compare_digest
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 
 from kompany.core.engine import KompanyEngine
+from kompany.core.event_hub import get_event_hub
 from kompany.interfaces.web import render_dashboard
 from kompany.remote import request_from_telegram_update
 
@@ -29,6 +35,129 @@ def get_engine() -> KompanyEngine:
     if _engine is None:
         _engine = KompanyEngine()
     return _engine
+
+
+def reset_engine() -> None:
+    """Drop the cached engine instance.
+
+    Used by the onboarding REST endpoint after a fresh install so the
+    next ``get_engine()`` call picks up the just-written ``kompany.db``.
+    Also handy for tests that swap out data dirs across requests.
+    """
+    global _engine
+    _engine = None
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    """Liveness probe for the Tauri sidecar shell.
+
+    The Rust shell polls this endpoint after spawning the sidecar
+    binary and only opens the WebView once it returns 200. Keep it
+    cheap — no DB hits, no engine spin-up.
+    """
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Onboarding REST surface (used by the Tauri shell + browser flow).
+# ---------------------------------------------------------------------------
+
+
+class OnboardingStatusResponse(BaseModel):
+    """Snapshot of whether the running install has been onboarded."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    onboarded: bool
+    template_id: str | None = None
+    provider: str | None = None
+
+
+class OnboardingCompleteRequest(BaseModel):
+    """Body for ``POST /onboarding/complete`` sent by the in-window wizard."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    template_id: str = Field(..., min_length=1)
+    directive: str | None = None
+
+
+class OnboardingCompleteResponse(BaseModel):
+    """Response from ``POST /onboarding/complete``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str  # "ready" | "error"
+    template_id: str | None = None
+    provider: str | None = None
+    message: str | None = None
+    code: str | None = None
+
+
+def _resolved_data_dir() -> Path:
+    """Resolve the data dir the sidecar should use, consistent with engine."""
+    env = os.environ.get("KOMPANY_DATA_DIR", "").strip()
+    if env:
+        return Path(env).expanduser()
+    return Path("~/.kompany").expanduser()
+
+
+@app.get("/onboarding/status", response_model=OnboardingStatusResponse)
+def onboarding_status() -> OnboardingStatusResponse:
+    """Report whether onboarding has completed for the current data dir.
+
+    Read-only and safe to call before any engine spin-up — the Tauri
+    shell hits this on every WebView load so the SPA can redirect to
+    the in-window wizard when no template has been applied yet.
+    """
+    from kompany.installer import is_onboarded
+
+    snap = is_onboarded(_resolved_data_dir())
+    return OnboardingStatusResponse(**snap)
+
+
+@app.post(
+    "/onboarding/complete",
+    response_model=OnboardingCompleteResponse,
+)
+def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteResponse:
+    """Run a fully-headless onboard from the in-window wizard form.
+
+    On success the cached engine is dropped so a follow-up ``/status``
+    or ``/agents/status`` request rebuilds against the freshly-written
+    ``kompany.db``. Errors are surfaced as ``status='error'`` with a
+    short message rather than a 5xx, so the JS form can show them
+    inline without parsing FastAPI's error envelope.
+    """
+    from kompany.installer import OnboardError, onboard_headless
+
+    try:
+        result = onboard_headless(
+            data_dir=_resolved_data_dir(),
+            provider=req.provider,
+            api_key=req.api_key,
+            template_id=req.template_id,
+            directive=req.directive,
+        )
+    except OnboardError as exc:
+        return OnboardingCompleteResponse(
+            status="error",
+            message=exc.message,
+            code=exc.code,
+        )
+
+    # Drop the cached engine so the next request rebuilds against the
+    # freshly-initialised data dir.
+    reset_engine()
+    return OnboardingCompleteResponse(
+        status="ready",
+        template_id=result.template_id,
+        provider=result.provider,
+        message=None,
+    )
 
 
 class DirectiveRequest(BaseModel):
@@ -991,3 +1120,173 @@ def execute_project(project_id: str) -> dict[str, Any]:
     if not p:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
     return engine.execute_project(project_id)
+
+
+# ---------------------------------------------------------------------------
+# Web UI: SSE feed + static file serving
+# ---------------------------------------------------------------------------
+
+# The 11 canonical C-suite roles, in display order. Used as the source of
+# truth for the office panel — the UI always shows 11 rows whether or not
+# audit_log mentions a role.
+C_SUITE_ROLES: tuple[str, ...] = (
+    "ceo", "cfo", "cto", "cpo", "cmo", "cro",
+    "coo", "csa", "ciso", "cos", "cv",
+)
+
+# Heartbeat keepalive interval (seconds). EventSource drops if the server
+# stays silent for too long behind some proxies — 15s is the conservative
+# default used by SSE bridges in the wild.
+_SSE_HEARTBEAT_SECONDS = 15.0
+
+
+async def _sse_event_stream() -> AsyncIterator[bytes]:
+    """Async generator that yields SSE-formatted bytes for one client.
+
+    Multiplexes:
+      * an :class:`asyncio.Queue` fed by the global :class:`EventHub`
+      * a periodic ``:keepalive`` comment so reverse proxies don't time out
+    """
+    hub = get_event_hub()
+    queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
+    hub._subscribers.add(queue)  # type: ignore[attr-defined]
+    try:
+        # Tell the client we're alive immediately. Some browsers wait for
+        # the first byte before resolving the EventSource ``open`` event.
+        yield b": connected\n\n"
+        while True:
+            try:
+                envelope = await asyncio.wait_for(
+                    queue.get(),
+                    timeout=_SSE_HEARTBEAT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                yield b": keepalive\n\n"
+                continue
+            event_type = envelope.get("type", "message")
+            event_id = envelope.get("id", 0)
+            # Wrap the type into the JSON payload and use the *default*
+            # ``message`` event so a single ``onmessage`` listener can
+            # demultiplex every audit.<x> / inbox.updated / health.event
+            # flavor. EventSource cannot wildcard named events, and we
+            # don't want to enumerate every possible ``audit.<subtype>``.
+            envelope_out = {
+                "type": event_type,
+                "data": dict(envelope.get("data", {}) or {}),
+            }
+            data = json.dumps(envelope_out, default=str)
+            payload = (
+                f"id: {event_id}\n"
+                f"data: {data}\n\n"
+            ).encode("utf-8")
+            yield payload
+    finally:
+        hub._subscribers.discard(queue)  # type: ignore[attr-defined]
+
+
+@app.get("/events")
+async def events_stream() -> StreamingResponse:
+    """Server-Sent Events feed of live engine activity.
+
+    Browser ``EventSource`` clients connect here to receive ``audit.*``,
+    ``inbox.updated``, ``health.event``, and ``episode.recorded`` events
+    in real time. No history is replayed — only events emitted after the
+    client connects.
+    """
+    return StreamingResponse(
+        _sse_event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            # Disable nginx response buffering — SSE depends on chunks
+            # arriving as soon as the server flushes them.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/agents/status")
+def agents_status() -> list[dict[str, Any]]:
+    """Return the live status of all 11 C-suite roles for the office panel.
+
+    Source of truth: the ``agent_status`` table if present, with the most
+    recent ``audit_log`` activity as a heuristic fallback when an agent
+    has no explicit status row yet. The response always contains exactly
+    11 rows in canonical display order.
+    """
+    engine = get_engine()
+    rows_by_role: dict[str, dict[str, Any]] = {}
+
+    # Primary source: agent_status store.
+    try:
+        for entry in engine.agent_status.list_all():  # type: ignore[attr-defined]
+            role = (entry.get("agent_role") or entry.get("role") or "").lower()
+            if role:
+                rows_by_role[role] = entry
+    except Exception:
+        pass
+
+    # Fallback: tail audit_log for any agent activity in the last ~5 min.
+    if not rows_by_role:
+        try:
+            recent = engine.audit.recent(limit=200)
+        except Exception:
+            recent = []
+        for row in recent:
+            role = (row.get("agent_role") or "").lower()
+            if not role or role in rows_by_role:
+                continue
+            rows_by_role[role] = {
+                "agent_role": role,
+                "status": "busy",
+                "last_action": row.get("action"),
+                "updated_at": row.get("timestamp"),
+            }
+
+    result = []
+    for role in C_SUITE_ROLES:
+        row = rows_by_role.get(role)
+        if row is None:
+            result.append({
+                "role": role.upper(),
+                "status": "idle",
+                "last_action": None,
+                "latency_ms": None,
+            })
+        else:
+            result.append({
+                "role": role.upper(),
+                "status": row.get("status") or "idle",
+                "last_action": row.get("last_action") or row.get("action"),
+                "latency_ms": row.get("latency_ms"),
+            })
+    return result
+
+
+def _web_ui_dir() -> Path:
+    """Resolve the bundled ``web_ui/`` directory inside the installed package."""
+    return Path(__file__).resolve().parent.parent / "web_ui"
+
+
+# Clean URL alias for the onboarding page so callers can link to
+# ``/ui/onboarding`` instead of the bare ``.html`` file. Must be
+# registered before the StaticFiles mount so it wins over the static
+# router. Returns a 307 so the WebView updates its location bar to the
+# canonical static path (preserves relative asset resolution).
+@app.get("/ui/onboarding", include_in_schema=False)
+def onboarding_alias() -> RedirectResponse:
+    return RedirectResponse(url="/ui/onboarding.html", status_code=307)
+
+
+# Mount the cyberpunk SPA at /ui. ``html=True`` tells StaticFiles to serve
+# ``index.html`` for the directory root, so ``/ui/`` works without a list view.
+_WEB_UI_DIR = _web_ui_dir()
+if _WEB_UI_DIR.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(_WEB_UI_DIR), html=True), name="ui")
+
+
+@app.get("/", include_in_schema=False)
+def root_redirect() -> RedirectResponse:
+    """Redirect bare ``/`` to the web UI."""
+    return RedirectResponse(url="/ui/", status_code=307)

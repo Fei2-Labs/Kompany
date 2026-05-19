@@ -922,8 +922,8 @@ def heartbeat(
     ))
 
 
-@app.command("serve")
-def serve(
+@app.command("heartbeat-loop")
+def heartbeat_loop(
     interval: float = typer.Option(30.0, "--interval", min=0.0),
     once: bool = typer.Option(False, "--once"),
     max_ticks: int | None = typer.Option(None, "--max-ticks"),
@@ -1944,3 +1944,61 @@ def execute(
                 o["output"][:60] + "..." if len(o["output"]) > 60 else o["output"],
             )
         console.print(table)
+
+
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address."),
+    port: int = typer.Option(8000, "--port", help="TCP port."),
+    open_browser: bool = typer.Option(
+        False,
+        "--open",
+        help="Open the web UI in the default browser after the server starts.",
+    ),
+    reload: bool = typer.Option(
+        False,
+        "--reload",
+        help="Dev mode: auto-reload on source change (uvicorn --reload).",
+    ),
+):
+    """Start the Kompany backend + cyberpunk web UI.
+
+    The web UI is served at ``/ui`` and the SSE feed at ``/events``. With
+    ``--open``, the default browser is launched at the UI URL after a
+    short delay so the server is ready to handle the first request.
+    """
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover
+        console.print(
+            "[red]uvicorn is not installed.[/red] "
+            "Install the api extras: pip install 'kompany[api]'"
+        )
+        raise typer.Exit(1) from exc
+
+    url = f"http://{host}:{port}/ui/"
+    console.print(f"[green]Kompany backend on[/green] http://{host}:{port}")
+    console.print(f"[green]UI on[/green] {url}")
+    console.print(f"[green]SSE stream on[/green] http://{host}:{port}/events")
+
+    if open_browser:
+        # Schedule the browser launch slightly after uvicorn starts. We
+        # use a small threading.Timer so we don't block before uvicorn.run.
+        import threading
+        import webbrowser
+
+        def _open():
+            try:
+                webbrowser.open(url)
+            except Exception:  # pragma: no cover — best effort
+                pass
+
+        threading.Timer(1.0, _open).start()
+
+    uvicorn.run(
+        "kompany.interfaces.api:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )

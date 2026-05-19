@@ -114,6 +114,28 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
 
 ---
 
+## Quick Start (Desktop App)
+
+The fastest way to try Kompany is the desktop bundle. Double-click,
+fill out the in-window onboarding form, and you're live — no Python
+install, no terminal, no browser.
+
+| Platform | Download                          | First-launch                               |
+|----------|-----------------------------------|--------------------------------------------|
+| macOS    | `Kompany.dmg` (drag to Applications) | Right-click the app icon → **Open** the first time (v1 ships unsigned). |
+| Windows  | `Kompany.msi`                     | SmartScreen → **More info** → **Run anyway**. |
+| Linux    | `Kompany.AppImage`                | `chmod +x Kompany.AppImage && ./Kompany.AppImage` |
+
+> Releases are not yet published to GitHub Releases. To build the
+> installer locally, run `./kompany/build_desktop.sh` from a checkout.
+> See [`docs/context/distribution.md`](docs/context/distribution.md) for
+> the toolchain prerequisites.
+
+On first launch the window shows a cyberpunk onboarding form: pick a
+model provider, drop in an API key, choose a starter company, and
+optionally type a first directive. The dashboard pivots in the same
+window once provisioning completes.
+
 ## Installation
 
 ### One-line install (recommended)

@@ -1338,7 +1338,7 @@ def test_cli_serve_once_json(monkeypatch):
     fake_engine = FakeEngine()
     monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: fake_engine)
 
-    result = runner.invoke(cli_app, ["serve", "--once", "--json"])
+    result = runner.invoke(cli_app, ["heartbeat-loop", "--once", "--json"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -1351,7 +1351,7 @@ def test_cli_serve_once_dispatch_json(monkeypatch):
     monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: fake_engine)
 
     result = runner.invoke(cli_app, [
-        "serve",
+        "heartbeat-loop",
         "--once",
         "--dispatch-notifications",
         "--adapter",

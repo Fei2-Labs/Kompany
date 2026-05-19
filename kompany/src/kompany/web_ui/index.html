@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kompany // Cyberpunk Terminal</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+</head>
+<body>
+  <div class="header">
+    <div class="brand">&#9612;KOMPANY//<span id="brand-name">SOLO-FOUNDER</span> <span class="blink">&#9608;</span></div>
+    <div class="stats">
+      <div class="stat"><span>cash:</span> <b id="stat-cash">$0.00</b></div>
+      <div class="stat"><span>burn:</span> <b id="stat-burn">$0/h</b></div>
+      <div class="stat"><span>run:</span> <b id="stat-run">--</b></div>
+      <div class="stat"><span>ep:</span> <b id="stat-episodes">0</b></div>
+      <div class="stat"><span>sse:</span> <b id="stat-sse">offline</b></div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="frame" data-label="STAFF [11/11]">
+      <div class="agents-list" id="agents-list">
+        <div class="agent-row"><span class="id">--</span><span class="ascii">...</span><span class="status-text">booting</span><span class="latency">--</span></div>
+      </div>
+    </div>
+
+    <div class="right-col">
+      <div class="frame" data-label="INBOX [0 pending]" id="inbox-frame">
+        <div class="inbox-list" id="inbox-list">
+          <div class="empty">inbox is empty.</div>
+        </div>
+      </div>
+
+      <div class="frame" data-label="LIVE TIMELINE">
+        <div class="timeline" id="timeline">
+          <div class="line ok">boot sequence...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame" data-label="EPISODES" id="episodes-frame">
+    <div class="episodes-row">
+      <div class="episodes-col">
+        <div class="episodes-list" id="episodes-list">
+          <div class="empty">no episodes yet.</div>
+        </div>
+      </div>
+      <div class="episodes-payload" id="episodes-payload">
+        <pre class="empty">select an episode to view payload.</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="directive-bar">
+    <span class="prompt-prefix">kompany&gt;</span>
+    <input type="text" id="directive-input" placeholder="type a directive and press enter..." autocomplete="off">
+    <span id="directive-status"></span>
+  </div>
+
+  <script type="module" src="/ui/static/app.js"></script>
+</body>
+</html>

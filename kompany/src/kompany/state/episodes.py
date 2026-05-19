@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 from kompany.state.approvals import ApprovalRequests
@@ -161,6 +162,17 @@ class Episodes:
         row = self.get(project_id)
         # ``get`` always returns a row here because we just wrote it.
         assert row is not None
+        try:
+            get_event_hub().publish(
+                "episode.recorded",
+                {
+                    "project_id": project_id,
+                    "summary": summary,
+                    "run_id": rid,
+                },
+            )
+        except Exception:  # pragma: no cover — best-effort live feed
+            pass
         return row
 
     def trim_to_retention_window(self, max_full_count: int) -> list[dict[str, Any]]:

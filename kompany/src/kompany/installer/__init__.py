@@ -9,6 +9,18 @@ and ``.trellis/tasks/05-19-one-line-install/prd.md`` for the design.
 
 from __future__ import annotations
 
-from kompany.installer.onboard import OnboardResult, run_onboard
+from kompany.installer.onboard import (
+    OnboardError,
+    OnboardResult,
+    is_onboarded,
+    onboard_headless,
+    run_onboard,
+)
 
-__all__ = ["OnboardResult", "run_onboard"]
+__all__ = [
+    "OnboardError",
+    "OnboardResult",
+    "is_onboarded",
+    "onboard_headless",
+    "run_onboard",
+]

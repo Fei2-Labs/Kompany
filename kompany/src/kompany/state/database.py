@@ -193,17 +193,11 @@ CREATE TABLE IF NOT EXISTS project_episodes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_agent ON agent_memories(agent_role);
-CREATE INDEX IF NOT EXISTS idx_debates_project_id ON debates(project_id);
-CREATE INDEX IF NOT EXISTS idx_debates_run_id ON debates(run_id);
-CREATE INDEX IF NOT EXISTS idx_project_episodes_run_id ON project_episodes(run_id);
-CREATE INDEX IF NOT EXISTS idx_project_episodes_retention ON project_episodes(retention_tier);
-CREATE INDEX IF NOT EXISTS idx_health_events_project_id ON health_events(project_id);
-CREATE INDEX IF NOT EXISTS idx_health_events_run_id ON health_events(run_id);
-CREATE INDEX IF NOT EXISTS idx_health_events_status ON health_events(status);
-CREATE INDEX IF NOT EXISTS idx_tasks_status_updated_at ON tasks(status, updated_at);
-CREATE INDEX IF NOT EXISTS idx_approval_comments_approval_id ON approval_comments(approval_id);
-CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status);
-CREATE INDEX IF NOT EXISTS idx_approval_requests_predecessor_id ON approval_requests(predecessor_id);
+-- NOTE: indexes referencing columns added by _migrate() (run_id,
+-- predecessor_id, tasks.updated_at, etc.) live in _migrate() itself.
+-- Putting them here would crash executescript() on databases created
+-- before those columns existed, because CREATE TABLE IF NOT EXISTS is
+-- a no-op for existing tables — the columns only appear after ALTER.
 """
 
 

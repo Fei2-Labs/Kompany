@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kompany // First Boot</title>
+  <link rel="stylesheet" href="/ui/static/style.css">
+</head>
+<body class="onboarding-body">
+  <div class="header">
+    <div class="brand">&#9612;KOMPANY//<span>FIRST-BOOT</span> <span class="blink">&#9608;</span></div>
+    <div class="stats">
+      <div class="stat"><span>status:</span> <b id="onb-status">waiting for player</b></div>
+    </div>
+  </div>
+
+  <div class="onboarding-shell">
+    <div class="frame" data-label="WELCOME">
+      <p class="onb-lede">
+        Welcome, founder. Spin up your autonomous C-suite in 90 seconds.
+        Pick a model provider, drop in an API key, choose a starter
+        company, and you're live.
+      </p>
+    </div>
+
+    <form id="onboarding-form" class="frame" data-label="CONFIGURE //">
+      <div class="onb-field">
+        <label for="onb-provider">// LLM PROVIDER</label>
+        <select id="onb-provider" name="provider" required>
+          <option value="anthropic">anthropic (Claude)</option>
+          <option value="openai">openai (GPT)</option>
+          <option value="gemini">gemini (Google)</option>
+          <option value="glm">glm (Zhipu)</option>
+          <option value="kimi">kimi (Moonshot)</option>
+        </select>
+      </div>
+
+      <div class="onb-field">
+        <label for="onb-api-key">// API KEY</label>
+        <input
+          id="onb-api-key"
+          name="api_key"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="sk-..."
+          required
+        >
+        <p class="onb-hint">Stored encrypted in the local vault. Never leaves your machine.</p>
+      </div>
+
+      <div class="onb-field">
+        <label>// STARTER COMPANY</label>
+        <div class="onb-templates">
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="blank">
+            <span class="t-title">blank</span>
+            <span class="t-mission">Start from a clean slate.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="saas-startup" checked>
+            <span class="t-title">saas-startup</span>
+            <span class="t-mission">Launch a B2B SaaS product.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="indie-tool">
+            <span class="t-title">indie-tool</span>
+            <span class="t-mission">Ship a small paid tool.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="content-creator">
+            <span class="t-title">content-creator</span>
+            <span class="t-mission">Grow a media business.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="ecommerce">
+            <span class="t-title">ecommerce</span>
+            <span class="t-mission">Run a DTC storefront.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="consulting-firm">
+            <span class="t-title">consulting-firm</span>
+            <span class="t-mission">Sell senior-time consulting.</span>
+          </label>
+          <label class="onb-template">
+            <input type="radio" name="template_id" value="community">
+            <span class="t-title">community</span>
+            <span class="t-mission">Build a paid community.</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="onb-field">
+        <label for="onb-directive">// FIRST DIRECTIVE (OPTIONAL)</label>
+        <textarea
+          id="onb-directive"
+          name="directive"
+          rows="3"
+          placeholder="e.g. 'Launch a landing page for our beta this week.'"
+        ></textarea>
+      </div>
+
+      <div class="onb-actions">
+        <button type="submit" id="onb-submit" class="onb-btn">
+          &#9656; PROVISION COMPANY
+        </button>
+      </div>
+
+      <div id="onb-progress" class="onb-progress" hidden>
+        <span class="onb-spinner">&#9608;</span>
+        <span id="onb-progress-text">Provisioning your company...</span>
+      </div>
+
+      <div id="onb-error" class="onb-error" hidden></div>
+    </form>
+  </div>
+
+  <script type="module" src="/ui/static/modules/ui/onboarding.js"></script>
+</body>
+</html>

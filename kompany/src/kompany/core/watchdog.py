@@ -36,6 +36,7 @@ import contextlib
 import logging
 from typing import Any, Callable
 
+from kompany.core.event_hub import get_event_hub
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.audit import AuditLog
 from kompany.state.health_events import HealthEvents
@@ -414,6 +415,24 @@ class Watchdog:
             )
         except Exception:  # noqa: BLE001
             log.debug("watchdog: audit mirror failed", exc_info=True)
+
+        # Also fan out as a dedicated health.event so the UI's health
+        # panel can react without filtering the general audit stream.
+        try:
+            get_event_hub().publish(
+                "health.event",
+                {
+                    "event_type": event_type,
+                    "event_id": event_row.get("id"),
+                    "kind": event_row.get("kind"),
+                    "status": event_row.get("status"),
+                    "task_id": event_row.get("task_id"),
+                    "project_id": event_row.get("project_id"),
+                    "run_id": event_row.get("run_id"),
+                },
+            )
+        except Exception:  # pragma: no cover — best-effort
+            pass
 
 
 class LLMUnavailable(RuntimeError):
