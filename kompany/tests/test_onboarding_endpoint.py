@@ -99,12 +99,14 @@ def test_complete_with_valid_body_returns_ready(
         api_key: str,
         template_id: str,
         directive: str | None = None,
+        base_url: str | None = None,
     ) -> OnboardResult:
         captured["call"] = {
             "provider": provider,
             "api_key": api_key,
             "template_id": template_id,
             "directive": directive,
+            "base_url": base_url,
             "data_dir": str(data_dir),
         }
         return OnboardResult(

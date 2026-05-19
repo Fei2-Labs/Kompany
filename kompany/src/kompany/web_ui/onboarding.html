@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kompany // First Boot</title>
-  <link rel="stylesheet" href="/ui/static/style.css">
+  <link rel="stylesheet" href="/ui/static/style.css?v=2">
 </head>
 <body class="onboarding-body">
   <div class="header">
     <div class="brand">&#9612;KOMPANY//<span>FIRST-BOOT</span> <span class="blink">&#9608;</span></div>
     <div class="stats">
-      <div class="stat"><span>status:</span> <b id="onb-status">waiting for player</b></div>
+      <div class="stat"><span>status:</span> <b id="onb-status">waiting for founder</b></div>
     </div>
   </div>
 
@@ -25,14 +25,48 @@
 
     <form id="onboarding-form" class="frame" data-label="CONFIGURE //">
       <div class="onb-field">
-        <label for="onb-provider">// LLM PROVIDER</label>
-        <select id="onb-provider" name="provider" required>
-          <option value="anthropic">anthropic (Claude)</option>
-          <option value="openai">openai (GPT)</option>
-          <option value="gemini">gemini (Google)</option>
-          <option value="glm">glm (Zhipu)</option>
-          <option value="kimi">kimi (Moonshot)</option>
-        </select>
+        <label for="onb-provider-button">// LLM PROVIDER</label>
+        <input type="hidden" id="onb-provider" name="provider" value="anthropic" required>
+        <div
+          class="cyb-combobox"
+          id="onb-provider-combobox"
+          aria-expanded="false"
+          data-target="onb-provider"
+        >
+          <button
+            type="button"
+            id="onb-provider-button"
+            class="cyb-combobox-button"
+            aria-haspopup="listbox"
+            aria-controls="onb-provider-list"
+          >anthropic (Claude)</button>
+          <ul
+            id="onb-provider-list"
+            class="cyb-combobox-list"
+            role="listbox"
+            aria-labelledby="onb-provider-button"
+          >
+            <li class="cyb-combobox-option" role="option" data-value="anthropic" aria-selected="true">anthropic (Claude)</li>
+            <li class="cyb-combobox-option" role="option" data-value="openai">openai (GPT)</li>
+            <li class="cyb-combobox-option" role="option" data-value="gemini">gemini (Google)</li>
+            <li class="cyb-combobox-option" role="option" data-value="glm">glm (Zhipu)</li>
+            <li class="cyb-combobox-option" role="option" data-value="kimi">kimi (Moonshot)</li>
+            <li class="cyb-combobox-option" role="option" data-value="custom">custom (OpenAI-compatible)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="onb-field" id="onb-base-url-field" hidden>
+        <label for="onb-base-url">// BASE URL</label>
+        <input
+          id="onb-base-url"
+          name="base_url"
+          type="url"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="https://your-endpoint.example.com/v1"
+        >
+        <p class="onb-hint">Required for custom providers. Must be OpenAI-compatible (Chat Completions API).</p>
       </div>
 
       <div class="onb-field">
@@ -115,6 +149,6 @@
     </form>
   </div>
 
-  <script type="module" src="/ui/static/modules/ui/onboarding.js"></script>
+  <script type="module" src="/ui/static/modules/ui/onboarding.js?v=2"></script>
 </body>
 </html>

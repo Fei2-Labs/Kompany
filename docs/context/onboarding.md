@@ -10,7 +10,7 @@ uvx kompany onboard --yes
 
 In under 90 seconds the wizard checks the environment, captures an LLM
 provider + API key, applies a starter company template, and (optionally)
-runs the player's first directive. This is the path the demo video
+runs the founder's first directive. This is the path the demo video
 exercises, and the path the integration test suite covers end-to-end.
 
 ## What it does, step by step

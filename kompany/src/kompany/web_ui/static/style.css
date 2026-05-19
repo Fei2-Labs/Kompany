@@ -318,9 +318,11 @@ body.onboarding-body { padding-bottom: 40px; }
   font-style: italic;
 }
 
-#onboarding-form select,
 #onboarding-form input[type="password"],
 #onboarding-form input[type="text"],
+#onboarding-form input[type="url"],
+#onboarding-form input[type="email"],
+#onboarding-form input[type="search"],
 #onboarding-form textarea {
   background: rgba(0, 255, 65, 0.04);
   border: 1px solid rgba(0, 255, 65, 0.35);
@@ -330,13 +332,102 @@ body.onboarding-body { padding-bottom: 40px; }
   padding: 8px 10px;
   outline: 0;
   caret-color: #00ff41;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  box-shadow: none;
 }
 
-#onboarding-form select:focus,
 #onboarding-form input:focus,
 #onboarding-form textarea:focus {
   border-color: #00ff41;
-  background: rgba(0, 255, 65, 0.08);
+  background-color: rgba(0, 255, 65, 0.08);
+}
+
+#onboarding-form input::placeholder,
+#onboarding-form textarea::placeholder {
+  color: rgba(0, 255, 65, 0.35);
+}
+
+/* Defeat Chrome autofill yellow/white. */
+#onboarding-form input:-webkit-autofill,
+#onboarding-form input:-webkit-autofill:hover,
+#onboarding-form input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #00ff41;
+  -webkit-box-shadow: 0 0 0 1000px rgba(0, 16, 0, 1) inset;
+  caret-color: #00ff41;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Custom combobox (replaces native <select> so dropdown list is themable). */
+.cyb-combobox {
+  position: relative;
+  font-family: inherit;
+  font-size: 13px;
+}
+.cyb-combobox-button {
+  width: 100%;
+  text-align: left;
+  background: rgba(0, 255, 65, 0.04);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 32px 8px 10px;
+  cursor: pointer;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+}
+.cyb-combobox-button:focus {
+  outline: 0;
+  border-color: #00ff41;
+  background-color: rgba(0, 255, 65, 0.08);
+}
+.cyb-combobox-button::after {
+  content: "▼";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: #00ff41;
+}
+.cyb-combobox[aria-expanded="true"] .cyb-combobox-button::after {
+  content: "▲";
+}
+.cyb-combobox-list {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: #000;
+  border: 1px solid #00ff41;
+  z-index: 50;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.cyb-combobox[aria-expanded="false"] .cyb-combobox-list {
+  display: none;
+}
+.cyb-combobox-option {
+  padding: 8px 10px;
+  cursor: pointer;
+  color: #00ff41;
+  border-left: 2px solid transparent;
+}
+.cyb-combobox-option:hover,
+.cyb-combobox-option[aria-selected="true"] {
+  background: rgba(0, 255, 65, 0.12);
+  border-left-color: #00ff41;
+}
+.cyb-combobox-option[data-active="true"] {
+  background: rgba(0, 255, 65, 0.2);
 }
 
 #onboarding-form textarea { resize: vertical; min-height: 60px; }

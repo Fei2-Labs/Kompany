@@ -83,6 +83,7 @@ class OnboardingCompleteRequest(BaseModel):
     api_key: str = Field(..., min_length=1)
     template_id: str = Field(..., min_length=1)
     directive: str | None = None
+    base_url: str | None = None
 
 
 class OnboardingCompleteResponse(BaseModel):
@@ -141,6 +142,7 @@ def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteRes
             api_key=req.api_key,
             template_id=req.template_id,
             directive=req.directive,
+            base_url=req.base_url,
         )
     except OnboardError as exc:
         return OnboardingCompleteResponse(

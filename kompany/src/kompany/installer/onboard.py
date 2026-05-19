@@ -840,6 +840,7 @@ def onboard_headless(
     api_key: str,
     template_id: str,
     directive: str | None = None,
+    base_url: str | None = None,
     *,
     engine_factory: Callable[[], Any] | None = None,
 ) -> OnboardResult:
@@ -873,6 +874,11 @@ def onboard_headless(
         raise OnboardError("missing_api_key", "api_key is required")
     if not template_id:
         raise OnboardError("missing_template", "template_id is required")
+    if provider == "custom" and not (base_url and base_url.strip()):
+        raise OnboardError(
+            "missing_base_url",
+            "custom provider requires a base_url (OpenAI-compatible endpoint)",
+        )
 
     data_dir = Path(data_dir).expanduser().resolve()
     ok, msg = _ensure_data_dir(data_dir)
@@ -923,6 +929,17 @@ def onboard_headless(
                 )
             if vault_field:
                 setattr(engine.settings, vault_field, api_key)
+            # For custom provider, also persist base_url alongside the API key.
+            if provider == "custom" and base_url:
+                base_url_value = base_url.strip()
+                if getattr(engine.settings, "vault_key", ""):
+                    try:
+                        engine.credentials.set("custom_base_url", base_url_value)
+                    except Exception as exc:  # noqa: BLE001
+                        result.notes.append(
+                            f"custom_base_url vault write failed ({exc}); using process env only"
+                        )
+                setattr(engine.settings, "custom_base_url", base_url_value)
             result.api_key_storage = storage
 
             ok, detail = _ping_llm(

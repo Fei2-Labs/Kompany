@@ -18,7 +18,7 @@ future approval-thread RPG, future resilience watchdog).
 tables. Three known-but-unimplemented consumers will also need to ride
 inside this payload later:
 
-1. **Approval thread RPG** (paperclip P0 #2) — player counter-proposals and
+1. **Approval thread RPG** (paperclip P0 #2) — founder counter-proposals and
    revision requests on approval requests.
 2. **Resilience watchdog** (collab report P1 #3 #4) — `stranded_todo`,
    `stranded_in_progress`, `silent_run` task states and watchdog alerts.
@@ -46,7 +46,7 @@ forward-compatible additions go under `ext` (see below).
 | `debate_ids` | `list[str]` | live | episode materializer (from `debates` table) | distillation P1 | `[]` |
 | `audit_events` | `list[AuditEvent]` | live | episode materializer (key rows from `audit_log`) | trace + distillation P1 | `[]` |
 | `reflections` | `list[ReflectionEntry]` | live | from `agent_memories` where `category='reflection'` | distillation P1 | `[]` |
-| `approval_events` | `list[ApprovalEvent]` | **reserved** | future `approval-thread-and-rpg` (after `approval_comments` subtable lands) | distillation P1 (player preference patterns) | `[]` |
+| `approval_events` | `list[ApprovalEvent]` | **reserved** | future `approval-thread-and-rpg` (after `approval_comments` subtable lands) | distillation P1 (founder preference patterns) | `[]` |
 | `health_events` | `list[HealthEvent]` | **reserved** | future `resilience-foundation` (after watchdog event table lands) | distillation P1 (fragility patterns) | `[]` |
 | `ext` | `dict[str, Any]` | permanent extension point | any future task, namespaced by task slug | compatibility container | `{}` |
 

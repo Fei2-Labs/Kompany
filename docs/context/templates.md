@@ -1,6 +1,6 @@
 # Company templates
 
-Templates are ready-to-play company presets. They let a new player skip
+Templates are ready-to-play company presets. They let a new founder skip
 the empty-canvas problem on day 1: pick a scenario, get a mission, a
 starter team, an initial budget, and a few draft directives staged in
 the inbox.

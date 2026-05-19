@@ -2,9 +2,9 @@
 
 Built by `05-18-approval-thread-and-rpg`. Replaces the flat
 `pending / approved / rejected` flow with a full decision thread so the
-player can counter-propose, snooze, cancel, or comment — and so
+founder can counter-propose, snooze, cancel, or comment — and so
 distillation (later `05-17-self-learning-evolution` P1) can learn from
-the player's revision pattern.
+the founder's revision pattern.
 
 ## State machine
 
@@ -55,7 +55,7 @@ replay path. All other terminal -> any transitions raise
 | `severity`       | TEXT | `'medium'`  | `info|low|medium|high|critical`|
 | `predecessor_id` | TEXT | `NULL`      | self-reference, revision chain |
 | `snoozed_until`  | TEXT | `NULL`      | SQLite datetime, UTC           |
-| `snoozed_by`     | TEXT | `NULL`      | who snoozed (player/agent)     |
+| `snoozed_by`     | TEXT | `NULL`      | who snoozed (founder/agent)     |
 
 New table `approval_comments`:
 
@@ -63,7 +63,7 @@ New table `approval_comments`:
 id            TEXT PRIMARY KEY
 approval_id   TEXT NOT NULL    -- no FK constraint enforced (SQLite default)
 by_type       TEXT NOT NULL    -- 'user' | 'agent' | 'system'
-by_id         TEXT             -- agent role, player alias, or NULL
+by_id         TEXT             -- agent role, founder alias, or NULL
 body          TEXT NOT NULL
 created_at    TEXT             -- datetime('now') default
 
@@ -77,7 +77,7 @@ rendered order matches insertion order even within a single second.
 
 ## Revision handler registry
 
-When a player calls `request_revision` on an approval, the original is
+When a founder calls `request_revision` on an approval, the original is
 flipped to `revision_requested` (terminal) + the counter-proposal is
 written as a comment. The engine then dispatches to a per-`action_type`
 revision handler that produces the successor approval:
@@ -132,5 +132,5 @@ The legacy CLI commands `kompany approvals` / `kompany approve` /
 - `comments`: ordered list of `ApprovalComment` (`by`, `at`, `text`)
 - `decided_at`: ISO timestamp of the terminal transition
 
-Distillation reads this slot to learn player preference patterns (e.g.
-"player revises 8/10 CFO budget proposals to half").
+Distillation reads this slot to learn founder preference patterns (e.g.
+"founder revises 8/10 CFO budget proposals to half").
