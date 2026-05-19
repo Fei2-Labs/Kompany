@@ -1,0 +1,20 @@
+{
+  "id": "consulting-firm",
+  "name": "Consulting Firm",
+  "mission_title": "Run a consulting firm on retainers",
+  "mission_md_path": "mission.md",
+  "initial_budget": 3000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"
+  ],
+  "agent_config_overrides": {
+    "cfo": {"approval_threshold_usd": 1000},
+    "cro": {"focus": "retainer revenue over one-off projects"}
+  },
+  "suggested_directives": [
+    "Define our three service tiers and their deliverables",
+    "Land our first 3 paying retainer clients",
+    "Set up monthly retainer billing and a client onboarding doc"
+  ],
+  "rpg_theme": "professional_office_suite"
+}

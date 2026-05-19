@@ -48,3 +48,14 @@ When a goal is achieved through a method in a completely new domain, the team mu
 **Meaning:** CoS leads a retrospective to determine if success was driven by replicable capability or a one-time opportunity. If replicable, CRO + CPO propose a new ongoing-type project through the standard decision chain. If one-time, close the goal-type project and preserve experience in the self-learning system.
 
 **Implication:** Entering a new domain is always a strategic decision requiring user approval. The team should not blindly expand into unfamiliar territory.
+
+## P0 implementation — episode logging
+At every project delivery, `engine.run_retrospective` writes a single structured record into `project_episodes.payload_json` (built from the frozen `EpisodePayloadV1` schema in `kompany.state.episode_payload`). The payload aggregates the project's metadata, tasks, ledger summary, decisions, `debate_ids`, curated audit events, and reflections — so downstream consumers (distillation, crystallization, future replay tooling) read **one row** instead of joining six tables.
+
+Strategic debates persist in their own `debates` table the moment `_handle_strategic_debate` finishes the multi-round protocol; the resulting `debate_id` flows into `decisions.result` and is referenced from the episode payload (never embedded — debates can be reused across directives).
+
+**Retention** is governed by `company_config['episode_retention_full_count']` (default 50). After every retrospective, episodes beyond the window are demoted to `retention_tier='summary'`: detailed `payload_json` is cleared, but the one-line `summary` and `debate_ids` remain. The six source tables stay untouched, so a trimmed project can be re-materialized at any time via `episodes rebuild <project_id>` (CLI / SDK / API / MCP).
+
+**Audit events emitted**: `learning.episode_recorded`, `learning.episode_trimmed`, `debate.recorded`.
+
+**Resilience signal — `health_events` slot**: `05-18-resilience-foundation` populates the `EpisodePayloadV1.health_events` slot at materialization time by JOINing the new `health_events` table on `project_id`. Each entry carries the watchdog `kind` (`silent_run`, `recovered`, `retry_exhausted`, `stranded_in_progress`, `stranded_todo`), the player resolution (`status` ∈ `open|resolved|snoozed|dismissed`, plus `resolved_by` / `resolved_at` / `snoozed_until`), and the originating `run_id`. P1 distillation uses this slot to learn cross-project fragility patterns — e.g. "Tuesday-afternoon 429 spikes on provider X" — without re-scanning the source table.

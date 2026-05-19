@@ -195,6 +195,40 @@ class Kompany:
         """Run (or replay) the CoS retrospective for a project."""
         return self._engine.run_retrospective(project_id)
 
+    def distill(
+        self,
+        since: Any = None,
+        dry_run: bool = False,
+        episode_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run CoS cross-episode distillation.
+
+        ``since`` accepts a ``timedelta`` (or numeric seconds). ``None``
+        falls back to the engine's 30-day default. Pass ``episode_ids``
+        to distil an explicit subset and bypass the window + 50-episode
+        ceiling.
+        """
+        return self._engine.distill(
+            since=since,
+            dry_run=dry_run,
+            episode_ids=episode_ids,
+        )
+
+    @property
+    def templates(self) -> "_TemplatesNamespace":
+        """Company-template operations: ``list``, ``show``, ``apply``."""
+        return _TemplatesNamespace(self._engine)
+
+    @property
+    def episodes(self) -> "_EpisodesNamespace":
+        """Project-episode operations: ``list``, ``get``, ``rebuild``."""
+        return _EpisodesNamespace(self._engine)
+
+    @property
+    def health(self) -> "_HealthNamespace":
+        """Health-event operations: ``list``, ``get``, ``resolve``."""
+        return _HealthNamespace(self._engine)
+
     def runtime_status(self) -> dict[str, Any]:
         """Return engine runtime state."""
         return self._engine.get_runtime_state()
@@ -326,3 +360,221 @@ class Kompany:
     def reject(self, approval_id: str, reason: str = "") -> dict[str, Any] | None:
         """Reject a pending request."""
         return self._engine.reject_request(approval_id, reason=reason)
+
+    def inbox(
+        self,
+        statuses: tuple[str, ...] = ("pending", "snoozed"),
+    ) -> list[dict[str, Any]]:
+        """RPG-style inbox of actionable approvals.
+
+        Default surfaces both ``pending`` and ``snoozed`` rows; terminal
+        approvals (``approved``/``rejected``/``revision_requested``/
+        ``cancelled``) are read via ``approvals_ns.show(id)``.
+        """
+        return self._engine.inbox(statuses=statuses)
+
+    @property
+    def approvals_ns(self) -> "_ApprovalsNamespace":
+        """Approval-thread operations: ``show``, ``approve``, ``reject``,
+        ``revise``, ``snooze``, ``cancel``, ``comment``."""
+        return _ApprovalsNamespace(self._engine)
+
+
+class _TemplatesNamespace:
+    """SDK sub-namespace exposing company-template operations."""
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def list(self) -> list[dict[str, Any]]:
+        """Return all available company templates as dicts."""
+        return self._engine.list_templates()
+
+    def show(self, template_id: str) -> dict[str, Any]:
+        """Return one template's manifest + rendered mission body."""
+        return self._engine.show_template(template_id)
+
+    def apply(
+        self,
+        template_id: str,
+        force: bool = False,
+        override_budget: float | None = None,
+        override_directive: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply a template to the current company."""
+        return self._engine.apply_template(
+            template_id,
+            force=force,
+            override_budget=override_budget,
+            override_directive=override_directive,
+        )
+
+
+class _EpisodesNamespace:
+    """SDK sub-namespace exposing episode operations on the engine."""
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def list(
+        self,
+        retention_tier: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List materialized project episodes (no payload).
+
+        ``retention_tier`` may be ``"full"`` or ``"summary"``.
+        """
+        return self._engine.list_episodes(retention_tier=retention_tier)
+
+    def get(self, project_id: str) -> dict[str, Any] | None:
+        """Fetch one episode including its ``payload_json`` string."""
+        return self._engine.get_episode(project_id)
+
+    def rebuild(self, project_id: str) -> dict[str, Any]:
+        """Force re-materialization of a project's episode payload."""
+        return self._engine.rebuild_episode(project_id)
+
+
+class _HealthNamespace:
+    """SDK sub-namespace exposing watchdog health-event operations."""
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def list(
+        self,
+        status: str | None = None,
+        kind: str | None = None,
+        project_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List health events, newest-first.
+
+        Filters: ``status`` in ``open|resolved|snoozed|dismissed``;
+        ``kind`` in ``silent_run|recovered|retry_exhausted|stranded_in_progress|stranded_todo``.
+        """
+        return self._engine.list_health_events(
+            status=status,
+            kind=kind,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    def get(self, event_id: str) -> dict[str, Any] | None:
+        """Fetch one health event by id."""
+        return self._engine.get_health_event(event_id)
+
+    def resolve(
+        self,
+        event_id: str,
+        action: str = "continue",
+        snooze_minutes: int | None = None,
+        resolved_by: str = "player",
+    ) -> dict[str, Any] | None:
+        """Apply a player action (``continue`` / ``snooze`` / ``dismiss``)."""
+        return self._engine.resolve_health_event(
+            event_id=event_id,
+            action=action,
+            snooze_minutes=snooze_minutes,
+            resolved_by=resolved_by,
+        )
+
+
+class _ApprovalsNamespace:
+    """SDK sub-namespace for the approval-thread RPG inbox actions."""
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def show(self, approval_id: str) -> dict[str, Any] | None:
+        """Return one approval with its full thread + comments."""
+        return self._engine.get_approval(approval_id)
+
+    def approve(
+        self,
+        approval_id: str,
+        comment: str | None = None,
+        approved_by: str = "master",
+    ) -> dict[str, Any] | None:
+        return self._engine.approve_request(
+            approval_id,
+            approved_by=approved_by,
+            comment_body=comment,
+        )
+
+    def reject(
+        self,
+        approval_id: str,
+        reason: str = "",
+        comment: str | None = None,
+        rejected_by: str = "master",
+    ) -> dict[str, Any] | None:
+        return self._engine.reject_request(
+            approval_id,
+            rejected_by=rejected_by,
+            reason=reason or None,
+            comment_body=comment,
+        )
+
+    def revise(
+        self,
+        approval_id: str,
+        counter: str,
+        comment: str | None = None,
+        by_type: str = "user",
+        by_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Player counter-proposal; returns ``{original, successor}``."""
+        return self._engine.request_approval_revision(
+            approval_id,
+            counter=counter,
+            by_type=by_type,
+            by_id=by_id,
+            comment_body=comment,
+        )
+
+    def snooze(
+        self,
+        approval_id: str,
+        minutes: int,
+        comment: str | None = None,
+        by_type: str = "user",
+        by_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._engine.snooze_approval(
+            approval_id,
+            minutes=minutes,
+            by_type=by_type,
+            by_id=by_id,
+            comment_body=comment,
+        )
+
+    def cancel(
+        self,
+        approval_id: str,
+        reason: str = "",
+        comment: str | None = None,
+        by_type: str = "user",
+        by_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._engine.cancel_approval(
+            approval_id,
+            reason=reason or None,
+            by_type=by_type,
+            by_id=by_id,
+            comment_body=comment,
+        )
+
+    def comment(
+        self,
+        approval_id: str,
+        body: str,
+        by_type: str = "user",
+        by_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._engine.comment_on_approval(
+            approval_id,
+            body=body,
+            by_type=by_type,
+            by_id=by_id,
+        )

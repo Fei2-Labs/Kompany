@@ -1,0 +1,21 @@
+{
+  "id": "saas-startup",
+  "name": "SaaS Startup",
+  "mission_title": "Build a B2B SaaS to $1M ARR",
+  "mission_md_path": "mission.md",
+  "initial_budget": 5000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cto", "cpo", "cmo", "cro",
+    "coo", "csa", "ciso", "cos", "cv"
+  ],
+  "agent_config_overrides": {
+    "cfo": {"approval_threshold_usd": 500},
+    "cto": {"focus": "fast iteration over architecture purity"}
+  },
+  "suggested_directives": [
+    "Define our ideal customer profile and pricing tiers",
+    "Launch a landing page with a waitlist signup",
+    "Set up Stripe with a 14-day free trial and self-serve checkout"
+  ],
+  "rpg_theme": "modern_loft_office"
+}

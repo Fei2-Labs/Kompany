@@ -1,0 +1,20 @@
+{
+  "id": "ecommerce",
+  "name": "DTC Ecommerce Brand",
+  "mission_title": "Launch a DTC ecommerce brand",
+  "mission_md_path": "mission.md",
+  "initial_budget": 4000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cpo", "cmo", "cro", "coo", "csa", "ciso", "cos", "cv"
+  ],
+  "agent_config_overrides": {
+    "cfo": {"approval_threshold_usd": 400},
+    "coo": {"focus": "supply chain reliability over speed-to-market"}
+  },
+  "suggested_directives": [
+    "Pick the initial product line (1-3 SKUs maximum)",
+    "Design and launch the Shopify store",
+    "Run the first paid ad test with a $200 budget cap"
+  ],
+  "rpg_theme": "warehouse_loft"
+}

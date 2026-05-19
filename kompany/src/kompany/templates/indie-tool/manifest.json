@@ -1,0 +1,20 @@
+{
+  "id": "indie-tool",
+  "name": "Indie Tool",
+  "mission_title": "Ship a paid indie tool to $10k MRR",
+  "mission_md_path": "mission.md",
+  "initial_budget": 1000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cto", "cpo", "cro", "coo", "cos"
+  ],
+  "agent_config_overrides": {
+    "cfo": {"approval_threshold_usd": 100},
+    "ceo": {"tone": "scrappy solo founder, ship fast"}
+  },
+  "suggested_directives": [
+    "Pick one narrow pain we can solve in 2 weeks",
+    "Ship the MVP and put it behind a Gumroad paywall",
+    "Launch on Product Hunt with a clear demo video"
+  ],
+  "rpg_theme": "home_office_garage"
+}

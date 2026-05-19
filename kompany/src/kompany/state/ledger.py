@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 from kompany.state.models import LedgerCategory, LedgerEntry
 
@@ -26,15 +27,17 @@ class Ledger:
         directive_id: str | None = None,
         project_id: str | None = None,
         approved_by: str | None = None,
+        run_id: str | None = None,
     ) -> LedgerEntry:
         balance = self.get_balance() + amount
+        rid = run_id if run_id is not None else current_run_id()
         self.db.execute(
             """INSERT INTO ledger
                (amount, balance_after, description, category,
-                directive_id, project_id, approved_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                directive_id, project_id, approved_by, run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (amount, balance, description, category.value,
-             directive_id, project_id, approved_by),
+             directive_id, project_id, approved_by, rid),
         )
         self.db.commit()
         return LedgerEntry(
@@ -48,7 +51,11 @@ class Ledger:
         )
 
     def record_ai_cost(
-        self, amount_usd: float, description: str, directive_id: str | None = None
+        self,
+        amount_usd: float,
+        description: str,
+        directive_id: str | None = None,
+        run_id: str | None = None,
     ) -> LedgerEntry:
         """Record an AI/LLM cost as a real operational expense."""
         return self.record(
@@ -57,6 +64,7 @@ class Ledger:
             category=LedgerCategory.AI_COST,
             directive_id=directive_id,
             approved_by="auto",
+            run_id=run_id,
         )
 
     def get_totals(self) -> dict[str, float]:

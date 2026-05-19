@@ -129,16 +129,16 @@ class FakeEngine:
     def list_approvals(self):
         return [self._approval] if self._approval["status"] == "pending" else []
 
-    def approve_request(self, approval_id):
+    def approve_request(self, approval_id, approved_by="master", comment_body=None):
         if approval_id != self._approval["id"] or self._approval["status"] != "pending":
             return None
-        self._approval = {**self._approval, "status": "approved", "resolved_by": "master"}
+        self._approval = {**self._approval, "status": "approved", "resolved_by": approved_by}
         return self._approval
 
-    def reject_request(self, approval_id, reason=""):
+    def reject_request(self, approval_id, rejected_by="master", reason="", comment_body=None):
         if approval_id != self._approval["id"] or self._approval["status"] != "pending":
             return None
-        self._approval = {**self._approval, "status": "rejected", "resolved_by": "master", "resolution_reason": reason}
+        self._approval = {**self._approval, "status": "rejected", "resolved_by": rejected_by, "resolution_reason": reason}
         return self._approval
 
     def observability_snapshot(self):
@@ -435,13 +435,13 @@ class FakeEngine:
             "total_ai_cost": 0.0,
         }
 
-    def reject_request(self, approval_id, reason=None):
+    def reject_request(self, approval_id, rejected_by="master", reason=None, comment_body=None):
         if approval_id != self._approval["id"] or self._approval["status"] != "pending":
             return None
         self._approval = {
             **self._approval,
             "status": "rejected",
-            "resolved_by": "master",
+            "resolved_by": rejected_by,
             "resolution_reason": reason,
         }
         return self._approval

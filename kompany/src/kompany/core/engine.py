@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any, Callable
 
 from kompany.agents.registry import AgentRegistry
 from kompany.config.settings import KompanySettings
@@ -14,6 +15,8 @@ from kompany.core.directive import (
     DirectiveStatus,
     DirectiveType,
 )
+from kompany.core.run_context import current_run_id, run_scope
+from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient
 from kompany.llm.cost_tracker import CostTracker
 from kompany.notifications import build_notifier
@@ -54,10 +57,18 @@ from kompany.state.models import (
     RevenueProposal,
 )
 from kompany.state.backup import BackupManager
+from kompany.state.debates import Debates
+from kompany.state.episodes import Episodes
+from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
+from kompany.state.templates import (
+    Templates,
+    TemplateAlreadyApplied,
+    TemplateNotFound,
+)
 from kompany.state.tool_authorization import ToolAuthorizationStore
 
 
@@ -73,6 +84,9 @@ class KompanyEngine:
         self.projects = Projects(self.db)
         self.memory = AgentMemory(self.db)
         self.audit = AuditLog(self.db)
+        self.debates = Debates(self.db)
+        self.episodes = Episodes(self.db)
+        self.health_events = HealthEvents(self.db)
         self.approvals = ApprovalRequests(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
@@ -81,18 +95,58 @@ class KompanyEngine:
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
+        self.templates = Templates(
+            db=self.db,
+            ledger=self.ledger,
+            projects=self.projects,
+            audit=self.audit,
+        )
         self.backups = BackupManager(self.settings.data_dir)
         self.cost_tracker = CostTracker(self.ledger)
         self.autonomy = AutonomyGate()
+
+        # Resilience watchdog: silent-run + stranded-task supervisor.
+        # Defaults live in code; ``company_config`` overrides take effect
+        # at engine construction time.
+        self.watchdog = Watchdog(
+            health_events=self.health_events,
+            projects=self.projects,
+            audit=self.audit,
+            scan_interval_seconds=self._get_int_config(
+                "stranded_scan_interval_seconds", default=60
+            ),
+            stale_threshold_seconds=self._get_int_config(
+                "task_stale_threshold_seconds", default=600
+            ),
+            approvals=self.approvals,
+        )
 
         self.llm = LLMClient(
             settings=self.settings,
             cost_tracker=self.cost_tracker,
             provider_error_handler=self._handle_provider_error,
+            audit_log=self.audit,
+            watchdog=self.watchdog,
+            silent_timeout_seconds=self._get_int_config(
+                "llm_silent_timeout_seconds", default=90
+            ),
         )
         self.registry = AgentRegistry(
             self.llm, self.settings, self.ledger, self.projects
         )
+
+        # Revision-handler registry. Keyed by ``ApprovalRequest.action_type``;
+        # each handler receives ``(original_approval, hint_text)`` and must
+        # return a freshly persisted ``ApprovalRequest`` whose
+        # ``predecessor_id`` points back at the original. Action types
+        # without a registered handler fall through to
+        # ``_default_revision_handler`` (see below) so the player flow never
+        # dead-ends. Registered here so callers can swap in
+        # caller-specific LLM-driven re-plan paths in a later task.
+        self._revision_handlers: dict[
+            str,
+            Callable[[ApprovalRequest, str], ApprovalRequest],
+        ] = {}
 
     def _resolve_vault_key(self) -> None:
         vault_key, source = resolve_vault_key(
@@ -166,6 +220,12 @@ class KompanyEngine:
 
     def execute_project(self, project_id: str) -> dict:
         """Execute a revenue project's tasks autonomously."""
+        if current_run_id() is None:
+            with run_scope():
+                return self._execute_project_inner(project_id)
+        return self._execute_project_inner(project_id)
+
+    def _execute_project_inner(self, project_id: str) -> dict:
         rt = self.runtime.get()
         if rt["state"] == "suspended":
             self.audit.record(
@@ -187,6 +247,12 @@ class KompanyEngine:
 
     def resume_project(self, project_id: str) -> dict:
         """Resume a project from persisted task/checkpoint state."""
+        if current_run_id() is None:
+            with run_scope():
+                return self._resume_project_inner(project_id)
+        return self._resume_project_inner(project_id)
+
+    def _resume_project_inner(self, project_id: str) -> dict:
         latest = self.checkpoints.latest(project_id)
         rt = self.runtime.get()
         if rt["state"] == "suspended":
@@ -222,6 +288,16 @@ class KompanyEngine:
         target_amount: float | None = None,
     ) -> dict:
         """Prepare a full executive decision-chain packet without executing it."""
+        if current_run_id() is None:
+            with run_scope():
+                return self._prepare_decision_packet_inner(raw_input, target_amount)
+        return self._prepare_decision_packet_inner(raw_input, target_amount)
+
+    def _prepare_decision_packet_inner(
+        self,
+        raw_input: str,
+        target_amount: float | None,
+    ) -> dict:
         balance = self.ledger.get_balance()
         shortfall = max(0.0, (target_amount or 0.0) - balance)
         directive = Directive(raw_input=raw_input)
@@ -323,6 +399,7 @@ class KompanyEngine:
             payload={"packet": packet.model_dump(mode="json")},
             directive_id=directive.id,
             requested_by="AutonomyGate",
+            severity="medium",
         ))
         packet.approval_id = request.id
         self.audit.record(
@@ -346,6 +423,16 @@ class KompanyEngine:
                           → C-level review (cro/cfo/cos/ceo)
                           → delivery approval request (no auto-delivery)
         """
+        if current_run_id() is None:
+            with run_scope():
+                return self._execute_decision_packet_inner(approval_id, executor)
+        return self._execute_decision_packet_inner(approval_id, executor)
+
+    def _execute_decision_packet_inner(
+        self,
+        approval_id: str,
+        executor: str,
+    ) -> dict:
         from kompany.core.runner import ProjectRunner
 
         request = self.approvals.get(approval_id)
@@ -416,6 +503,7 @@ class KompanyEngine:
             },
             project_id=project.id,
             requested_by="AutonomyGate",
+            severity="high",
         ))
         self.audit.record(
             "governed_execution.delivery_requested",
@@ -452,6 +540,16 @@ class KompanyEngine:
         Idempotent: a second call returns ``status="already_delivered"`` with
         no project mutation and no duplicate audit entry.
         """
+        if current_run_id() is None:
+            with run_scope():
+                return self._release_delivery_inner(approval_id, released_by)
+        return self._release_delivery_inner(approval_id, released_by)
+
+    def _release_delivery_inner(
+        self,
+        approval_id: str,
+        released_by: str,
+    ) -> dict:
         request = self.approvals.get(approval_id)
         if request is None or request.action_type != "delivery_approval":
             self.audit.record(
@@ -571,6 +669,12 @@ class KompanyEngine:
         Idempotent: if a retrospective already exists for the project,
         returns ``status="already_recorded"`` without writing or auditing.
         """
+        if current_run_id() is None:
+            with run_scope():
+                return self._run_retrospective_inner(project_id)
+        return self._run_retrospective_inner(project_id)
+
+    def _run_retrospective_inner(self, project_id: str) -> dict:
         project = self.projects.get(project_id)
         if project is None:
             self.audit.record(
@@ -642,6 +746,40 @@ class KompanyEngine:
             project_id=project_id,
         )
 
+        # Materialize the structured episode record + enforce retention.
+        # Wrapped in try/except so that a materialization bug never blocks
+        # a retrospective from being written (reflections are the user-visible
+        # output; episodes are the durable analysis substrate).
+        try:
+            episode_row = self.episodes.record_or_update(project_id)
+            self.audit.record(
+                "learning.episode_recorded",
+                "Materialized project episode",
+                detail={
+                    "project_id": project_id,
+                    "retention_tier": episode_row["retention_tier"],
+                },
+                project_id=project_id,
+            )
+            max_full = self._get_int_config(
+                "episode_retention_full_count", default=50
+            )
+            trimmed = self.episodes.trim_to_retention_window(max_full)
+            for entry in trimmed:
+                self.audit.record(
+                    "learning.episode_trimmed",
+                    "Episode demoted to summary retention",
+                    detail=entry,
+                    project_id=entry["project_id"],
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            self.audit.record(
+                "learning.episode_failed",
+                "Episode materialization failed",
+                detail={"project_id": project_id, "error": str(exc)},
+                project_id=project_id,
+            )
+
         return Retrospective(
             project_id=project_id,
             status="recorded",
@@ -650,6 +788,232 @@ class KompanyEngine:
             tasks_failed=failed,
             reflections=reflections,
         ).model_dump(mode="json")
+
+    # ------------------------------------------------------------------
+    # Health events (resilience watchdog)
+    # ------------------------------------------------------------------
+
+    def list_health_events(
+        self,
+        status: str | None = None,
+        project_id: str | None = None,
+        kind: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List health events, newest-first, optionally filtered."""
+        return self.health_events.list(
+            status=status,
+            project_id=project_id,
+            kind=kind,
+            limit=limit,
+        )
+
+    def get_health_event(self, event_id: str) -> dict[str, Any] | None:
+        """Fetch a single health event by id."""
+        return self.health_events.get(event_id)
+
+    def resolve_health_event(
+        self,
+        event_id: str,
+        action: str,
+        snooze_minutes: int | None = None,
+        resolved_by: str = "player",
+    ) -> dict[str, Any] | None:
+        """Apply a player action (``continue`` / ``snooze`` / ``dismiss``)."""
+        if action == "snooze" and snooze_minutes is None:
+            snooze_minutes = self._get_int_config(
+                "health_default_snooze_minutes", default=30
+            )
+        return self.watchdog.resolve(
+            event_id=event_id,
+            action=action,
+            resolved_by=resolved_by,
+            snooze_minutes=snooze_minutes,
+        )
+
+    def scan_stranded_tasks(self) -> list[dict[str, Any]]:
+        """One-shot stranded-task sweep. Returns the events written."""
+        if current_run_id() is None:
+            with run_scope():
+                return self.watchdog.scan_once()
+        return self.watchdog.scan_once()
+
+    def mark_task_stranded(
+        self,
+        task_id: str,
+        project_id: str | None = None,
+        reason: str = "llm_unavailable",
+    ) -> dict[str, Any]:
+        """Flip a task to ``stranded_in_progress`` + write health event.
+
+        Called by the engine when an ``LLMUnavailable`` is caught after
+        the watchdog's retry budget is exhausted.
+        """
+        if current_run_id() is None:
+            with run_scope():
+                return self._mark_task_stranded_inner(task_id, project_id, reason)
+        return self._mark_task_stranded_inner(task_id, project_id, reason)
+
+    def _mark_task_stranded_inner(
+        self,
+        task_id: str,
+        project_id: str | None,
+        reason: str,
+    ) -> dict[str, Any]:
+        try:
+            self.projects.update_task_status_raw(
+                task_id=task_id,
+                status="stranded_in_progress",
+            )
+        except Exception:
+            pass
+        return self.watchdog.record_stranded_in_progress(
+            task_id=task_id,
+            project_id=project_id,
+            detail={"reason": reason},
+        )
+
+    async def start(self) -> None:
+        """Start engine background workers (watchdog scanner)."""
+        self.watchdog.start()
+
+    async def stop(self) -> None:
+        """Stop engine background workers."""
+        await self.watchdog.stop()
+
+    # ------------------------------------------------------------------
+    # Company templates (ready-to-play scenarios)
+    # ------------------------------------------------------------------
+
+    def list_templates(self) -> list[dict[str, Any]]:
+        """Return all available company templates as dicts."""
+        return [tpl.model_dump() for tpl in self.templates.list_templates()]
+
+    def show_template(self, template_id: str) -> dict[str, Any]:
+        """Return one template's manifest + rendered mission body."""
+        try:
+            tpl, mission = self.templates.show_with_mission(template_id)
+        except TemplateNotFound as exc:
+            raise ValueError(str(exc)) from exc
+        payload = tpl.model_dump()
+        payload["mission"] = mission
+        return payload
+
+    def apply_template(
+        self,
+        template_id: str,
+        force: bool = False,
+        override_budget: float | None = None,
+        override_directive: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply a ready-to-play template to the current company.
+
+        Wraps :meth:`Templates.apply` in an audit-friendly run scope and
+        normalizes the structured errors into ``ValueError`` so every
+        surface (CLI, REST, MCP, SDK) handles them uniformly.
+        """
+        if current_run_id() is None:
+            with run_scope():
+                return self._apply_template_inner(
+                    template_id,
+                    force=force,
+                    override_budget=override_budget,
+                    override_directive=override_directive,
+                )
+        return self._apply_template_inner(
+            template_id,
+            force=force,
+            override_budget=override_budget,
+            override_directive=override_directive,
+        )
+
+    def _apply_template_inner(
+        self,
+        template_id: str,
+        *,
+        force: bool,
+        override_budget: float | None,
+        override_directive: str | None,
+    ) -> dict[str, Any]:
+        try:
+            result = self.templates.apply(
+                template_id,
+                force=force,
+                override_budget=override_budget,
+                override_directive=override_directive,
+            )
+        except TemplateNotFound as exc:
+            raise ValueError(str(exc)) from exc
+        except TemplateAlreadyApplied as exc:
+            raise ValueError(str(exc)) from exc
+        return result.model_dump()
+
+    def _get_int_config(self, key: str, default: int) -> int:
+        """Read an integer config value from ``company_config``.
+
+        Falls back to ``default`` if the row is missing or unparseable.
+        """
+        row = self.db.execute(
+            "SELECT value FROM company_config WHERE key = ?", (key,)
+        ).fetchone()
+        if not row:
+            return default
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError):
+            return default
+
+    def list_episodes(
+        self,
+        retention_tier: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List materialized project episodes (no payload)."""
+        rows = self.episodes.list(retention_tier=retention_tier)
+        # Strip the heavy payload column from the list view; callers who
+        # want the full payload should call ``get_episode``.
+        return [
+            {k: v for k, v in row.items() if k != "payload_json"}
+            for row in rows
+        ]
+
+    def get_episode(self, project_id: str) -> dict[str, Any] | None:
+        """Fetch one episode row including its ``payload_json``."""
+        return self.episodes.get(project_id)
+
+    def rebuild_episode(self, project_id: str) -> dict[str, Any]:
+        """Force re-materialization of one project's episode payload.
+
+        Use this after manually mutating source-table rows (e.g. backfilling
+        a missing audit event) to refresh the cached payload. The operation
+        is idempotent and re-applies retention trimming.
+        """
+        if current_run_id() is None:
+            with run_scope():
+                return self._rebuild_episode_inner(project_id)
+        return self._rebuild_episode_inner(project_id)
+
+    def _rebuild_episode_inner(self, project_id: str) -> dict[str, Any]:
+        row = self.episodes.record_or_update(project_id)
+        self.audit.record(
+            "learning.episode_recorded",
+            "Episode rebuilt on demand",
+            detail={
+                "project_id": project_id,
+                "retention_tier": row["retention_tier"],
+                "trigger": "rebuild",
+            },
+            project_id=project_id,
+        )
+        max_full = self._get_int_config("episode_retention_full_count", default=50)
+        trimmed = self.episodes.trim_to_retention_window(max_full)
+        for entry in trimmed:
+            self.audit.record(
+                "learning.episode_trimmed",
+                "Episode demoted to summary retention",
+                detail=entry,
+                project_id=entry["project_id"],
+            )
+        return row
 
     def list_memories(
         self,
@@ -667,6 +1031,255 @@ class KompanyEngine:
             include_stale=include_stale,
             knowledge_type=knowledge_type,
         )
+
+    # ------------------------------------------------------------------
+    # Cross-episode distillation (P1 self-learning)
+    # ------------------------------------------------------------------
+
+    def distill(
+        self,
+        since: Any = None,
+        dry_run: bool = False,
+        episode_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run cross-episode distillation as CoS.
+
+        Pulls the recent ``project_episodes`` rows, asks CoS to identify
+        durable cross-project patterns, and UPSERTs each pattern into
+        ``agent_memories`` (``category='experiential'``) keyed by
+        ``(agent_role, pattern_key)``.
+
+        Parameters
+        ----------
+        since:
+            A ``timedelta`` controlling the time window. ``None`` uses
+            :data:`kompany.agents.cos_distillation.DEFAULT_SINCE` (30 days).
+            Ignored when ``episode_ids`` is provided.
+        dry_run:
+            If ``True``, the LLM call still happens (so the operator can
+            inspect what would be written) but no rows are written to
+            ``agent_memories`` and no audit event is recorded.
+        episode_ids:
+            Explicit subset of project ids to distil. Bypasses the
+            ``since`` window and the 50-episode cap.
+        """
+        if current_run_id() is None:
+            with run_scope():
+                return self._distill_inner(
+                    since=since,
+                    dry_run=dry_run,
+                    episode_ids=episode_ids,
+                )
+        return self._distill_inner(
+            since=since,
+            dry_run=dry_run,
+            episode_ids=episode_ids,
+        )
+
+    def _distill_inner(
+        self,
+        *,
+        since: Any,
+        dry_run: bool,
+        episode_ids: list[str] | None,
+    ) -> dict[str, Any]:
+        from datetime import timedelta
+
+        from kompany.agents.cos_distillation import (
+            DEFAULT_SINCE,
+            MAX_EPISODES_PER_RUN,
+            build_episode_summaries,
+            filter_patterns,
+            select_episode_rows,
+        )
+
+        window = since if since is not None else DEFAULT_SINCE
+        # Strings/numbers from REST or CLI callers get coerced to timedelta
+        # here so the selection helper sees a consistent type.
+        if isinstance(window, (int, float)):
+            window = timedelta(seconds=float(window))
+        if not isinstance(window, timedelta) and window is not None:
+            raise ValueError(
+                f"since must be a timedelta or numeric seconds, got {type(window).__name__}"
+            )
+
+        # ``list`` returns rows in newest-first order with full payload
+        # column. We need the payloads to summarize so ``list_episodes``
+        # (which strips payload_json) isn't an option here.
+        all_rows = self.episodes.list()
+        selected = select_episode_rows(
+            all_rows,
+            episode_ids=episode_ids,
+            since=window if not episode_ids else None,
+        )
+
+        # Hard cap unless the operator explicitly selected episodes.
+        if episode_ids is None and len(selected) > MAX_EPISODES_PER_RUN:
+            raise ValueError(
+                f"too many episodes in window ({len(selected)} > "
+                f"{MAX_EPISODES_PER_RUN}); use --episodes to select a subset"
+            )
+
+        run_id = current_run_id()
+
+        # No-input fast path: nothing to learn, nothing to bill for. We
+        # still emit an audit event so operators can see the run happened.
+        if not selected:
+            result = {
+                "status": "no_episodes",
+                "episodes_in": 0,
+                "patterns_out": 0,
+                "patterns": [],
+                "ai_cost": 0.0,
+                "run_id": run_id,
+                "dry_run": dry_run,
+            }
+            self.audit.record(
+                "learning.distillation_run",
+                "Distillation run produced no patterns (empty episode window)",
+                detail={
+                    "episodes_in": 0,
+                    "patterns_out": 0,
+                    "ai_cost": 0.0,
+                    "dry_run": dry_run,
+                    "run_id": run_id,
+                },
+            )
+            return result
+
+        summaries, parse_failures = build_episode_summaries(selected)
+        if not summaries:
+            # Every selected row had a malformed payload. Surface this as
+            # ``no_episodes`` rather than calling the LLM with nothing.
+            self.audit.record(
+                "learning.distillation_failed",
+                "All selected episodes had malformed payloads",
+                detail={
+                    "episodes_in": len(selected),
+                    "parse_failures": parse_failures,
+                    "dry_run": dry_run,
+                    "run_id": run_id,
+                },
+            )
+            return {
+                "status": "no_parseable_episodes",
+                "episodes_in": len(selected),
+                "patterns_out": 0,
+                "patterns": [],
+                "ai_cost": 0.0,
+                "run_id": run_id,
+                "dry_run": dry_run,
+                "parse_failures": parse_failures,
+            }
+
+        # Run the LLM call. The CoS agent + the LLMClient wrapper handle
+        # run_id propagation, audit events, ledger cost accounting,
+        # silent-run detection, and retry on transient failure.
+        cos_agent = self.registry.get("cos")
+        try:
+            resp = cos_agent.distill(summaries)
+        except Exception as exc:
+            self.audit.record(
+                "learning.distillation_failed",
+                "CoS LLM call failed during distillation",
+                detail={
+                    "episodes_in": len(summaries),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                    "dry_run": dry_run,
+                    "run_id": run_id,
+                },
+            )
+            raise
+
+        parsed = resp.parsed
+        if parsed is None:
+            # ``call_structured`` either parses or raises; defensive only.
+            self.audit.record(
+                "learning.distillation_failed",
+                "CoS distillation returned no parsed output",
+                detail={
+                    "episodes_in": len(summaries),
+                    "dry_run": dry_run,
+                    "run_id": run_id,
+                },
+            )
+            raise RuntimeError("CoS distillation returned no parsed output")
+
+        patterns, warnings = filter_patterns(parsed)
+
+        # Write phase. ``dry_run`` short-circuits all DB writes; the audit
+        # event still fires so operators can see who triggered the dry run.
+        written: list[dict[str, Any]] = []
+        if not dry_run:
+            for pattern in patterns:
+                action_meta = {
+                    "pattern_key": pattern.pattern_key,
+                    "confidence": pattern.confidence,
+                    "evidence_episode_ids": list(pattern.evidence_episode_ids),
+                }
+                upsert = self.memory.upsert_by_pattern_key(
+                    agent_role=pattern.target_agent_role,
+                    pattern_key=pattern.pattern_key,
+                    content=pattern.pattern_summary,
+                    metadata=action_meta,
+                    category="experiential",
+                    knowledge_type="experiential",
+                    run_id=run_id,
+                )
+                written.append({
+                    "agent_role": pattern.target_agent_role,
+                    "pattern_key": pattern.pattern_key,
+                    "memory_id": upsert["id"],
+                    "action": upsert["action"],
+                    "confidence": pattern.confidence,
+                })
+
+        result_patterns = [
+            {
+                "target_agent_role": p.target_agent_role,
+                "pattern_key": p.pattern_key,
+                "pattern_summary": p.pattern_summary,
+                "confidence": p.confidence,
+                "evidence_episode_ids": list(p.evidence_episode_ids),
+            }
+            for p in patterns
+        ]
+
+        result = {
+            "status": "completed",
+            "episodes_in": len(summaries),
+            "patterns_out": len(patterns),
+            "patterns": result_patterns,
+            "ai_cost": float(resp.cost_usd),
+            "run_id": run_id,
+            "dry_run": dry_run,
+            "warnings": warnings,
+            "writes": written,
+            "parse_failures": parse_failures,
+        }
+
+        self.audit.record(
+            "learning.distillation_run",
+            "CoS cross-episode distillation completed",
+            detail={
+                "episodes_in": len(summaries),
+                "patterns_out": len(patterns),
+                "ai_cost": float(resp.cost_usd),
+                "dry_run": dry_run,
+                "writes": [
+                    {
+                        "agent_role": w["agent_role"],
+                        "pattern_key": w["pattern_key"],
+                        "action": w["action"],
+                    }
+                    for w in written
+                ],
+                "warnings": warnings,
+                "run_id": run_id,
+            },
+        )
+        return result
 
     def get_runtime_state(self) -> dict:
         """Return the current persisted runtime state."""
@@ -1215,6 +1828,7 @@ class KompanyEngine:
                         "purpose": purpose,
                     },
                     requested_by="ToolAuthorizationGate",
+                    severity="critical",
                 ))
                 result = ToolAuthorizationResult(
                     agent_role=agent_role,
@@ -1377,6 +1991,9 @@ class KompanyEngine:
         self.projects = Projects(self.db)
         self.memory = AgentMemory(self.db)
         self.audit = AuditLog(self.db)
+        self.debates = Debates(self.db)
+        self.episodes = Episodes(self.db)
+        self.health_events = HealthEvents(self.db)
         self.approvals = ApprovalRequests(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
@@ -1472,6 +2089,12 @@ class KompanyEngine:
 
     def process_override(self, text: str) -> dict:
         """Create a risk briefing and approval request for a user override."""
+        if current_run_id() is None:
+            with run_scope():
+                return self._process_override_inner(text)
+        return self._process_override_inner(text)
+
+    def _process_override_inner(self, text: str) -> dict:
         directive = Directive(raw_input=text)
         directive.status = DirectiveStatus.AWAITING_APPROVAL
         briefing = {
@@ -1490,6 +2113,7 @@ class KompanyEngine:
             payload={"override": text, "briefing": briefing},
             directive_id=directive.id,
             requested_by="KompanyEngine",
+            severity="high",
         ))
         self.audit.record(
             "override.risk_briefing_created",
@@ -1504,7 +2128,18 @@ class KompanyEngine:
         }
 
     def process_directive(self, raw_input: str) -> DirectiveResult:
-        """Main entry point. Takes natural language, returns result."""
+        """Main entry point. Takes natural language, returns result.
+
+        Opens a fresh ``run_scope`` so every state write made during this
+        directive (audit_log, decisions, ledger, memories, approvals)
+        carries the same ``run_id``. A nested call (e.g. CEO derives a
+        child directive) records the outer ``run_id`` as ``parent_run_id``
+        automatically — see :func:`kompany.core.run_context.run_scope`.
+        """
+        with run_scope():
+            return self._process_directive_inner(raw_input)
+
+    def _process_directive_inner(self, raw_input: str) -> DirectiveResult:
         directive = Directive(raw_input=raw_input)
 
         rt = self.runtime.get()
@@ -1569,12 +2204,22 @@ class KompanyEngine:
 
             result = handler(directive, classification, ceo)
 
+            decision_result_payload: dict[str, Any] = {
+                "status": result.status,
+                "message": result.message[:500],
+            }
+            if result.project_id:
+                decision_result_payload["project_id"] = result.project_id
+            if result.debate_id:
+                decision_result_payload["debate_id"] = result.debate_id
+            if result.approval_id:
+                decision_result_payload["approval_id"] = result.approval_id
             self.journal.log(Decision(
                 directive_id=directive.id,
                 directive_type=directive.directive_type.value if directive.directive_type else "unknown",
                 raw_input=directive.raw_input,
                 classification=classification.model_dump() if classification else {},
-                result={"status": result.status, "message": result.message[:500]},
+                result=decision_result_payload,
                 agents_involved=result.agents_used,
                 total_ai_cost=result.total_ai_cost,
                 duration_seconds=time.time() - start_time,
@@ -1626,6 +2271,7 @@ class KompanyEngine:
                 },
                 directive_id=directive.id,
                 requested_by="AutonomyGate",
+                severity="medium",
             ))
             approval_id = request.id
         self.audit.record(
@@ -1640,13 +2286,183 @@ class KompanyEngine:
         )
         return approval_id
 
+    def trace_run(self, run_id: str) -> dict:
+        """Return all state writes tagged with ``run_id``, time-ordered.
+
+        Pulls from audit_log, decisions, ledger, agent_memories, tasks,
+        and approval_requests. Each record carries a ``kind`` so callers
+        can format mixed streams without re-introspecting columns.
+        """
+        events: list[dict] = []
+
+        for row in self.db.execute(
+            """SELECT timestamp, event_type, agent_role, action, detail,
+                      directive_id, project_id, run_id
+               FROM audit_log WHERE run_id = ? ORDER BY id""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "audit",
+                "timestamp": row["timestamp"],
+                "event_type": row["event_type"],
+                "agent_role": row["agent_role"],
+                "action": row["action"],
+                "detail": row["detail"],
+                "directive_id": row["directive_id"],
+                "project_id": row["project_id"],
+            })
+
+        for row in self.db.execute(
+            """SELECT timestamp, id, directive_id, directive_type,
+                      result, agents_involved, total_ai_cost,
+                      duration_seconds
+               FROM decisions WHERE run_id = ? ORDER BY timestamp""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "decision",
+                "timestamp": row["timestamp"],
+                "id": row["id"],
+                "directive_id": row["directive_id"],
+                "directive_type": row["directive_type"],
+                "result": row["result"],
+                "agents_involved": row["agents_involved"],
+                "total_ai_cost": row["total_ai_cost"],
+                "duration_seconds": row["duration_seconds"],
+            })
+
+        for row in self.db.execute(
+            """SELECT timestamp, amount, balance_after, description,
+                      category, directive_id, project_id
+               FROM ledger WHERE run_id = ? ORDER BY id""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "ledger",
+                "timestamp": row["timestamp"],
+                "amount": row["amount"],
+                "balance_after": row["balance_after"],
+                "description": row["description"],
+                "category": row["category"],
+                "directive_id": row["directive_id"],
+                "project_id": row["project_id"],
+            })
+
+        for row in self.db.execute(
+            """SELECT created_at, agent_role, category, knowledge_type,
+                      content, context, directive_id
+               FROM agent_memories WHERE run_id = ? ORDER BY id""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "memory",
+                "timestamp": row["created_at"],
+                "agent_role": row["agent_role"],
+                "category": row["category"],
+                "knowledge_type": row["knowledge_type"],
+                "content": row["content"],
+                "context": row["context"],
+                "directive_id": row["directive_id"],
+            })
+
+        for row in self.db.execute(
+            """SELECT created_at, id, project_id, title, status,
+                      assigned_agent
+               FROM tasks WHERE run_id = ? ORDER BY created_at""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "task",
+                "timestamp": row["created_at"],
+                "id": row["id"],
+                "project_id": row["project_id"],
+                "title": row["title"],
+                "status": row["status"],
+                "assigned_agent": row["assigned_agent"],
+            })
+
+        for row in self.db.execute(
+            """SELECT created_at, id, status, action_type, summary,
+                      directive_id, project_id, requested_by, resolved_by
+               FROM approval_requests WHERE run_id = ? ORDER BY created_at""",
+            (run_id,),
+        ).fetchall():
+            events.append({
+                "kind": "approval",
+                "timestamp": row["created_at"],
+                "id": row["id"],
+                "status": row["status"],
+                "action_type": row["action_type"],
+                "summary": row["summary"],
+                "directive_id": row["directive_id"],
+                "project_id": row["project_id"],
+                "requested_by": row["requested_by"],
+                "resolved_by": row["resolved_by"],
+            })
+
+        events.sort(key=lambda e: (e.get("timestamp") or "", e.get("kind", "")))
+        return {
+            "run_id": run_id,
+            "event_count": len(events),
+            "events": events,
+        }
+
     def list_approvals(self) -> list[dict]:
         """List pending approval requests."""
         return [request.model_dump(mode="json") for request in self.approvals.list_pending()]
 
-    def approve_request(self, request_id: str, approved_by: str = "master") -> dict | None:
+    def inbox(
+        self,
+        statuses: tuple[str, ...] = ("pending", "snoozed"),
+    ) -> list[dict]:
+        """Return the player's RPG inbox: actionable approvals + counts.
+
+        ``pending`` and ``snoozed`` rows are surfaced by default — terminal
+        states (``approved``/``rejected``/``revision_requested``/``cancelled``)
+        are read via ``approval show <id>`` or the episode retrospective.
+
+        Each row carries ``comment_count`` so the inbox renderer can show
+        "3 comments" without a second per-row query.
+        """
+        rows: list[dict] = []
+        for status in statuses:
+            for request in self.approvals.list_by_status(status=status):
+                payload = request.model_dump(mode="json")
+                payload["comment_count"] = len(
+                    self.approvals.list_comments(request.id)
+                )
+                rows.append(payload)
+        rows.sort(key=lambda r: r["created_at"], reverse=True)
+        return rows
+
+    def get_approval(self, request_id: str) -> dict | None:
+        """Return one approval + its full thread (predecessors + successors)
+        + comments. Used by ``approval show`` across all four surfaces."""
+        request = self.approvals.get(request_id)
+        if request is None:
+            return None
+        thread = [r.model_dump(mode="json") for r in self.approvals.list_thread(request_id)]
+        comments = [
+            c.model_dump(mode="json")
+            for c in self.approvals.list_comments(request_id)
+        ]
+        result = request.model_dump(mode="json")
+        result["thread"] = thread
+        result["comments"] = comments
+        return result
+
+    def approve_request(
+        self,
+        request_id: str,
+        approved_by: str = "master",
+        comment_body: str | None = None,
+    ) -> dict | None:
         """Approve a pending request."""
-        request = self.approvals.approve(request_id, approved_by=approved_by)
+        request = self.approvals.approve(
+            request_id,
+            approved_by=approved_by,
+            comment_body=comment_body,
+        )
         if request:
             self.audit.record(
                 "approval.approved",
@@ -1663,12 +2479,14 @@ class KompanyEngine:
         request_id: str,
         rejected_by: str = "master",
         reason: str | None = None,
+        comment_body: str | None = None,
     ) -> dict | None:
         """Reject a pending request."""
         request = self.approvals.reject(
             request_id,
             rejected_by=rejected_by,
             reason=reason,
+            comment_body=comment_body,
         )
         if request:
             self.audit.record(
@@ -1684,6 +2502,209 @@ class KompanyEngine:
             )
             return request.model_dump(mode="json")
         return None
+
+    # ------------------------------------------------------------------
+    # Approval thread + RPG inbox (05-18-approval-thread-and-rpg)
+    # ------------------------------------------------------------------
+
+    def register_revision_handler(
+        self,
+        action_type: str,
+        handler: Callable[[ApprovalRequest, str], ApprovalRequest],
+    ) -> None:
+        """Register a revision handler for one ``action_type``.
+
+        The handler is invoked when a player ``request_revision`` lands
+        with a counter-proposal hint. Signature:
+
+            handler(original_approval: ApprovalRequest, hint_text: str)
+                -> ApprovalRequest
+
+        The handler must **persist** the returned ``ApprovalRequest`` (via
+        ``self.approvals.create`` or equivalent) and set its
+        ``predecessor_id`` to ``original_approval.id`` so ``list_thread``
+        can link the two rows.
+
+        Each ``action_type`` may have at most one handler; re-registering
+        replaces the previous one (handy for tests and for swapping in an
+        LLM-driven replacement at boot).
+        """
+        if not callable(handler):
+            raise TypeError("handler must be callable")
+        self._revision_handlers[action_type] = handler
+
+    def _default_revision_handler(
+        self,
+        original: ApprovalRequest,
+        hint: str,
+    ) -> ApprovalRequest:
+        """Fallback when no caller-specific handler is registered.
+
+        Copies the original ``payload``, stamps the player's counter
+        proposal into ``payload['revision_hint']``, links via
+        ``predecessor_id``, and re-submits as ``pending`` for player
+        approval. **Critically**, the new approval is created with the
+        same ``action_type`` but the handler does *not* trigger another
+        revision pathway — that would loop.
+        """
+        new_payload = {**(original.payload or {}), "revision_hint": hint}
+        successor = ApprovalRequest(
+            action_type=original.action_type,
+            summary=f"[Revised] {original.summary}",
+            payload=new_payload,
+            directive_id=original.directive_id,
+            project_id=original.project_id,
+            requested_by=original.requested_by,
+            severity=original.severity,
+            predecessor_id=original.id,
+        )
+        return self.approvals.create(successor)
+
+    def request_approval_revision(
+        self,
+        request_id: str,
+        counter: str,
+        by_type: str = "user",
+        by_id: str | None = None,
+        comment_body: str | None = None,
+    ) -> dict | None:
+        """Player counter-proposal flow.
+
+        1. Original approval -> ``revision_requested`` (terminal).
+        2. The counter text lands as a comment on the original.
+        3. The action-type's revision handler (or the default fallback)
+           creates a fresh ``pending`` approval that links back via
+           ``predecessor_id``.
+
+        Returns a dict with ``original`` and ``successor`` payloads, or
+        ``None`` if the original was not found.
+        """
+        original = self.approvals.get(request_id)
+        if original is None:
+            return None
+        # Use comment_body for the "additional context" if provided; the
+        # ``counter`` text is always preserved as its own thread comment.
+        original_after = self.approvals.request_revision(
+            request_id=request_id,
+            comment_body=counter,
+            by_type=by_type,
+            by_id=by_id,
+        )
+        if original_after is None:
+            return None
+        if comment_body:
+            self.approvals.add_comment(
+                approval_id=request_id,
+                body=comment_body,
+                by_type=by_type,
+                by_id=by_id,
+            )
+        handler = self._revision_handlers.get(
+            original.action_type, self._default_revision_handler
+        )
+        successor = handler(original, counter)
+        self.audit.record(
+            "approval.revision_requested",
+            "Player requested revision",
+            detail={
+                "approval_id": original.id,
+                "successor_id": successor.id,
+                "action_type": original.action_type,
+            },
+            directive_id=original.directive_id,
+            project_id=original.project_id,
+        )
+        return {
+            "original": original_after.model_dump(mode="json"),
+            "successor": successor.model_dump(mode="json"),
+        }
+
+    def snooze_approval(
+        self,
+        request_id: str,
+        minutes: int,
+        by_type: str = "user",
+        by_id: str | None = None,
+        comment_body: str | None = None,
+    ) -> dict | None:
+        """Snooze an approval; the watchdog auto-unsnoozes when due."""
+        request = self.approvals.snooze(
+            request_id=request_id,
+            minutes=minutes,
+            by_type=by_type,
+            by_id=by_id,
+            comment_body=comment_body,
+        )
+        if request is None:
+            return None
+        self.audit.record(
+            "approval.snoozed",
+            f"Approval snoozed for {minutes}m",
+            detail={
+                "approval_id": request.id,
+                "minutes": minutes,
+                "snoozed_until": (
+                    request.snoozed_until.isoformat()
+                    if request.snoozed_until
+                    else None
+                ),
+            },
+            directive_id=request.directive_id,
+            project_id=request.project_id,
+        )
+        return request.model_dump(mode="json")
+
+    def cancel_approval(
+        self,
+        request_id: str,
+        reason: str | None = None,
+        by_type: str = "user",
+        by_id: str | None = None,
+        comment_body: str | None = None,
+    ) -> dict | None:
+        """Cancel an approval (terminal): the player says 'don't pursue this'."""
+        request = self.approvals.cancel(
+            request_id=request_id,
+            reason=reason,
+            by_type=by_type,
+            by_id=by_id,
+            comment_body=comment_body,
+        )
+        if request is None:
+            return None
+        self.audit.record(
+            "approval.cancelled",
+            "Approval cancelled",
+            detail={
+                "approval_id": request.id,
+                "reason": reason,
+            },
+            directive_id=request.directive_id,
+            project_id=request.project_id,
+        )
+        return request.model_dump(mode="json")
+
+    def comment_on_approval(
+        self,
+        request_id: str,
+        body: str,
+        by_type: str = "user",
+        by_id: str | None = None,
+    ) -> dict | None:
+        """Append a free-form comment to an approval thread.
+
+        Allowed on any state — terminal or not — so the player can leave
+        retrospective notes on a closed thread.
+        """
+        if self.approvals.get(request_id) is None:
+            return None
+        comment = self.approvals.add_comment(
+            approval_id=request_id,
+            body=body,
+            by_type=by_type,
+            by_id=by_id,
+        )
+        return comment.model_dump(mode="json")
 
     def _handle_acquisition(self, directive, classification, ceo) -> DirectiveResult:
         """Handle ACQUISITION directives — must deliver, never downgrade."""
@@ -1826,6 +2847,28 @@ class KompanyEngine:
             directive_id=directive.id,
         )
 
+        # Persist the structured debate transcript so episodes / future
+        # "why did we decide that?" tooling can replay it. The formatted
+        # text below is still returned as ``message`` for backward
+        # compatibility with existing callers.
+        debate_id = self.debates.record(
+            rounds=result.rounds,
+            synthesis=result.synthesis,
+            decision=result.decision,
+            directive_id=directive.id,
+            project_id=None,
+        )
+        self.audit.record(
+            "debate.recorded",
+            "Strategic debate transcript persisted",
+            detail={
+                "debate_id": debate_id,
+                "agents_participated": result.agents_participated,
+                "rounds": len(result.rounds),
+            },
+            directive_id=directive.id,
+        )
+
         # Format the debate result for the Master
         parts = [f"Debate: \"{directive.raw_input}\"\n"]
 
@@ -1880,6 +2923,7 @@ class KompanyEngine:
             status="completed" if can_auto_proceed else "awaiting_approval",
             message="\n".join(parts),
             approval_id=approval_id,
+            debate_id=debate_id,
             total_ai_cost=self.cost_tracker.session_total,
             agents_used=result.agents_participated + ["cos", "ceo"],
         )

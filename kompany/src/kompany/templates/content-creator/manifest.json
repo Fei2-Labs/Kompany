@@ -1,0 +1,20 @@
+{
+  "id": "content-creator",
+  "name": "Content Creator Studio",
+  "mission_title": "Build a media studio (channel + newsletter)",
+  "mission_md_path": "mission.md",
+  "initial_budget": 2000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cpo", "cmo", "cro", "coo", "cos", "cv"
+  ],
+  "agent_config_overrides": {
+    "cfo": {"approval_threshold_usd": 300},
+    "cmo": {"focus": "consistent cadence over viral moments"}
+  },
+  "suggested_directives": [
+    "Pick the primary channel format (YouTube, podcast, or written)",
+    "Schedule and publish the first 4 posts on a fixed cadence",
+    "Launch a paid newsletter with a free + paid tier"
+  ],
+  "rpg_theme": "creator_studio"
+}

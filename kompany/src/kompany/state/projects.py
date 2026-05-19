@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 from kompany.state.models import Project, ProjectStatus, Task, TaskStatus
 
@@ -103,14 +104,16 @@ class Projects:
 
     # --- Task management ---
 
-    def create_task(self, task: Task) -> Task:
+    def create_task(self, task: Task, run_id: str | None = None) -> Task:
         """Create a task within a project."""
+        rid = run_id if run_id is not None else current_run_id()
         self.db.execute(
             """INSERT INTO tasks
-               (id, project_id, title, status, assigned_agent, parent_task_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               (id, project_id, title, status, assigned_agent,
+                parent_task_id, run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (task.id, task.project_id, task.title,
-             task.status.value, task.assigned_agent, task.parent_task_id),
+             task.status.value, task.assigned_agent, task.parent_task_id, rid),
         )
         self.db.commit()
         return task
@@ -126,16 +129,71 @@ class Projects:
     def update_task_status(
         self, task_id: str, status: TaskStatus, result: dict | None = None
     ) -> None:
-        """Update a task's status and optionally its result."""
-        completed = "datetime('now')" if status == TaskStatus.COMPLETED else "NULL"
+        """Update a task's status and optionally its result.
+
+        Also bumps ``updated_at`` so the resilience watchdog scanner can
+        distinguish fresh activity from a forgotten ``in_progress`` row.
+        """
         result_json = json.dumps(result) if result else None
+        status_value = status.value if isinstance(status, TaskStatus) else str(status)
         self.db.execute(
-            f"""UPDATE tasks SET status = ?, result = ?,
+            """UPDATE tasks SET status = ?, result = ?,
+                updated_at = datetime('now'),
                 completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END
                 WHERE id = ?""",
-            (status.value, result_json, status.value, task_id),
+            (status_value, result_json, status_value, task_id),
         )
         self.db.commit()
+
+    def update_task_status_raw(
+        self,
+        task_id: str,
+        status: str,
+        result: dict | None = None,
+    ) -> None:
+        """Set a non-enum task status (e.g. ``stranded_in_progress``).
+
+        The resilience foundation introduces task states that live outside
+        :class:`TaskStatus` — they are valid transient values written by
+        the watchdog only, never typed into agents. Kept narrow on purpose.
+        """
+        result_json = json.dumps(result) if result else None
+        self.db.execute(
+            """UPDATE tasks SET status = ?, result = COALESCE(?, result),
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (status, result_json, task_id),
+        )
+        self.db.commit()
+
+    def touch_task(self, task_id: str) -> None:
+        """Bump a task's ``updated_at`` without changing other fields."""
+        self.db.execute(
+            "UPDATE tasks SET updated_at = datetime('now') WHERE id = ?",
+            (task_id,),
+        )
+        self.db.commit()
+
+    def list_stale_in_progress(self, stale_seconds: int) -> list[Task]:
+        """Return ``in_progress`` tasks whose ``updated_at`` is older than ``stale_seconds``.
+
+        Used by the resilience scanner. ``stale_seconds`` must be positive;
+        zero would match every row which is never useful.
+        """
+        if stale_seconds <= 0:
+            return []
+        # ``active`` is the in-flight state in this codebase
+        # (``TaskStatus.ACTIVE``). ``in_progress`` is accepted too because
+        # the PRD uses the paperclip-style vocabulary; future migrations to
+        # that name should just keep working without a code change here.
+        rows = self.db.execute(
+            """SELECT * FROM tasks
+               WHERE status IN ('active', 'in_progress')
+                 AND updated_at IS NOT NULL
+                 AND updated_at <= datetime('now', ?)""",
+            (f"-{int(stale_seconds)} seconds",),
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def _row_to_task(self, row) -> Task:
         return Task(

@@ -72,6 +72,30 @@ class ApprovalStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVISION_REQUESTED = "revision_requested"
+    SNOOZED = "snoozed"
+    CANCELLED = "cancelled"
+
+
+# Severity values for approval requests. Kept as a frozenset (not Enum) so
+# string literals from CLI / API / SQL writes don't need ``.value`` plumbing.
+APPROVAL_SEVERITIES: frozenset[str] = frozenset({
+    "info",
+    "low",
+    "medium",
+    "high",
+    "critical",
+})
+
+# Terminal statuses — no outgoing transitions. ``snoozed`` is *not* terminal:
+# the watchdog auto-unsnoozes it back to ``pending`` when ``snoozed_until``
+# lapses.
+APPROVAL_TERMINAL_STATUSES: frozenset[ApprovalStatus] = frozenset({
+    ApprovalStatus.APPROVED,
+    ApprovalStatus.REJECTED,
+    ApprovalStatus.REVISION_REQUESTED,
+    ApprovalStatus.CANCELLED,
+})
 
 
 class ApprovalRequest(BaseModel):
@@ -87,6 +111,28 @@ class ApprovalRequest(BaseModel):
     resolution_reason: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
+    # Approval thread + RPG inbox additions (05-18-approval-thread-and-rpg).
+    # All optional with safe defaults so existing call sites stay legal.
+    severity: str = "medium"
+    predecessor_id: str | None = None
+    snoozed_until: datetime | None = None
+    snoozed_by: str | None = None
+
+
+class ApprovalComment(BaseModel):
+    """One comment on an approval thread.
+
+    ``by_type`` is one of ``user`` / ``agent`` / ``system``. ``by_id`` is the
+    agent role (``cfo``, etc.) for agent comments, the player alias or NULL
+    for user comments, and NULL for system-generated audit notes.
+    """
+
+    id: str = Field(default_factory=_short_id)
+    approval_id: str
+    by_type: str  # "user" | "agent" | "system"
+    by_id: str | None = None
+    body: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RevenueProposal(BaseModel):

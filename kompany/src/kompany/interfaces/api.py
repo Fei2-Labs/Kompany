@@ -58,6 +58,32 @@ class DebateRequest(BaseModel):
 
 class RejectApprovalRequest(BaseModel):
     reason: str = ""
+    comment: str = ""
+
+
+class ApproveApprovalRequest(BaseModel):
+    comment: str = ""
+
+
+class ReviseApprovalRequest(BaseModel):
+    counter: str
+    comment: str = ""
+
+
+class SnoozeApprovalRequest(BaseModel):
+    minutes: int
+    comment: str = ""
+
+
+class CancelApprovalRequest(BaseModel):
+    reason: str = ""
+    comment: str = ""
+
+
+class CommentApprovalRequest(BaseModel):
+    body: str
+    by_type: str = "user"
+    by_id: str | None = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -211,6 +237,178 @@ def run_retrospective(req: RetrospectiveRequest) -> dict[str, Any]:
     """Run or replay a CoS retrospective for a project."""
     engine = get_engine()
     return engine.run_retrospective(req.project_id)
+
+
+class HealthResolveRequest(BaseModel):
+    action: str
+    snooze_minutes: int | None = None
+    resolved_by: str = "player"
+
+
+@app.get("/health/events")
+def list_health_events(
+    status: str | None = None,
+    kind: str | None = None,
+    project_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List watchdog health events, newest-first."""
+    engine = get_engine()
+    try:
+        return engine.list_health_events(
+            status=status,
+            kind=kind,
+            project_id=project_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/health/events/{event_id}")
+def get_health_event(event_id: str) -> dict[str, Any]:
+    """Fetch one health event."""
+    engine = get_engine()
+    row = engine.get_health_event(event_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Health event not found: {event_id}")
+    return row
+
+
+@app.post("/health/events/{event_id}/resolve")
+def resolve_health_event(
+    event_id: str,
+    req: HealthResolveRequest,
+) -> dict[str, Any]:
+    """Apply a player action (``continue`` / ``snooze`` / ``dismiss``)."""
+    engine = get_engine()
+    try:
+        row = engine.resolve_health_event(
+            event_id=event_id,
+            action=req.action,
+            snooze_minutes=req.snooze_minutes,
+            resolved_by=req.resolved_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Health event not found: {event_id}")
+    return row
+
+
+class TemplateApplyRequest(BaseModel):
+    force: bool = False
+    override_budget: float | None = None
+    override_directive: str | None = None
+
+
+@app.get("/templates")
+def list_templates() -> list[dict[str, Any]]:
+    """List available company templates."""
+    return get_engine().list_templates()
+
+
+@app.get("/templates/{template_id}")
+def get_template(template_id: str) -> dict[str, Any]:
+    """Fetch one template by id (includes rendered mission body)."""
+    try:
+        return get_engine().show_template(template_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/templates/{template_id}/apply")
+def apply_template(
+    template_id: str,
+    req: TemplateApplyRequest | None = None,
+) -> dict[str, Any]:
+    """Apply a template — writes company config, ledgers the initial
+    budget, and stages suggested directives as draft projects."""
+    body = req or TemplateApplyRequest()
+    try:
+        return get_engine().apply_template(
+            template_id,
+            force=body.force,
+            override_budget=body.override_budget,
+            override_directive=body.override_directive,
+        )
+    except ValueError as exc:
+        # Distinguish "not found" from "already applied" via message
+        message = str(exc)
+        status = 404 if "not found" in message else 409
+        raise HTTPException(status_code=status, detail=message) from exc
+
+
+@app.get("/episodes")
+def list_episodes(retention: str | None = None) -> list[dict[str, Any]]:
+    """List materialized project episodes."""
+    engine = get_engine()
+    return engine.list_episodes(retention_tier=retention)
+
+
+@app.get("/episodes/{project_id}")
+def get_episode(project_id: str) -> dict[str, Any]:
+    """Fetch one episode by project id."""
+    engine = get_engine()
+    row = engine.get_episode(project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Episode not found: {project_id}")
+    return row
+
+
+@app.post("/episodes/{project_id}/rebuild")
+def rebuild_episode(project_id: str) -> dict[str, Any]:
+    """Force re-materialization of a project's episode."""
+    engine = get_engine()
+    try:
+        return engine.rebuild_episode(project_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class DistillationRequest(BaseModel):
+    since: str | None = None
+    dry_run: bool = False
+    episode_ids: list[str] | None = None
+
+
+@app.post("/distillation/run")
+def run_distillation(req: DistillationRequest | None = None) -> dict[str, Any]:
+    """Run CoS cross-episode distillation.
+
+    Body fields (all optional):
+
+    * ``since`` — human window like ``"30d"`` / ``"12h"``; defaults to 30d.
+    * ``dry_run`` — when true the LLM runs but no memories are written.
+    * ``episode_ids`` — explicit subset that bypasses both ``since`` and
+      the 50-episode cap.
+    """
+    from datetime import timedelta
+
+    body = req or DistillationRequest()
+    window: timedelta | None = None
+    if body.since is not None:
+        text = body.since.strip().lower()
+        units = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+        try:
+            if text and text[-1] in units:
+                window = timedelta(seconds=float(text[:-1]) * units[text[-1]])
+            elif text:
+                window = timedelta(seconds=float(text))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid 'since' value: {body.since!r}",
+            ) from exc
+
+    try:
+        return get_engine().distill(
+            since=window,
+            dry_run=body.dry_run,
+            episode_ids=body.episode_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/memories/{agent_role}")
@@ -675,17 +873,40 @@ def get_ledger(limit: int = 10) -> list[dict]:
 
 
 @app.get("/approvals")
-def list_approvals() -> list[dict[str, Any]]:
-    """List pending approval requests."""
+def list_approvals(status: str | None = None) -> list[dict[str, Any]]:
+    """List approval requests. ``status`` query param filters by state;
+    omit it to get only pending rows (legacy default)."""
     engine = get_engine()
-    return engine.list_approvals()
+    if status is None:
+        return engine.list_approvals()
+    return [r.model_dump(mode="json") for r in engine.approvals.list_by_status(status=status)]
+
+
+@app.get("/approvals/{approval_id}")
+def show_approval(approval_id: str) -> dict[str, Any]:
+    """Return one approval with its thread + comment timeline."""
+    engine = get_engine()
+    data = engine.get_approval(approval_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return data
+
+
+@app.get("/inbox")
+def inbox() -> list[dict[str, Any]]:
+    """RPG inbox: pending + snoozed approvals with comment counts."""
+    return get_engine().inbox()
 
 
 @app.post("/approvals/{approval_id}/approve")
-def approve_request(approval_id: str) -> dict[str, Any]:
+def approve_request(
+    approval_id: str,
+    req: ApproveApprovalRequest | None = None,
+) -> dict[str, Any]:
     """Approve a pending request."""
     engine = get_engine()
-    result = engine.approve_request(approval_id)
+    comment = req.comment if req and req.comment else None
+    result = engine.approve_request(approval_id, comment_body=comment)
     if not result:
         raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
     return result
@@ -695,7 +916,68 @@ def approve_request(approval_id: str) -> dict[str, Any]:
 def reject_request(approval_id: str, req: RejectApprovalRequest) -> dict[str, Any]:
     """Reject a pending request."""
     engine = get_engine()
-    result = engine.reject_request(approval_id, reason=req.reason)
+    result = engine.reject_request(
+        approval_id,
+        reason=req.reason,
+        comment_body=req.comment or None,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return result
+
+
+@app.post("/approvals/{approval_id}/revise")
+def revise_request(approval_id: str, req: ReviseApprovalRequest) -> dict[str, Any]:
+    """Counter-propose: original -> ``revision_requested``, new pending row spawned."""
+    engine = get_engine()
+    result = engine.request_approval_revision(
+        approval_id,
+        counter=req.counter,
+        comment_body=req.comment or None,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return result
+
+
+@app.post("/approvals/{approval_id}/snooze")
+def snooze_request(approval_id: str, req: SnoozeApprovalRequest) -> dict[str, Any]:
+    """Snooze an approval; watchdog auto-unsnoozes when due."""
+    engine = get_engine()
+    result = engine.snooze_approval(
+        approval_id,
+        minutes=req.minutes,
+        comment_body=req.comment or None,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return result
+
+
+@app.post("/approvals/{approval_id}/cancel")
+def cancel_request(approval_id: str, req: CancelApprovalRequest) -> dict[str, Any]:
+    """Cancel an approval (terminal)."""
+    engine = get_engine()
+    result = engine.cancel_approval(
+        approval_id,
+        reason=req.reason or None,
+        comment_body=req.comment or None,
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
+    return result
+
+
+@app.post("/approvals/{approval_id}/comment")
+def comment_request(approval_id: str, req: CommentApprovalRequest) -> dict[str, Any]:
+    """Append a free-form comment to an approval thread."""
+    engine = get_engine()
+    result = engine.comment_on_approval(
+        approval_id,
+        body=req.body,
+        by_type=req.by_type,
+        by_id=req.by_id,
+    )
     if not result:
         raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
     return result

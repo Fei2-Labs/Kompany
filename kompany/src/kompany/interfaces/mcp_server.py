@@ -262,6 +262,106 @@ TOOLS = [
         },
     ),
     Tool(
+        name="kompany_health_list",
+        description="List watchdog health events (silent_run, stranded, recovered, retry_exhausted).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "open | resolved | snoozed | dismissed"},
+                "kind": {"type": "string", "description": "silent_run | recovered | retry_exhausted | stranded_in_progress | stranded_todo"},
+                "project_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 100},
+            },
+        },
+    ),
+    Tool(
+        name="kompany_health_get",
+        description="Fetch one watchdog health event by id.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+            },
+            "required": ["event_id"],
+        },
+    ),
+    Tool(
+        name="kompany_health_resolve",
+        description="Apply a player action to a health event (continue / snooze / dismiss).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string"},
+                "action": {"type": "string", "description": "continue | snooze | dismiss"},
+                "snooze_minutes": {"type": "integer"},
+                "resolved_by": {"type": "string", "default": "player"},
+            },
+            "required": ["event_id", "action"],
+        },
+    ),
+    Tool(
+        name="kompany_episodes_list",
+        description="List materialized project-episode records (self-learning).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "retention_tier": {
+                    "type": "string",
+                    "description": "Optional filter: 'full' or 'summary'.",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="kompany_episodes_get",
+        description="Fetch one project episode by project id (includes payload_json if full).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+            },
+            "required": ["project_id"],
+        },
+    ),
+    Tool(
+        name="kompany_episodes_rebuild",
+        description="Re-materialize a project's episode payload from source tables.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+            },
+            "required": ["project_id"],
+        },
+    ),
+    Tool(
+        name="kompany_distill",
+        description=(
+            "Run CoS cross-episode distillation. Loads recent project "
+            "episodes, asks CoS to extract durable patterns, and UPSERTs "
+            "them into agent_memories as 'experiential' rows."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "since": {
+                    "type": "string",
+                    "description": "Lookback window like '30d' / '12h' / '45m'. Defaults to 30d.",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true the LLM runs but no memories are written.",
+                    "default": False,
+                },
+                "episode_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Explicit project ids; bypasses 'since' and the 50-episode cap.",
+                },
+            },
+        },
+    ),
+    Tool(
         name="kompany_memories",
         description="List memories for an agent role with optional stale and knowledge_type filters.",
         inputSchema={
@@ -405,6 +505,134 @@ TOOLS = [
                 "reason": {"type": "string", "description": "Rejection reason", "default": ""},
             },
             "required": ["approval_id"],
+        },
+    ),
+    Tool(
+        name="kompany_inbox",
+        description="RPG inbox: pending + snoozed approvals with comment counts.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_approval_show",
+        description="Return one approval with its thread + comment timeline.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string", "description": "Approval request ID"},
+            },
+            "required": ["approval_id"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_approve",
+        description="Approve a pending approval, optionally with a comment.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "comment": {"type": "string", "default": ""},
+            },
+            "required": ["approval_id"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_reject",
+        description="Reject an approval with a required reason + optional comment.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "reason": {"type": "string"},
+                "comment": {"type": "string", "default": ""},
+            },
+            "required": ["approval_id", "reason"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_revise",
+        description=(
+            "Counter-propose: original -> revision_requested; a new pending "
+            "approval is spawned with the counter text stamped into "
+            "payload['revision_hint']."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "counter": {"type": "string"},
+                "comment": {"type": "string", "default": ""},
+            },
+            "required": ["approval_id", "counter"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_snooze",
+        description="Snooze an approval; watchdog auto-unsnoozes when due.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "minutes": {"type": "integer"},
+                "comment": {"type": "string", "default": ""},
+            },
+            "required": ["approval_id", "minutes"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_cancel",
+        description="Cancel an approval (terminal).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "reason": {"type": "string", "default": ""},
+                "comment": {"type": "string", "default": ""},
+            },
+            "required": ["approval_id"],
+        },
+    ),
+    Tool(
+        name="kompany_approval_comment",
+        description="Append a free-form comment to an approval thread.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "approval_id": {"type": "string"},
+                "body": {"type": "string"},
+                "by_type": {"type": "string", "default": "user"},
+                "by_id": {"type": "string"},
+            },
+            "required": ["approval_id", "body"],
+        },
+    ),
+    Tool(
+        name="kompany_template_list",
+        description="List available ready-to-play company templates.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_template_show",
+        description="Show one company template by id (returns manifest + rendered mission body).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string", "description": "Template id"},
+            },
+            "required": ["template_id"],
+        },
+    ),
+    Tool(
+        name="kompany_template_apply",
+        description="Apply a company template — writes config, ledgers the initial budget, and stages suggested directives as draft projects.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "template_id": {"type": "string", "description": "Template id"},
+                "force": {"type": "boolean", "description": "Re-apply over an existing template", "default": False},
+                "override_budget": {"type": "number", "description": "Override the template's default initial budget."},
+                "override_directive": {"type": "string", "description": "Replace suggested directives with one custom directive."},
+            },
+            "required": ["template_id"],
         },
     ),
 ]
@@ -590,6 +818,48 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "kompany_retrospective":
         return _json_response(engine.run_retrospective(arguments["project_id"]))
 
+    if name == "kompany_health_list":
+        try:
+            return _json_response(engine.list_health_events(
+                status=arguments.get("status"),
+                kind=arguments.get("kind"),
+                project_id=arguments.get("project_id"),
+                limit=arguments.get("limit", 100),
+            ))
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+
+    if name == "kompany_health_get":
+        row = engine.get_health_event(arguments["event_id"])
+        return _json_response(row or {"error": f"Health event not found: {arguments['event_id']}"})
+
+    if name == "kompany_health_resolve":
+        try:
+            row = engine.resolve_health_event(
+                event_id=arguments["event_id"],
+                action=arguments["action"],
+                snooze_minutes=arguments.get("snooze_minutes"),
+                resolved_by=arguments.get("resolved_by", "player"),
+            )
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+        return _json_response(row or {"error": f"Health event not found: {arguments['event_id']}"})
+
+    if name == "kompany_episodes_list":
+        return _json_response(engine.list_episodes(
+            retention_tier=arguments.get("retention_tier"),
+        ))
+
+    if name == "kompany_episodes_get":
+        row = engine.get_episode(arguments["project_id"])
+        return _json_response(row or {"error": f"Episode not found: {arguments['project_id']}"})
+
+    if name == "kompany_episodes_rebuild":
+        try:
+            return _json_response(engine.rebuild_episode(arguments["project_id"]))
+        except LookupError as exc:
+            return _json_response({"error": str(exc)})
+
     if name == "kompany_memories":
         return _json_response(engine.list_memories(
             arguments["agent_role"],
@@ -598,6 +868,30 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             knowledge_type=arguments.get("knowledge_type"),
             category=arguments.get("category"),
         ))
+
+    if name == "kompany_distill":
+        from datetime import timedelta
+
+        since_text = arguments.get("since")
+        window: timedelta | None = None
+        if since_text:
+            text = str(since_text).strip().lower()
+            units = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+            try:
+                if text and text[-1] in units:
+                    window = timedelta(seconds=float(text[:-1]) * units[text[-1]])
+                elif text:
+                    window = timedelta(seconds=float(text))
+            except ValueError:
+                return _json_response({"error": f"Invalid 'since' value: {since_text!r}"})
+        try:
+            return _json_response(engine.distill(
+                since=window,
+                dry_run=bool(arguments.get("dry_run", False)),
+                episode_ids=arguments.get("episode_ids"),
+            ))
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
 
     if name == "kompany_release_delivery":
         try:
@@ -664,6 +958,82 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             reason=arguments.get("reason", ""),
         )
         return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_inbox":
+        return _json_response(engine.inbox())
+
+    if name == "kompany_approval_show":
+        result = engine.get_approval(arguments["approval_id"])
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_approve":
+        result = engine.approve_request(
+            arguments["approval_id"],
+            comment_body=arguments.get("comment") or None,
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_reject":
+        result = engine.reject_request(
+            arguments["approval_id"],
+            reason=arguments["reason"],
+            comment_body=arguments.get("comment") or None,
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_revise":
+        result = engine.request_approval_revision(
+            arguments["approval_id"],
+            counter=arguments["counter"],
+            comment_body=arguments.get("comment") or None,
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_snooze":
+        result = engine.snooze_approval(
+            arguments["approval_id"],
+            minutes=int(arguments["minutes"]),
+            comment_body=arguments.get("comment") or None,
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_cancel":
+        result = engine.cancel_approval(
+            arguments["approval_id"],
+            reason=arguments.get("reason") or None,
+            comment_body=arguments.get("comment") or None,
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_approval_comment":
+        result = engine.comment_on_approval(
+            arguments["approval_id"],
+            body=arguments["body"],
+            by_type=arguments.get("by_type", "user"),
+            by_id=arguments.get("by_id"),
+        )
+        return _json_response(result or {"error": f"Approval '{arguments['approval_id']}' not found"})
+
+    if name == "kompany_template_list":
+        return _json_response(engine.list_templates())
+
+    if name == "kompany_template_show":
+        try:
+            return _json_response(engine.show_template(arguments["template_id"]))
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+
+    if name == "kompany_template_apply":
+        try:
+            result = engine.apply_template(
+                arguments["template_id"],
+                force=bool(arguments.get("force", False)),
+                override_budget=arguments.get("override_budget"),
+                override_directive=arguments.get("override_directive"),
+            )
+        except ValueError as exc:
+            return _json_response({"error": str(exc)})
+        return _json_response(result)
 
     return [TextContent(type="text", text=f"Unknown tool: {name}")]
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 
 
@@ -22,13 +23,17 @@ class AuditLog:
         agent_role: str | None = None,
         directive_id: str | None = None,
         project_id: str | None = None,
+        run_id: str | None = None,
     ) -> None:
         detail_text = json.dumps(detail) if isinstance(detail, dict) else detail
+        rid = run_id if run_id is not None else current_run_id()
         self.db.execute(
             """INSERT INTO audit_log
-               (event_type, agent_role, action, detail, directive_id, project_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (event_type, agent_role, action, detail_text, directive_id, project_id),
+               (event_type, agent_role, action, detail,
+                directive_id, project_id, run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (event_type, agent_role, action, detail_text,
+             directive_id, project_id, rid),
         )
         self.db.commit()
 

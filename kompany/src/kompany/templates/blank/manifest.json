@@ -1,0 +1,14 @@
+{
+  "id": "blank",
+  "name": "Blank Slate",
+  "mission_title": "(set your mission with `kompany config set mission ...`)",
+  "mission_md_path": "mission.md",
+  "initial_budget": 1000.0,
+  "enabled_agents": [
+    "ceo", "cfo", "cto", "cpo", "cmo", "cro",
+    "coo", "csa", "ciso", "cos", "cv"
+  ],
+  "agent_config_overrides": {},
+  "suggested_directives": [],
+  "rpg_theme": "empty_room"
+}

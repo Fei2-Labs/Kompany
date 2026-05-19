@@ -116,6 +116,21 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
 
 ## Installation
 
+### One-line install (recommended)
+
+```bash
+uvx kompany onboard --yes
+```
+
+That single command checks your environment, captures your LLM API key
+(masked, stored in the encrypted vault), applies a starter company
+template, and prints the first set of "what to do next" hints — all in
+under 90 seconds. Pass `--provider=...`, `--api-key=...`,
+`--template=...`, `--directive="..."`, or `--data-dir=/path` to skip
+specific prompts; with all of them plus `--yes`, the wizard runs fully
+headless. See [`docs/context/onboarding.md`](docs/context/onboarding.md)
+for the full step-by-step.
+
 ### Prerequisites
 
 - Python 3.11+

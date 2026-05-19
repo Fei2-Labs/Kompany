@@ -32,6 +32,25 @@ kompany-mcp = "kompany.interfaces.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kompany"]
+# Templates ship as data inside the package — manifests and markdown
+# bodies must end up next to the code at install time so
+# ``importlib.resources.files('kompany').joinpath('templates/...')``
+# resolves correctly from a wheel or a sdist.
+include = [
+    "src/kompany/**/*.py",
+    "src/kompany/templates/**/*.json",
+    "src/kompany/templates/**/*.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/kompany/**/*.py",
+    "src/kompany/templates/**/*.json",
+    "src/kompany/templates/**/*.md",
+    "tests/**/*.py",
+    "README.md",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

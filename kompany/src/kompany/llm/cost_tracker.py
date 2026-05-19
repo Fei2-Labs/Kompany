@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kompany.core.run_context import current_run_id
 from kompany.llm.models import estimate_cost
 
 
@@ -19,6 +20,7 @@ class CostTracker:
         output_tokens: int,
         description: str,
         directive_id: str | None = None,
+        run_id: str | None = None,
     ) -> float:
         """Record an LLM call cost. Returns the USD cost."""
         cost = estimate_cost(model, input_tokens, output_tokens)
@@ -28,5 +30,6 @@ class CostTracker:
                 amount_usd=cost,
                 description=description,
                 directive_id=directive_id,
+                run_id=run_id if run_id is not None else current_run_id(),
             )
         return cost
