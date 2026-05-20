@@ -479,6 +479,44 @@ class ApprovalRequests:
         self.db.commit()
         return self.get(request_id)
 
+    def set_predecessor(
+        self,
+        request_id: str,
+        predecessor_id: str | None,
+    ) -> ApprovalRequest | None:
+        """Stamp a ``predecessor_id`` link onto an existing approval.
+
+        Used by the target feasibility revise flow: the re-review path
+        creates a fresh approval first (so ``run_target_feasibility_review``
+        stays callable from any entry point) then back-links it to the
+        original via this helper.
+        """
+        request = self.get(request_id)
+        if request is None:
+            return None
+        self.db.execute(
+            "UPDATE approval_requests SET predecessor_id = ? WHERE id = ?",
+            (predecessor_id, request_id),
+        )
+        self.db.commit()
+        return self.get(request_id)
+
+    def update_summary(
+        self,
+        request_id: str,
+        summary: str,
+    ) -> ApprovalRequest | None:
+        """Replace an approval's summary line (e.g. add a ``[Revised]`` prefix)."""
+        request = self.get(request_id)
+        if request is None:
+            return None
+        self.db.execute(
+            "UPDATE approval_requests SET summary = ? WHERE id = ?",
+            (summary, request_id),
+        )
+        self.db.commit()
+        return self.get(request_id)
+
     def list_due_snoozed(self) -> list[ApprovalRequest]:
         """Approvals whose snooze window has elapsed.
 

@@ -601,3 +601,109 @@ body.onboarding-body { padding-bottom: 40px; }
   color: rgba(0, 255, 65, 0.75);
   font-size: 11px;
 }
+
+/* ---------------------------------------------------------------- */
+/* Claim list (evidence-traced debate) + Feasibility review screen. */
+/* ---------------------------------------------------------------- */
+
+.claim-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(0, 255, 65, 0.12);
+  flex-wrap: wrap;
+}
+.claim-row:last-child { border-bottom: none; }
+.claim-row-inferred { border-left: 2px solid rgba(255, 170, 0, 0.7); padding-left: 6px; }
+.claim-marker { color: rgba(0, 255, 65, 0.8); min-width: 1.2em; }
+.claim-row-inferred .claim-marker { color: #ffaa00; }
+.claim-text { flex: 1 1 auto; color: rgba(0, 255, 65, 0.9); }
+.claim-evidence-chip {
+  background: transparent;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: rgba(0, 255, 65, 0.75);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+.claim-evidence-chip-open { background: rgba(0, 255, 65, 0.08); }
+.claim-evidence-panel {
+  width: 100%;
+  margin: 4px 0 0 18px;
+  padding: 4px 8px;
+  list-style: none;
+  background: rgba(0, 255, 65, 0.04);
+  border-left: 2px solid rgba(0, 255, 65, 0.25);
+  font-size: 11px;
+}
+.claim-evidence-source { color: rgba(0, 255, 65, 0.75); }
+.claim-evidence-source-inferred { color: #ffaa00; }
+.claim-legacy-tag { color: rgba(255, 170, 0, 0.6); font-size: 11px; }
+.claim-row-empty { color: rgba(0, 255, 65, 0.45); font-style: italic; }
+
+/* Feasibility review (3-column trio). */
+.fr-host { display: flex; flex-direction: column; gap: 10px; }
+.fr-header { color: rgba(0, 255, 65, 0.85); letter-spacing: 1px; }
+.fr-banner {
+  color: rgba(255, 170, 0, 0.9);
+  background: rgba(255, 170, 0, 0.07);
+  border: 1px dashed rgba(255, 170, 0, 0.45);
+  padding: 6px 10px;
+}
+.fr-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 12px;
+}
+.fr-col {
+  border: 1px solid rgba(0, 255, 65, 0.25);
+  padding: 8px;
+  background: rgba(0, 255, 65, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fr-col-head { color: rgba(0, 255, 65, 0.9); font-weight: bold; }
+.fr-col-cost { color: rgba(0, 255, 65, 0.55); font-size: 11px; }
+.fr-col-frozen { opacity: 0.55; }
+.fr-col-frozen-tag { color: rgba(255, 170, 0, 0.8); font-size: 11px; }
+.fr-claims { display: flex; flex-direction: column; }
+.fr-diff-section { font-size: 11px; margin-top: 6px; }
+.fr-diff-removed-head { color: rgba(255, 80, 80, 0.65); }
+.fr-diff-now-head { color: rgba(0, 255, 65, 0.85); }
+.fr-diff-removed { opacity: 0.55; }
+.fr-diff-removed .claim-row { text-decoration: line-through; border-left: 2px solid rgba(255, 80, 80, 0.4); padding-left: 4px; }
+.fr-diff-removed .claim-marker { color: rgba(255, 80, 80, 0.6); }
+.fr-diff-added .claim-row { background: rgba(0, 255, 65, 0.06); border-left: 2px solid rgba(0, 255, 65, 0.55); padding-left: 4px; }
+.fr-diff-added .claim-marker { color: rgba(0, 255, 65, 1); }
+.fr-diff-stable { opacity: 0.85; }
+.fr-diff-empty { color: rgba(0, 255, 65, 0.45); font-style: italic; }
+.fr-total { color: rgba(0, 255, 65, 0.8); border-top: 1px solid rgba(0, 255, 65, 0.3); padding-top: 6px; }
+.fr-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.fr-btn {
+  background: transparent;
+  color: rgba(0, 255, 65, 0.9);
+  border: 1px solid rgba(0, 255, 65, 0.55);
+  padding: 6px 12px;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+.fr-btn:hover:not(:disabled) { background: rgba(0, 255, 65, 0.08); }
+.fr-btn:disabled { opacity: 0.5; cursor: progress; }
+.fr-btn-adopt { border-color: rgba(0, 255, 65, 0.85); }
+.fr-btn-counter { border-color: rgba(255, 170, 0, 0.75); color: rgba(255, 170, 0, 0.95); }
+.fr-btn-keep { border-color: rgba(0, 200, 255, 0.5); color: rgba(0, 200, 255, 0.85); }
+.fr-counter { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.fr-counter-busy { opacity: 0.7; }
+.fr-counter-text {
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 255, 65, 0.9);
+  border: 1px solid rgba(255, 170, 0, 0.55);
+  padding: 8px;
+  font-family: inherit;
+  min-height: 80px;
+  resize: vertical;
+}
