@@ -55,6 +55,11 @@ class LLMResponse:
     cost_usd: float
     model: str
     parsed: Any = None
+    # Set to True by :class:`CostTracker.record` (and by
+    # ``record_ai_cost``) after the response has been booked against the
+    # ledger. Callers can read this to avoid double-recording the same
+    # response — see ``llm/cost_ledger.py``. Not part of the wire format.
+    _cost_recorded: bool = False
 
 
 class LLMClient:
@@ -176,6 +181,7 @@ class LLMClient:
         max_tokens: int = 4096,
         task_id: str | None = None,
         project_id: str | None = None,
+        action_type: str | None = None,
     ) -> LLMResponse:
         """Make a freeform LLM call, dispatching to the correct provider.
 
@@ -196,6 +202,11 @@ class LLMClient:
 
         When ``watchdog`` is None (standalone test use), behaviour is the
         legacy single-shot call with no timeout / retry.
+
+        ``action_type`` is the call-site label used in the SSE
+        ``llm.spend`` payload (see ``05-19-cost-visibility-discipline``).
+        Optional; when ``None`` the spend event falls back to
+        ``"other"``.
         """
         provider = self._resolve_provider(model)
         if self.watchdog is None:
@@ -222,6 +233,7 @@ class LLMClient:
                 prompt=prompt,
                 agent_name=agent_name,
                 directive_id=directive_id,
+                action_type=action_type,
             )
 
         # Resilient path: timeout + single retry.
@@ -235,6 +247,7 @@ class LLMClient:
             directive_id=directive_id,
             task_id=task_id,
             project_id=project_id,
+            action_type=action_type,
         )
 
     def _call_with_watchdog(
@@ -249,6 +262,7 @@ class LLMClient:
         directive_id: str | None,
         task_id: str | None,
         project_id: str | None,
+        action_type: str | None = None,
     ) -> LLMResponse:
         """Inner: run the call with timeout-based silent_run detection + 1 retry."""
         silent_seconds = self.silent_timeout_seconds
@@ -298,6 +312,7 @@ class LLMClient:
                     prompt=prompt,
                     agent_name=agent_name,
                     directive_id=directive_id,
+                    action_type=action_type,
                 )
                 self._emit_recovered(
                     task_id=task_id,
@@ -375,6 +390,7 @@ class LLMClient:
                     prompt=prompt,
                     agent_name=agent_name,
                     directive_id=directive_id,
+                    action_type=action_type,
                 )
                 self._emit_recovered(
                     task_id=task_id,
@@ -400,6 +416,7 @@ class LLMClient:
                 prompt=prompt,
                 agent_name=agent_name,
                 directive_id=directive_id,
+                action_type=action_type,
             )
             self._emit_recovered(
                 task_id=task_id,
@@ -548,8 +565,15 @@ class LLMClient:
         prompt: str,
         agent_name: str,
         directive_id: str | None,
+        action_type: str | None = None,
     ) -> LLMResponse:
-        """Record cost + audit for a successful call. Returns ``resp``."""
+        """Record cost + audit for a successful call. Returns ``resp``.
+
+        ``action_type`` is forwarded to :meth:`CostTracker.record` so the
+        SSE ``llm.spend`` envelope carries a call-site label (see
+        ``05-19-cost-visibility-discipline``). When ``None`` the tracker
+        falls back to ``"other"``.
+        """
         rid = current_run_id()
         cost = self.cost_tracker.record(
             model=model,
@@ -558,8 +582,14 @@ class LLMClient:
             description=f"{agent_name}: {prompt[:60]}",
             directive_id=directive_id,
             run_id=rid,
+            action_type=action_type,
         )
         resp.cost_usd = cost
+        # Mark so explicit ``record_ai_cost`` calls don't double-book.
+        try:
+            resp._cost_recorded = True
+        except Exception:  # pragma: no cover — defensive
+            pass
         if self.audit_log is not None:
             try:
                 self.audit_log.record(
@@ -638,6 +668,7 @@ class LLMClient:
         agent_name: str = "unknown",
         directive_id: str | None = None,
         max_tokens: int = 4096,
+        action_type: str | None = None,
     ) -> LLMResponse:
         """Make an LLM call expecting JSON conforming to a Pydantic schema."""
         schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
@@ -652,6 +683,7 @@ class LLMClient:
             agent_name=agent_name,
             directive_id=directive_id,
             max_tokens=max_tokens,
+            action_type=action_type,
         )
         # Parse the JSON from the response text
         text = resp.text.strip()

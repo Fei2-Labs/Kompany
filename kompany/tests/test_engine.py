@@ -251,7 +251,7 @@ def _wire_packet_execution(engine):
         def __init__(self, fail=False):
             self.fail = fail
 
-        def call(self, prompt, directive_id=None, max_tokens=4096):
+        def call(self, prompt, directive_id=None, max_tokens=4096, action_type=None):
             if self.fail:
                 raise RuntimeError("forced task failure")
             return SimpleNamespace(text="output", cost_usd=0.0)
@@ -346,7 +346,7 @@ def test_execute_decision_packet_needs_revision_when_tasks_fail(engine):
         def get(self, role, company_state=None):
             from types import SimpleNamespace
             class _A:
-                def call(self_inner, prompt, directive_id=None, max_tokens=4096):
+                def call(self_inner, prompt, directive_id=None, max_tokens=4096, action_type=None):
                     raise RuntimeError("forced")
             return _A()
     engine.registry = AllFail()
@@ -974,7 +974,7 @@ def test_resume_project_returns_checkpoint_and_result(engine):
     )
 
     class FakeAgent:
-        def call(self, prompt, directive_id=None, max_tokens=4096):
+        def call(self, prompt, directive_id=None, max_tokens=4096, action_type=None):
             return SimpleNamespace(text="resumed", cost_usd=0.0)
 
     class FakeRegistry:

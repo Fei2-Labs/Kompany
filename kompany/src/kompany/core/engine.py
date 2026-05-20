@@ -15,6 +15,7 @@ from kompany.core.directive import (
     DirectiveStatus,
     DirectiveType,
 )
+from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient
@@ -131,7 +132,11 @@ class KompanyEngine:
         )
         self.glossary = GlossaryService(self.db)
         self.backups = BackupManager(self.settings.data_dir)
-        self.cost_tracker = CostTracker(self.ledger)
+        # STREAM layer of the cost visibility discipline: every LLM
+        # cost recording fans out a ``llm.spend`` SSE event so the web
+        # UI's dashboard chip / live cost meter stays in sync without
+        # polling. See ``05-19-cost-visibility-discipline``.
+        self.cost_tracker = CostTracker(self.ledger, event_hub=get_event_hub())
         self.autonomy = AutonomyGate()
 
         # Resilience watchdog: silent-run + stranded-task supervisor.
@@ -2124,7 +2129,8 @@ class KompanyEngine:
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
-        self.cost_tracker = CostTracker(self.ledger)
+        # Re-wire after backup restore: same hub instance, fresh ledger.
+        self.cost_tracker = CostTracker(self.ledger, event_hub=get_event_hub())
 
         # 4. Audit restore in the (now restored) live DB.
         self.audit.record(
@@ -3296,6 +3302,7 @@ class KompanyEngine:
             ),
             output_schema=ClaimList,
             max_tokens=600,
+            action_type="target_feasibility",
         )
         cos_resp = cos.call_structured(
             prompt=(
@@ -3308,6 +3315,7 @@ class KompanyEngine:
             ),
             output_schema=ClaimList,
             max_tokens=600,
+            action_type="target_feasibility",
         )
         ceo_resp = ceo.call_structured(
             prompt=(
@@ -3322,6 +3330,7 @@ class KompanyEngine:
             ),
             output_schema=ClaimList,
             max_tokens=600,
+            action_type="target_feasibility",
         )
         return (
             _safe_claims(cfo_resp, "(CFO returned no claims)"),

@@ -171,6 +171,7 @@ class ProjectRunner:
         resp = ceo.call_structured(
             prompt=prompt,
             output_schema=TaskDecomposition,
+            action_type="agent_task_execute",
         )
         return resp.parsed.tasks
 
@@ -202,7 +203,7 @@ class ProjectRunner:
             if memory_ctx:
                 prompt = f"{memory_ctx}\n\n{prompt}"
 
-            resp = agent.call(prompt=prompt)
+            resp = agent.call(prompt=prompt, action_type="agent_task_execute")
 
             # Store result
             task_result = {"output": resp.text, "cost": resp.cost_usd}

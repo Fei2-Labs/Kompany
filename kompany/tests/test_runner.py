@@ -17,7 +17,7 @@ from kompany.state.projects import Projects
 class FakeAgent:
     calls = 0
 
-    def call(self, prompt, directive_id=None, max_tokens=4096):
+    def call(self, prompt, directive_id=None, max_tokens=4096, action_type=None):
         FakeAgent.calls += 1
         return SimpleNamespace(text="done", cost_usd=0.01)
 

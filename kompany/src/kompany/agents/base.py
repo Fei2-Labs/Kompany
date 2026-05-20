@@ -73,8 +73,13 @@ class BaseAgent(ABC):
         prompt: str,
         directive_id: str | None = None,
         max_tokens: int = 4096,
+        action_type: str | None = None,
     ) -> LLMResponse:
-        """Make a freeform LLM call."""
+        """Make a freeform LLM call.
+
+        ``action_type`` is the call-site label used in the SSE
+        ``llm.spend`` payload (see ``05-19-cost-visibility-discipline``).
+        """
         model = self.settings.get_model_for_tier(self.model_tier)
         resp = self.llm.call(
             model=model,
@@ -83,6 +88,7 @@ class BaseAgent(ABC):
             agent_name=self.display_name,
             directive_id=directive_id,
             max_tokens=max_tokens,
+            action_type=action_type,
         )
         self.cost_accumulated += resp.cost_usd
         return resp
@@ -93,8 +99,13 @@ class BaseAgent(ABC):
         output_schema: Type[T],
         directive_id: str | None = None,
         max_tokens: int = 4096,
+        action_type: str | None = None,
     ) -> LLMResponse:
-        """Make an LLM call with structured JSON output."""
+        """Make an LLM call with structured JSON output.
+
+        ``action_type`` is the call-site label used in the SSE
+        ``llm.spend`` payload (see ``05-19-cost-visibility-discipline``).
+        """
         model = self.settings.get_model_for_tier(self.model_tier)
         resp = self.llm.call_structured(
             model=model,
@@ -104,6 +115,7 @@ class BaseAgent(ABC):
             agent_name=self.display_name,
             directive_id=directive_id,
             max_tokens=max_tokens,
+            action_type=action_type,
         )
         self.cost_accumulated += resp.cost_usd
         return resp

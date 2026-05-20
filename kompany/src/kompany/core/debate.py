@@ -122,6 +122,14 @@ class DebateEngine:
         positions: list[AgentPosition] = []
         context = self._format_prior_rounds(prior_rounds)
 
+        # Map round_type → SSE action_type label so the cost meter in the
+        # debate UI can attribute spend to the right column.
+        action_label = {
+            DebateRound.POSITION: "debate_round_1",
+            DebateRound.REBUTTAL: "debate_round_2",
+            DebateRound.CONVERGENCE: "debate_round_3",
+        }.get(round_type, "debate_round")
+
         for role in self._debaters:
             agent = self._registry.get(role)
             prompt = self._build_round_prompt(
@@ -132,6 +140,7 @@ class DebateEngine:
                 output_schema=AgentPosition,
                 directive_id=directive_id,
                 max_tokens=2048,
+                action_type=action_label,
             )
             pos = resp.parsed
             pos.agent_role = role
@@ -169,6 +178,7 @@ class DebateEngine:
             output_schema=DebateSynthesis,
             directive_id=directive_id,
             max_tokens=2048,
+            action_type="debate_synthesis",
         )
         return resp.parsed
 
@@ -202,6 +212,7 @@ class DebateEngine:
             output_schema=CEODecision,
             directive_id=directive_id,
             max_tokens=2048,
+            action_type="debate_decision",
         )
         return resp.parsed
 

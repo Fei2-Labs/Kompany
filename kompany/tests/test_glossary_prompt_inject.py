@@ -121,6 +121,7 @@ class _CapturingLLM:
         agent_name=None,
         max_tokens=4096,
         directive_id=None,
+        action_type=None,
     ) -> LLMResponse:
         self.last_prompt = prompt
         parsed = DirectiveClassification(

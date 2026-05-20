@@ -66,6 +66,7 @@ class CoSAgent(BaseAgent):
             output_schema=DistillationOutput,
             agent_name=self.display_name,
             max_tokens=max_tokens,
+            action_type="distillation",
         )
         self.cost_accumulated += resp.cost_usd
         return resp
