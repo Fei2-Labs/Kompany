@@ -412,6 +412,39 @@ def filter_patterns(
     return [by_key[k] for k in order], warnings
 
 
+def filter_inferred_only_patterns(
+    patterns: list[DistilledPattern],
+) -> tuple[list[DistilledPattern], list[dict[str, Any]]]:
+    """Drop patterns that have no concrete evidence.
+
+    Evidence-traced debate (task 05-19) treats ``evidence_episode_ids``
+    as the cross-episode equivalent of :class:`Source`: a pattern with
+    no episode ids is *inferred-only* and MUST NOT be promoted to
+    long-term ``agent_memories``. Long-term memory pollution is
+    irreversible — this is the only hard block in the evidence-trace
+    plan.
+
+    Returns ``(sourced_patterns, rejected_records)``. Each rejected
+    record carries ``pattern_key``, ``target_agent_role``, and a 200-char
+    ``claim_text`` snippet so the caller can emit a
+    ``distillation.claim_rejected_inferred_only`` audit event without
+    re-reading the pattern.
+    """
+    sourced: list[DistilledPattern] = []
+    rejected: list[dict[str, Any]] = []
+    for pattern in patterns:
+        if not pattern.evidence_episode_ids:
+            rejected.append({
+                "reason": "inferred_only",
+                "pattern_key": pattern.pattern_key,
+                "target_agent_role": pattern.target_agent_role,
+                "claim_text": pattern.pattern_summary[:200],
+            })
+            continue
+        sourced.append(pattern)
+    return sourced, rejected
+
+
 __all__ = [
     "DEFAULT_SINCE",
     "DISTILLATION_SYSTEM_PROMPT",
@@ -423,6 +456,7 @@ __all__ = [
     "PER_EPISODE_CHAR_BUDGET",
     "build_distillation_user_prompt",
     "build_episode_summaries",
+    "filter_inferred_only_patterns",
     "filter_patterns",
     "select_episode_rows",
     "summarize_episode",

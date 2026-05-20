@@ -200,6 +200,18 @@ class CEODecision(BaseModel):
         return []
 
 
+class ClaimList(BaseModel):
+    """Minimal structured output schema wrapping ``claims: list[Claim]``.
+
+    Used by call sites that want evidence-traced claims but don't need
+    the full :class:`AgentPosition` envelope (e.g. the onboarding target
+    feasibility review where the role / round / recommendation are
+    already known from the calling context).
+    """
+
+    claims: list[Claim] = Field(default_factory=list)
+
+
 class DebateResult(BaseModel):
     """Full result of a debate."""
     question: str
@@ -214,6 +226,7 @@ __all__ = [
     "AgentPosition",
     "CEODecision",
     "Claim",
+    "ClaimList",
     "DebateResult",
     "DebateRound",
     "DebateSynthesis",

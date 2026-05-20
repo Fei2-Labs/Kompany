@@ -107,6 +107,38 @@ class OnboardingCompleteResponse(BaseModel):
     targets_review_id: str | None = None
 
 
+class PingPricing(BaseModel):
+    """Per-million-token pricing for the model used in a connectivity probe."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    in_per_mtok: float
+    out_per_mtok: float
+
+
+class PingRequest(BaseModel):
+    """Body for ``POST /onboarding/ping`` — fail-fast API key validation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    base_url: str | None = None
+
+
+class PingResponse(BaseModel):
+    """Outcome of a single connectivity probe against an LLM provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
+    model: str | None = None
+    pricing: PingPricing | None = None
+    # One of: unauthorized | rate_limited | network | provider_error | unknown
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 def _resolved_data_dir() -> Path:
     """Resolve the data dir the sidecar should use, consistent with engine."""
     env = os.environ.get("KOMPANY_DATA_DIR", "").strip()
@@ -173,6 +205,175 @@ def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteRes
         provider=result.provider,
         message=None,
         targets_review_id=result.targets_review_id,
+    )
+
+
+def _classify_ping_error(detail: str) -> str:
+    """Map the ``_ping_llm`` failure detail string to an error_code enum.
+
+    ``_ping_llm`` returns ``"{ExceptionType}: {message}"`` on failure. We
+    sniff for HTTP status hints + provider-SDK exception type names to
+    bucket the failure into the five categories the frontend renders.
+    """
+    lowered = detail.lower()
+    # Network errors first — connection refused / timeouts come from
+    # ``httpx``/``openai``/``anthropic`` SDK error types that all carry
+    # "connection" or "timeout" in their class name or message.
+    if any(
+        marker in lowered
+        for marker in (
+            "connectionerror",
+            "apiconnectionerror",
+            "connecterror",
+            "connect_error",
+            "connection refused",
+            "connection error",
+            "timeout",
+            "timed out",
+            "name or service not known",
+            "dns",
+            "network is unreachable",
+        )
+    ):
+        return "network"
+    # Auth / invalid key.
+    if any(
+        marker in lowered
+        for marker in (
+            "authenticationerror",
+            "permissionerror",
+            "permissiondeniederror",
+            "invalid_api_key",
+            "invalid api key",
+            "invalid x-api-key",
+            "401",
+            "unauthorized",
+            "forbidden",
+            "403",
+        )
+    ):
+        return "unauthorized"
+    # Quota / rate-limit.
+    if any(
+        marker in lowered
+        for marker in (
+            "ratelimiterror",
+            "rate limit",
+            "rate-limit",
+            "rate_limit",
+            "429",
+            "too many requests",
+            "quota",
+            "resource exhausted",
+        )
+    ):
+        return "rate_limited"
+    # Provider 5xx / internal server error / bad gateway.
+    if any(
+        marker in lowered
+        for marker in (
+            "internalservererror",
+            "serviceunavailable",
+            "badgateway",
+            "500",
+            "502",
+            "503",
+            "504",
+            "internal server error",
+            "service unavailable",
+            "bad gateway",
+            "gateway timeout",
+        )
+    ):
+        return "provider_error"
+    return "unknown"
+
+
+@app.post("/onboarding/ping", response_model=PingResponse)
+def onboarding_ping(req: PingRequest) -> PingResponse:
+    """Standalone connectivity probe wrapping ``installer._ping_llm``.
+
+    The in-window onboarding wizard calls this from the Connection step
+    **before** the founder submits the full form, so a bad API key (or
+    an unreachable provider) is caught at fail-fast time instead of
+    cascading through template apply + first-directive dispatch.
+
+    The handler is intentionally **stateless**:
+
+    * It does not touch the DB, the credential vault, the audit log,
+      the episode store, or the cost ledger.
+    * It does not call ``record_ai_cost``. The ping prompt is 10 input
+      tokens and capped at ~50 output tokens, so the founder's wallet
+      sees no measurable charge from a ping.
+
+    This is the **only** sanctioned exception to the engineering
+    cost-visibility discipline ("every LLM call must record a ledger
+    row"). The exception is justified because the ping is a transient
+    health check whose outcome is shown to the founder synchronously
+    — there is no decision downstream that depends on its cost being
+    in the ledger. The underlying LLM provider still bills the call
+    on their side; that's their problem to surface, not ours.
+
+    Errors are classified into the five-value ``error_code`` enum:
+    ``unauthorized | rate_limited | network | provider_error | unknown``.
+    See :func:`_classify_ping_error`.
+    """
+    from kompany.config.settings import KompanySettings
+    from kompany.installer.onboard import (
+        PROVIDER_VAULT_KEYS,
+        _ping_llm,
+        _ping_model_for_provider,
+    )
+    from kompany.llm.models import PRICING
+
+    def _settings_factory() -> KompanySettings:
+        # Build a transient settings shim so ``_ping_llm`` can read the
+        # API key (and optional base_url) off the in-memory instance
+        # without touching the on-disk vault.
+        settings = KompanySettings()
+        attr = PROVIDER_VAULT_KEYS.get(req.provider)
+        if attr:
+            setattr(settings, attr, req.api_key)
+        if req.base_url:
+            # ``custom_base_url`` is the only base_url-shaped knob the
+            # client understands today; route through it regardless of
+            # provider so a custom endpoint override works for any one.
+            setattr(settings, "custom_base_url", req.base_url)
+        return settings
+
+    ok, detail = _ping_llm(
+        req.provider,
+        req.api_key,
+        settings_factory=_settings_factory,
+    )
+    if not ok:
+        return PingResponse(
+            ok=False,
+            model=None,
+            pricing=None,
+            error_code=_classify_ping_error(detail),
+            error_message=detail,
+        )
+
+    # Success path: figure out the model that was actually pinged + its
+    # pricing. Read pricing from the static ``llm.models.PRICING`` table.
+    settings = _settings_factory()
+    model = _ping_model_for_provider(req.provider, settings)
+    pricing_entry = PRICING.get(model)
+    pricing = (
+        PingPricing(
+            in_per_mtok=pricing_entry.input_per_mtok,
+            out_per_mtok=pricing_entry.output_per_mtok,
+        )
+        if pricing_entry is not None
+        else None
+    )
+    return PingResponse(
+        ok=True,
+        model=model,
+        pricing=pricing,
+        error_code=None,
+        error_message=None,
     )
 
 

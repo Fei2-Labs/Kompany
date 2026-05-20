@@ -694,20 +694,23 @@ def test_engine_distill_malformed_payload_audit_event(tmp_path):
 
 
 def test_engine_distill_warns_on_unknown_role(tmp_path):
+    # Both patterns carry evidence_episode_ids so the evidence-trace
+    # inferred-only filter (task 05-19) does not reject them — this test
+    # is targeting the unknown_target_agent_role warning path only.
     patterns = [
         DistilledPattern(
             target_agent_role="cfo",
             pattern_key="ok",
             pattern_summary="kept",
             confidence=0.5,
-            evidence_episode_ids=[],
+            evidence_episode_ids=["p1"],
         ),
         DistilledPattern(
             target_agent_role="wizard",
             pattern_key="bad",
             pattern_summary="dropped",
             confidence=0.5,
-            evidence_episode_ids=[],
+            evidence_episode_ids=["p1"],
         ),
     ]
     cos = _FakeCoSAgent(patterns)

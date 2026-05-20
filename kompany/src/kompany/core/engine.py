@@ -88,6 +88,18 @@ from kompany.state.templates import (
 from kompany.state.tool_authorization import ToolAuthorizationStore
 
 
+def _join_claim_texts(claims: list[Any]) -> str:
+    """Flatten a ``list[Claim]`` to a single string for legacy string fields.
+
+    Used by ``run_target_feasibility_review`` so the legacy ``cfo_view /
+    cos_view / ceo_proposal`` string keys keep working for any caller
+    that hasn't migrated to the new ``cfo_claims / cos_claims /
+    ceo_claims`` arrays yet.
+    """
+    parts = [str(getattr(c, "text", "")).strip() for c in claims]
+    return " ".join(p for p in parts if p)
+
+
 class KompanyEngine:
     """Core engine. All interfaces (CLI, API, MCP, SDK) call this."""
 
@@ -1160,6 +1172,7 @@ class KompanyEngine:
             DEFAULT_SINCE,
             MAX_EPISODES_PER_RUN,
             build_episode_summaries,
+            filter_inferred_only_patterns,
             filter_patterns,
             select_episode_rows,
         )
@@ -1286,6 +1299,24 @@ class KompanyEngine:
 
         patterns, warnings = filter_patterns(parsed)
 
+        # Evidence-trace guard (task 05-19): drop inferred-only patterns
+        # (no ``evidence_episode_ids``) before they pollute
+        # ``agent_memories``. Each rejection fires its own audit event so
+        # the founder can see "team learned 5 things, 3 were rejected".
+        patterns, claim_rejections = filter_inferred_only_patterns(patterns)
+        for rejection in claim_rejections:
+            self.audit.record(
+                event_type="distillation.claim_rejected_inferred_only",
+                action="Distillation rejected an inferred-only claim",
+                detail={
+                    "pattern_key": rejection["pattern_key"],
+                    "target_agent_role": rejection["target_agent_role"],
+                    "claim_text": rejection["claim_text"],
+                    "run_id": run_id,
+                    "dry_run": dry_run,
+                },
+            )
+
         # Write phase. ``dry_run`` short-circuits all DB writes; the audit
         # event still fires so operators can see who triggered the dry run.
         written: list[dict[str, Any]] = []
@@ -1347,6 +1378,7 @@ class KompanyEngine:
             "warnings": warnings,
             "writes": written,
             "parse_failures": parse_failures,
+            "claims_rejected_inferred_only": claim_rejections,
         }
 
         self.audit.record(
@@ -3025,6 +3057,12 @@ class KompanyEngine:
         ceo_proposal = ""
         rationale = ""
 
+        from kompany.core.debate_models import Claim, Source, SourceType
+
+        cfo_claims: list[Claim] = []
+        cos_claims: list[Claim] = []
+        ceo_claims: list[Claim] = []
+
         if skip_llm:
             cfo_view = (
                 f"At current cash ${cash:,.0f} and template defaults, "
@@ -3040,11 +3078,59 @@ class KompanyEngine:
                 f"deadline {recommended.deadline or 'unset'}."
             )
             rationale = "test-mode heuristic"
+            # Heuristic / test path: emit one inferred-only claim per role so
+            # the new payload shape is well-formed even without an LLM. The
+            # ``inferred`` source_type makes distillation reject these — by
+            # design: the heuristic is not a learning signal.
+            cfo_claims = [
+                Claim(
+                    text=cfo_view,
+                    evidence=[
+                        Source(
+                            source_type=SourceType.USER_INPUT,
+                            source_ref="initial_budget",
+                            claim_supported="budget-coverage",
+                        ),
+                        Source(
+                            source_type=SourceType.LEDGER_ENTRY,
+                            source_ref="balance",
+                            claim_supported="cash-on-hand",
+                        ),
+                    ],
+                )
+            ]
+            cos_claims = [
+                Claim(
+                    text=cos_view,
+                    evidence=[
+                        Source(
+                            source_type=SourceType.USER_INPUT,
+                            source_ref="revenue_target",
+                            claim_supported="target-feasibility",
+                        )
+                    ],
+                )
+            ]
+            ceo_claims = [
+                Claim(
+                    text=ceo_proposal,
+                    evidence=[
+                        Source(
+                            source_type=SourceType.INFERRED,
+                            source_ref="",
+                            claim_supported="heuristic-compromise",
+                        )
+                    ],
+                )
+            ]
         else:
             try:
-                cfo_view, cos_view, ceo_proposal, rationale = (
+                cfo_claims, cos_claims, ceo_claims, rationale = (
                     self._llm_target_review(founder, cash=cash, recommended=recommended)
                 )
+                cfo_view = _join_claim_texts(cfo_claims)
+                cos_view = _join_claim_texts(cos_claims)
+                ceo_proposal = _join_claim_texts(ceo_claims)
             except Exception as exc:  # noqa: BLE001
                 # Never let a flaky LLM kill onboarding; fall back to the
                 # heuristic with a note so the founder sees a useful
@@ -3056,11 +3142,19 @@ class KompanyEngine:
                     f"${recommended.revenue_target:,.0f}."
                 )
                 rationale = "llm_error_fallback"
+                # Synthesize inferred-only claims so downstream code can
+                # render even on LLM failure.
+                cfo_claims = [Claim(text=cfo_view)]
+                cos_claims = [Claim(text=cos_view)]
+                ceo_claims = [Claim(text=ceo_proposal)]
 
         payload: dict[str, Any] = {
             "cfo_view": cfo_view,
             "cos_view": cos_view,
             "ceo_proposal": ceo_proposal,
+            "cfo_claims": [c.model_dump(mode="json") for c in cfo_claims],
+            "cos_claims": [c.model_dump(mode="json") for c in cos_claims],
+            "ceo_claims": [c.model_dump(mode="json") for c in ceo_claims],
             "rationale": rationale,
             "original_targets": founder.model_dump(mode="json"),
             "recommended_targets": recommended.model_dump(mode="json"),
@@ -3135,13 +3229,20 @@ class KompanyEngine:
         *,
         cash: float,
         recommended: CompanyTargets,
-    ) -> tuple[str, str, str, str]:
+    ) -> tuple[list["Claim"], list["Claim"], list["Claim"], str]:
         """Run CFO+CoS+CEO LLM perspectives in sequence.
 
-        Each call is intentionally short (max_tokens=300) — the prompt is
-        narrow ("one sentence") so total cost stays under a few cents
-        even for apex-tier providers.
+        Each role returns a ``ClaimList`` (a Pydantic schema wrapping
+        ``claims: list[Claim]``) so downstream consumers can render
+        evidence-traced lines instead of opaque paragraphs.
+
+        Each call is intentionally short (max_tokens=400) — the prompts
+        stay narrow ("2-4 atomic claims, one sentence each") so total cost
+        stays under a few cents even for apex-tier providers.
         """
+        from kompany.core.debate import CLAIMS_SCHEMA_HINT
+        from kompany.core.debate_models import Claim, ClaimList, Source, SourceType
+
         # The trio share a common header so the LLM has identical context.
         # Glossary is injected first so the CFO/CoS/CEO calls reuse the
         # founder's canonical terminology in their feedback.
@@ -3162,36 +3263,70 @@ class KompanyEngine:
         ceo = self.registry.get(
             "ceo", company_state=self.get_company_state()
         )
-        cfo_resp = cfo.call(
+
+        def _safe_claims(resp_obj: Any, fallback_text: str) -> list[Claim]:
+            """Pick claims out of a structured response, fall back to one
+            inferred Claim if the LLM ignored the schema entirely."""
+            parsed = getattr(resp_obj, "parsed", None)
+            claims = list(getattr(parsed, "claims", []) or [])
+            if claims:
+                return claims
+            text = (getattr(resp_obj, "text", "") or "").strip() or fallback_text
+            return [
+                Claim(
+                    text=text,
+                    evidence=[
+                        Source(
+                            source_type=SourceType.INFERRED,
+                            source_ref="",
+                            claim_supported="llm_fallback",
+                        )
+                    ],
+                )
+            ]
+
+        cfo_resp = cfo.call_structured(
             prompt=(
                 header
-                + "\nAs CFO, one sentence: does the initial_budget cover "
-                "expected burn through the deadline?"
+                + "\nAs CFO, produce 2-4 atomic claims about whether the "
+                "initial_budget covers expected burn through the deadline. "
+                "Cite ledger_entry / user_input / template_default sources "
+                "for every numeric claim.\n\n"
+                + CLAIMS_SCHEMA_HINT
             ),
-            max_tokens=300,
+            output_schema=ClaimList,
+            max_tokens=600,
         )
-        cos_resp = cos.call(
+        cos_resp = cos.call_structured(
             prompt=(
                 header
-                + "\nAs Chief of Staff, one sentence: is the revenue/customer "
-                "target realistic for a cold start in this timeframe?"
+                + "\nAs Chief of Staff, produce 2-4 atomic claims about "
+                "whether the revenue/customer target is realistic for a "
+                "cold start in this timeframe. Cite user_input / "
+                "agent_memory / template_default sources where possible.\n\n"
+                + CLAIMS_SCHEMA_HINT
             ),
-            max_tokens=300,
+            output_schema=ClaimList,
+            max_tokens=600,
         )
-        ceo_resp = ceo.call(
+        ceo_resp = ceo.call_structured(
             prompt=(
                 header
                 + f"\nTeam's heuristic recommendation: revenue "
                 f"${recommended.revenue_target:,.0f}.\n"
-                "As CEO, one sentence: propose a compromise revenue target "
-                "and (optionally) a different deadline."
+                "As CEO, produce 2-4 atomic claims explaining your "
+                "compromise revenue target and (optionally) a different "
+                "deadline. Cite the user_input / template_default / "
+                "agent_memory sources that drove the compromise.\n\n"
+                + CLAIMS_SCHEMA_HINT
             ),
-            max_tokens=300,
+            output_schema=ClaimList,
+            max_tokens=600,
         )
         return (
-            (cfo_resp.text or "").strip(),
-            (cos_resp.text or "").strip(),
-            (ceo_resp.text or "").strip(),
+            _safe_claims(cfo_resp, "(CFO returned no claims)"),
+            _safe_claims(cos_resp, "(CoS returned no claims)"),
+            _safe_claims(ceo_resp, "(CEO returned no claims)"),
             "llm_review",
         )
 

@@ -157,7 +157,12 @@ class DebateEngine:
             f"Here are all positions from the debate:\n\n{context}\n\n"
             f"As Chief of Staff, synthesize this debate into a CEO brief. "
             f"Identify consensus, key tensions, and your recommended option. "
-            f"Be neutral — surface tradeoffs, don't take sides."
+            f"Be neutral — surface tradeoffs, don't take sides.\n\n"
+            f"Express the consensus as a list of atomic ``consensus_claims`` "
+            f"(not a free-text paragraph). Cite the source of every factual "
+            f"claim — prefer agent_memory / ledger_entry / user_input over "
+            f"inferred. The deprecated ``consensus_position`` string MAY be "
+            f"left empty.\n\n" + CLAIMS_SCHEMA_HINT
         )
         resp = cos.call_structured(
             prompt=prompt,
@@ -177,15 +182,20 @@ class DebateEngine:
         """CEO makes the final decision based on debate and synthesis."""
         ceo = self._registry.get("ceo")
         context = self._format_prior_rounds(all_rounds)
+        consensus_text = self._format_consensus_claims(synthesis)
         prompt = (
             f"The executive team debated:\n\n\"{question}\"\n\n"
             f"Debate positions:\n{context}\n\n"
             f"CoS Synthesis:\n"
-            f"- Consensus: {synthesis.consensus_position}\n"
+            f"- Consensus:\n{consensus_text}\n"
             f"- Tensions: {', '.join(synthesis.key_tensions)}\n"
             f"- Recommended: {synthesis.recommended_option}\n"
             f"- Risks: {', '.join(synthesis.risk_flags)}\n\n"
-            f"As CEO, make your final decision. Be decisive."
+            f"As CEO, make your final decision. Be decisive. Express your "
+            f"reasoning as ``rationale_claims`` (a list of atomic factual "
+            f"statements, each with cited evidence). The ``decision`` field "
+            f"is the headline verdict; the deprecated ``rationale`` string "
+            f"MAY be left empty.\n\n" + CLAIMS_SCHEMA_HINT
         )
         resp = ceo.call_structured(
             prompt=prompt,
@@ -237,17 +247,48 @@ class DebateEngine:
 
     @staticmethod
     def _format_prior_rounds(rounds: list[list[AgentPosition]]) -> str:
-        """Format prior rounds into readable context for prompts."""
+        """Format prior rounds into readable context for prompts.
+
+        Renders each position's ``effective_claims`` (new ``claims`` field
+        when present, legacy ``analysis`` otherwise) line-by-line so the
+        next round's LLM sees the per-claim evidence structure rather than
+        a flattened paragraph.
+        """
         if not rounds:
             return "(no prior positions)"
         parts: list[str] = []
         for i, rnd in enumerate(rounds, 1):
             parts.append(f"--- Round {i} ---")
             for pos in rnd:
+                claim_lines = DebateEngine._format_claim_block(pos.effective_claims())
                 parts.append(
                     f"[{pos.agent_name} ({pos.squad})] "
                     f"Recommendation: {pos.recommendation}\n"
-                    f"Analysis: {pos.analysis}\n"
+                    f"Claims:\n{claim_lines}\n"
                     f"Confidence: {pos.confidence}"
                 )
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _format_claim_block(claims: list[Claim]) -> str:
+        """Format ``Claim`` list into ``▸ text [src1, src2]`` lines."""
+        if not claims:
+            return "  (no claims)"
+        lines: list[str] = []
+        for claim in claims:
+            sources = [
+                s.source_ref or s.source_type.value
+                for s in claim.evidence
+                if s.source_type != SourceType.INFERRED
+            ]
+            marker = "  ▸" if sources else "  ⚠"
+            src_part = f" [{', '.join(sources)}]" if sources else ""
+            lines.append(f"{marker} {claim.text}{src_part}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_consensus_claims(synthesis: DebateSynthesis) -> str:
+        """Render synthesis consensus_claims (or legacy text) for prompts."""
+        return DebateEngine._format_claim_block(
+            synthesis.effective_consensus_claims()
+        )
