@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kompany Onboarding — Design Mockup</title>
+<style>
+  /* Inline cyberpunk tokens — pulled from web_ui/static/style.css so this
+     file is self-contained and renders offline. Match the production look. */
+  :root {
+    --green: #00ff41;
+    --green-dim: rgba(0, 255, 65, 0.55);
+    --green-faint: rgba(0, 255, 65, 0.25);
+    --cyan: #66ffff;
+    --amber: #ffaa00;
+    --red: #ff4444;
+    --bg: #000;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    background: var(--bg);
+    color: var(--green);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  body {
+    padding: 32px 24px 80px;
+    position: relative;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 100;
+    background: repeating-linear-gradient(0deg,
+      rgba(0,0,0,0) 0, rgba(0,255,65,0.04) 1px,
+      rgba(0,0,0,0) 2px, rgba(0,0,0,0) 4px);
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 101;
+    background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.5) 100%);
+  }
+
+  /* Doc chrome */
+  .doc-title {
+    max-width: 920px; margin: 0 auto 8px;
+    color: var(--green);
+    font-size: 16px;
+    text-shadow: 0 0 8px var(--green);
+  }
+  .doc-note {
+    max-width: 920px; margin: 0 auto 32px;
+    color: var(--green-dim);
+    font-size: 11px;
+    line-height: 1.7;
+  }
+  .doc-note b { color: var(--amber); }
+
+  /* Step container */
+  .step {
+    max-width: 920px;
+    margin: 0 auto 56px;
+    border: 1px dashed rgba(0,255,65,0.18);
+    padding: 24px;
+    background: rgba(0,255,65,0.012);
+  }
+  .step-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 4px;
+    font-size: 11px;
+    color: var(--green-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .step-head .num { color: var(--amber); font-weight: 700; }
+  .step-head .why { color: var(--green-dim); font-style: italic; text-transform: none; letter-spacing: 0; }
+  .step-title {
+    font-size: 14px;
+    color: var(--green);
+    margin-bottom: 18px;
+    text-shadow: 0 0 6px rgba(0,255,65,0.6);
+  }
+
+  /* Frame (matches .frame in prod style.css) */
+  .frame {
+    border: 2px solid var(--green);
+    padding: 20px;
+    margin-bottom: 16px;
+    position: relative;
+    background: rgba(0,255,65,0.015);
+  }
+  .frame::before {
+    content: attr(data-label);
+    position: absolute;
+    top: -10px; left: 16px;
+    background: #000;
+    padding: 0 8px;
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: 0.05em;
+  }
+
+  /* Header strip */
+  .hdr {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 12px; margin-bottom: 16px;
+    border-bottom: 1px dashed rgba(0,255,65,0.2);
+  }
+  .hdr .brand { font-weight: 700; font-size: 14px; text-shadow: 0 0 8px var(--green); }
+  .hdr .brand span { color: var(--cyan); }
+  .hdr .stat { font-size: 11px; color: var(--green-dim); }
+  .hdr .stat b { color: var(--green); font-weight: 400; }
+  .blink { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Boot lines */
+  .boot {
+    font-size: 12px;
+    line-height: 1.9;
+  }
+  .boot .line { white-space: pre; }
+  .boot .ok { color: var(--green); }
+  .boot .pend { color: var(--amber); }
+  .boot .dim { color: var(--green-dim); }
+  .boot .cursor { color: var(--green); animation: blink 0.9s steps(2) infinite; }
+  .boot .prompt { color: var(--cyan); }
+
+  /* Manifesto */
+  .manifesto {
+    font-size: 16px;
+    line-height: 1.7;
+    color: rgba(0,255,65,0.92);
+    padding: 24px 8px;
+  }
+  .manifesto .big {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--green);
+    text-shadow: 0 0 8px var(--green);
+    margin-bottom: 16px;
+  }
+  .manifesto .small {
+    margin-top: 16px;
+    color: var(--green-dim);
+    font-size: 12px;
+  }
+
+  /* Form fields */
+  .field { margin-bottom: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .field > label {
+    font-size: 11px;
+    color: rgba(0,255,65,0.7);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .field .hint { font-size: 11px; color: rgba(0,255,65,0.45); font-style: italic; }
+  input[type=text], input[type=password], input[type=number], textarea, .pseudo-input {
+    background: rgba(0,255,65,0.04);
+    border: 1px solid rgba(0,255,65,0.35);
+    color: var(--green);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    outline: 0;
+    width: 100%;
+  }
+  .pseudo-input { display: block; min-height: 34px; }
+  .combo {
+    position: relative;
+    background: rgba(0,255,65,0.04);
+    border: 1px solid rgba(0,255,65,0.35);
+    color: var(--green);
+    padding: 8px 32px 8px 10px;
+    font-size: 13px;
+  }
+  .combo::after {
+    content: "▼"; position: absolute; right: 10px; top: 50%;
+    transform: translateY(-50%); font-size: 9px; color: var(--green);
+  }
+
+  /* Faction grid */
+  .factions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .faction {
+    border: 1px solid rgba(0,255,65,0.35);
+    padding: 14px;
+    background: rgba(0,255,65,0.025);
+    position: relative;
+  }
+  .faction.selected {
+    border-color: var(--green);
+    background: rgba(0,255,65,0.08);
+    box-shadow: 0 0 12px rgba(0,255,65,0.25);
+  }
+  .faction.selected::before {
+    content: "▸";
+    position: absolute; top: 10px; right: 12px;
+    color: var(--green);
+    font-size: 16px;
+  }
+  .faction .handle {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.05em;
+    margin-bottom: 4px;
+    color: var(--green);
+  }
+  .faction .slug { font-size: 10px; color: var(--green-dim); margin-bottom: 8px; }
+  .faction .quote {
+    color: rgba(0,255,65,0.75);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 12px;
+    border-left: 2px solid rgba(0,255,65,0.4);
+    padding-left: 8px;
+  }
+  .faction .stats {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 3px 8px;
+    font-size: 11px;
+    margin-bottom: 10px;
+  }
+  .faction .stats .k { color: var(--green-dim); }
+  .faction .stats .v { color: var(--green); text-align: right; font-variant-numeric: tabular-nums; }
+  .faction .stats .bar {
+    background: rgba(0,255,65,0.08);
+    height: 8px; align-self: center;
+    position: relative;
+    border: 1px solid rgba(0,255,65,0.18);
+  }
+  .faction .stats .bar > i {
+    display: block; height: 100%;
+    background: var(--green);
+    box-shadow: 0 0 4px var(--green);
+  }
+  .faction .changes {
+    border-top: 1px dashed rgba(0,255,65,0.2);
+    padding-top: 8px;
+    font-size: 11px;
+    color: rgba(0,255,65,0.7);
+  }
+  .faction .changes b { color: var(--amber); font-weight: 400; }
+  .faction .changes div + div { margin-top: 4px; }
+
+  /* Mission briefing */
+  .mission-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .mission-left .field { margin-bottom: 14px; }
+  .mission-derived {
+    border: 1px dashed rgba(0,255,65,0.3);
+    padding: 14px;
+    background: rgba(0,255,65,0.02);
+    font-size: 12px;
+  }
+  .mission-derived .row {
+    display: flex; justify-content: space-between;
+    padding: 4px 0;
+    border-bottom: 1px dotted rgba(0,255,65,0.15);
+  }
+  .mission-derived .row:last-child { border-bottom: 0; }
+  .mission-derived .k { color: var(--green-dim); }
+  .mission-derived .v { color: var(--green); font-variant-numeric: tabular-nums; }
+  .mission-derived .v.amber { color: var(--amber); }
+  .mission-derived .v.cyan { color: var(--cyan); }
+  .mission-derived h4 {
+    font-size: 11px; color: var(--green-dim);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .mission-derived ul { list-style: none; }
+  .mission-derived ul li {
+    font-size: 11px;
+    color: rgba(0,255,65,0.75);
+    padding: 3px 0;
+  }
+  .mission-derived ul li::before { content: "▸ "; color: var(--amber); }
+
+  /* Action button */
+  .actions { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 20px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+  }
+  .btn:hover { background: rgba(0,255,65,0.13); }
+  .btn.primary { box-shadow: 0 0 8px rgba(0,255,65,0.4); }
+  .btn.ghost { color: var(--green-dim); border-color: rgba(0,255,65,0.3); }
+  .progress-pill {
+    font-size: 10px;
+    color: var(--green-dim);
+    letter-spacing: 0.1em;
+  }
+  .progress-pill .on { color: var(--green); }
+
+  /* Provision spinner row */
+  .provision {
+    font-size: 12px;
+    line-height: 1.9;
+  }
+  .provision .line.ok::before { content: "[OK] "; color: var(--green); }
+  .provision .line.pend::before { content: "[..] "; color: var(--amber); }
+  .provision .line.pend { color: var(--amber); }
+
+  /* Status strip (bottom of frame) */
+  .status-strip {
+    margin-top: 14px; padding-top: 10px;
+    border-top: 1px dashed rgba(0,255,65,0.18);
+    display: flex; gap: 24px; font-size: 10px; color: var(--green-dim);
+    letter-spacing: 0.05em;
+  }
+  .status-strip b { color: var(--green); font-weight: 400; }
+
+  /* Two-column intro layout */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+</style>
+</head>
+<body>
+
+<div class="doc-title">▌KOMPANY//ONBOARDING DESIGN MOCKUP <span class="blink">█</span></div>
+<div class="doc-note">
+  Each frame below = one step the player sees in sequence. Visual style matches production
+  <code>web_ui/static/style.css</code>. <b>All numbers shown on faction cards are real engine
+  parameters</b> — they map 1:1 to fields on <code>OnboardingCompleteRequest</code> and feed
+  the runtime's policy / ledger / agent-spawn behavior. Not decorative.
+</div>
+
+<!-- ============================================================
+     STEP 0 — BOOT SEQUENCE
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 0</span> · BOOT SEQUENCE</span>
+    <span class="why">~2.5s on first launch only · skipped if vault has an API key</span>
+  </div>
+  <div class="step-title">Establishes "you've booted into a runtime", not "you've loaded a webpage".</div>
+
+  <div class="frame" data-label="POST">
+    <div class="hdr">
+      <div class="brand">▌KOMPANY//<span>FIRST-BOOT</span> <span class="blink">█</span></div>
+      <div class="stat"><span>build:</span> <b>v0.1.0 · aarch64-apple-darwin</b></div>
+    </div>
+    <div class="boot">
+      <div class="line ok">[OK]  BIOS check ................... KOMPANY v0.1.0</div>
+      <div class="line ok">[OK]  Sidecar PID 4127 ............. 127.0.0.1:8765</div>
+      <div class="line ok">[OK]  Vault initialized ............ ~/.kompany/vault.db</div>
+      <div class="line ok">[OK]  Event hub online .............. SSE stream ready</div>
+      <div class="line ok">[OK]  Capital ledger ................ $0.00 (uninitialized)</div>
+      <div class="line ok">[OK]  Agent roster .................. 0 hired</div>
+      <div class="line pend">[..]  OPERATOR_AUTH ................. pending</div>
+      <div class="line dim">&nbsp;</div>
+      <div class="line prompt">                  ▸ AWAITING OPERATOR INPUT <span class="cursor">█</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     STEP 1 — MANIFESTO
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 1</span> · MANIFESTO INTERSTITIAL</span>
+    <span class="why">Optional · sets stakes before any field is asked</span>
+  </div>
+  <div class="step-title">One sentence of intent — increases perceived stakes, which is the whole product.</div>
+
+  <div class="frame" data-label="BRIEFING // 00.intro">
+    <div class="manifesto">
+      <div class="big">You're not configuring software.</div>
+      <p>You're commissioning a company. A runtime of autonomous agents that will
+      spend your capital, pursue your goal, sign contracts, ship code, talk to
+      customers — and either earn real money or burn it.</p>
+      <p style="margin-top:12px">Every number you enter on the next screens is wired
+      to the engine. The runtime will obey them. So enter them deliberately.</p>
+      <div class="small">No metrics are simulated. No scores. The only output is dollars.</div>
+    </div>
+    <div class="actions">
+      <span class="progress-pill"><span class="on">●</span>○○○○ &nbsp;01/05</span>
+      <button class="btn primary">▸ I UNDERSTAND. CONTINUE</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     STEP 2 — CONNECTION
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 2</span> · CONNECTION</span>
+    <span class="why">Reframed: it's the company's outbound link to its brain, not a "config field"</span>
+  </div>
+  <div class="step-title">LLM provider + API key. Same fields as today, just narrated differently.</div>
+
+  <div class="frame" data-label="CONNECTION // 01.uplink">
+    <div class="field">
+      <label>// COGNITION_PROVIDER</label>
+      <div class="combo">anthropic (Claude)</div>
+      <div class="hint">The brain your company will think with. Switchable later — runtime auto-migrates context.</div>
+    </div>
+
+    <div class="field">
+      <label>// PROVIDER_LICENSE_KEY</label>
+      <div class="pseudo-input" style="color:rgba(0,255,65,0.6)">sk-ant-•••••••••••••••••••••••••••••••••••••••••••••••••</div>
+      <div class="hint">Encrypted in local vault. Never leaves this machine. Pay-per-token billed directly to your provider — Kompany takes no cut.</div>
+    </div>
+
+    <div class="actions">
+      <span class="progress-pill">●<span class="on">●</span>○○○ &nbsp;02/05</span>
+      <div>
+        <button class="btn ghost">◂ BACK</button>
+        <button class="btn primary">▸ TEST UPLINK</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     STEP 3 — FACTION SELECTION (real business knobs, not game stats)
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 3</span> · FACTION (STARTER COMPANY)</span>
+    <span class="why">Every "stat" is a real engine parameter, not a game number</span>
+  </div>
+  <div class="step-title">
+    Replaces the flat 7-radio list. Each card is a real strategy preset: the four numbers shown are
+    engine policy knobs that change <em>what the runtime actually does</em>.
+  </div>
+
+  <div class="frame" data-label="FACTION // 03.charter">
+
+    <div class="factions">
+
+      <!-- BUILDER -->
+      <div class="faction selected">
+        <div class="handle">THE BUILDER</div>
+        <div class="slug">template_id: saas-startup</div>
+        <div class="quote">"Ship software. Charge enterprises. Sleep poorly."</div>
+        <div class="stats">
+          <span class="k">burn_ceiling</span>     <span class="bar"><i style="width:55%"></i></span> <span class="v">$220/wk</span>
+          <span class="k">risk_budget</span>      <span class="bar"><i style="width:35%"></i></span> <span class="v">35% cap</span>
+          <span class="k">ttr_target</span>       <span class="bar"><i style="width:20%"></i></span> <span class="v">12 wks</span>
+          <span class="k">initial_roster</span>   <span class="bar"><i style="width:60%"></i></span> <span class="v">4 agents</span>
+        </div>
+        <div class="changes">
+          <div><b>First hires:</b> CTO, RevOps, DevRel, Designer</div>
+          <div><b>KPI focus:</b> MRR, CAC, activation rate</div>
+          <div><b>Pivots allowed:</b> ✓ ledger carries over</div>
+        </div>
+      </div>
+
+      <!-- OPERATOR -->
+      <div class="faction">
+        <div class="handle">THE OPERATOR</div>
+        <div class="slug">template_id: consulting-firm</div>
+        <div class="quote">"Sell time. Buy time back. Repeat."</div>
+        <div class="stats">
+          <span class="k">burn_ceiling</span>     <span class="bar"><i style="width:25%"></i></span> <span class="v">$80/wk</span>
+          <span class="k">risk_budget</span>      <span class="bar"><i style="width:15%"></i></span> <span class="v">15% cap</span>
+          <span class="k">ttr_target</span>       <span class="bar"><i style="width:85%"></i></span> <span class="v">2 wks</span>
+          <span class="k">initial_roster</span>   <span class="bar"><i style="width:30%"></i></span> <span class="v">2 agents</span>
+        </div>
+        <div class="changes">
+          <div><b>First hires:</b> BD, Delivery Lead</div>
+          <div><b>KPI focus:</b> billable hours, gross margin</div>
+          <div><b>Pivots allowed:</b> ✓ ledger carries over</div>
+        </div>
+      </div>
+
+      <!-- TRADER -->
+      <div class="faction">
+        <div class="handle">THE TRADER</div>
+        <div class="slug">template_id: ecommerce</div>
+        <div class="quote">"Buy low. Sell shipped. Margin is morality."</div>
+        <div class="stats">
+          <span class="k">burn_ceiling</span>     <span class="bar"><i style="width:75%"></i></span> <span class="v">$300/wk</span>
+          <span class="k">risk_budget</span>      <span class="bar"><i style="width:60%"></i></span> <span class="v">60% cap</span>
+          <span class="k">ttr_target</span>       <span class="bar"><i style="width:60%"></i></span> <span class="v">4 wks</span>
+          <span class="k">initial_roster</span>   <span class="bar"><i style="width:50%"></i></span> <span class="v">3 agents</span>
+        </div>
+        <div class="changes">
+          <div><b>First hires:</b> Sourcing, Ads, Ops</div>
+          <div><b>KPI focus:</b> CAC, ROAS, inventory turnover</div>
+          <div><b>Pivots allowed:</b> ✓ ledger carries over</div>
+        </div>
+      </div>
+
+      <!-- BARD -->
+      <div class="faction">
+        <div class="handle">THE BARD</div>
+        <div class="slug">template_id: content-creator</div>
+        <div class="quote">"Audience is the moat. Everything else is rent."</div>
+        <div class="stats">
+          <span class="k">burn_ceiling</span>     <span class="bar"><i style="width:18%"></i></span> <span class="v">$50/wk</span>
+          <span class="k">risk_budget</span>      <span class="bar"><i style="width:25%"></i></span> <span class="v">25% cap</span>
+          <span class="k">ttr_target</span>       <span class="bar"><i style="width:30%"></i></span> <span class="v">8 wks</span>
+          <span class="k">initial_roster</span>   <span class="bar"><i style="width:20%"></i></span> <span class="v">2 agents</span>
+        </div>
+        <div class="changes">
+          <div><b>First hires:</b> Editor, Distribution</div>
+          <div><b>KPI focus:</b> reach, retention, sponsorship</div>
+          <div><b>Pivots allowed:</b> ✓ ledger carries over</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="actions">
+      <span class="progress-pill">●●<span class="on">●</span>○○ &nbsp;03/05</span>
+      <div>
+        <button class="btn ghost">◂ BACK</button>
+        <button class="btn primary">▸ COMMIT FACTION</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     STEP 4 — MISSION BRIEFING (capital + north star + first objective)
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 4</span> · MISSION BRIEFING</span>
+    <span class="why">Three structured fields replace the freeform "first directive" textbox</span>
+  </div>
+  <div class="step-title">
+    Fills two API gaps that exist today: <code>capital</code> (only on CLI) and <code>north_star</code> (nowhere).
+    Right column is engine-computed — the player sees what the runtime is about to commit to.
+  </div>
+
+  <div class="frame" data-label="MISSION_BRIEFING // 04.charter">
+
+    <div class="mission-grid">
+      <div class="mission-left">
+
+        <div class="field">
+          <label>// STARTING_CAPITAL  (real USD)</label>
+          <input type="text" value="$50.00" style="font-size:18px;color:var(--amber)">
+          <div class="hint">Initializes ledger. Engine cannot spend beyond this until revenue arrives.</div>
+        </div>
+
+        <div class="field">
+          <label>// WIN_CONDITION  (north-star goal)</label>
+          <textarea rows="2">Earn enough net profit to buy a Mac Studio (~$2,000)</textarea>
+          <div class="hint">Long-term target the runtime optimizes toward. Plain text — the engine parses it.</div>
+        </div>
+
+        <div class="field">
+          <label>// FIRST_OBJECTIVE  (week 1, optional)</label>
+          <textarea rows="3">Pick the cheapest viable model. Ship something chargeable this week.</textarea>
+          <div class="hint">If empty, the engine drafts week 1 itself from the faction's playbook.</div>
+        </div>
+
+      </div>
+
+      <div class="mission-derived">
+        <h4>// ENGINE PREVIEW</h4>
+        <div class="row"><span class="k">starting_capital</span><span class="v amber">$50.00</span></div>
+        <div class="row"><span class="k">target_capital</span><span class="v">$2,000.00</span></div>
+        <div class="row"><span class="k">required_roi</span><span class="v amber">40×</span></div>
+        <div class="row"><span class="k">weekly_burn_cap</span><span class="v">$220 (from BUILDER)</span></div>
+        <div class="row"><span class="k">runway_at_cap</span><span class="v cyan">0.2 wks</span></div>
+        <div class="row"><span class="k">first_revenue_by</span><span class="v">wk 12 (faction default)</span></div>
+
+        <h4 style="margin-top:14px">// AUTO-DRAFTED DIRECTIVES (wk 1)</h4>
+        <ul>
+          <li>Validate ICP via 5 problem interviews</li>
+          <li>Stand up landing page + waitlist</li>
+          <li>Identify one paying design partner</li>
+        </ul>
+
+        <div style="margin-top:12px;font-size:11px;color:var(--red);font-style:italic">
+          ⚠ Capital ($50) below recommended burn cap ($220/wk). Engine will throttle
+          aggressively until first revenue.
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <span class="progress-pill">●●●<span class="on">●</span>○ &nbsp;04/05</span>
+      <div>
+        <button class="btn ghost">◂ BACK</button>
+        <button class="btn primary">▸ ACCEPT MISSION</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================
+     STEP 5 — PROVISIONING
+     ============================================================ -->
+<section class="step">
+  <div class="step-head">
+    <span><span class="num">STEP 5</span> · PROVISIONING</span>
+    <span class="why">Real provisioning steps — visible so the player knows what just happened</span>
+  </div>
+  <div class="step-title">Replaces the bare "Provisioning your company..." spinner. Each line is a real subsystem coming online.</div>
+
+  <div class="frame" data-label="PROVISIONING // 05.commit">
+    <div class="provision">
+      <div class="line ok">Vault: stored anthropic API key, encrypted with OS keychain</div>
+      <div class="line ok">Ledger: initialized at $50.00 USD</div>
+      <div class="line ok">Goal memory: north_star registered ("buy Mac Studio @ $2,000")</div>
+      <div class="line ok">Faction policy: BUILDER loaded (burn $220/wk, risk 35%, ttr 12wk)</div>
+      <div class="line ok">Roster: 4 agents spawned (CTO, RevOps, DevRel, Designer)</div>
+      <div class="line pend">Drafting week-1 directives from objective…</div>
+    </div>
+
+    <div class="status-strip">
+      <div><span>STATUS:</span> <b style="color:var(--amber)">PROVISIONING</b></div>
+      <div><span>CONN:</span> <b>127.0.0.1:8765</b></div>
+      <div><span>RUN_ID:</span> <b>run_5f3b21a0</b></div>
+      <div><span>T+</span> <b>00:00:04.2</b></div>
+    </div>
+  </div>
+</section>
+
+<div class="doc-note" style="margin-top:24px">
+  <b>Implementation order</b> (matches the recommendation in the brainstorm report):<br>
+  &nbsp;&nbsp;1. Backend: add <code>capital: float</code> and <code>north_star: str</code> to <code>OnboardingCompleteRequest</code> + wire to <code>run_onboard</code> + engine goal memory.<br>
+  &nbsp;&nbsp;2. Backend: extend each template's manifest with <code>{burn_ceiling, risk_budget, ttr_target, initial_roster}</code> — the four numbers shown above.<br>
+  &nbsp;&nbsp;3. Frontend: replace flat radio list with faction cards (Step 3).<br>
+  &nbsp;&nbsp;4. Frontend: split First Directive textarea into the 3-field Mission Briefing + live engine preview (Step 4).<br>
+  &nbsp;&nbsp;5. Frontend: typed-out boot sequence (Step 0), gated by a "first boot" flag in vault.<br>
+  &nbsp;&nbsp;6. Frontend: manifesto interstitial (Step 1) — last to ship; A/B if needed.
+</div>
+
+</body>
+</html>

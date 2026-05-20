@@ -7,9 +7,33 @@ from typing import TYPE_CHECKING
 from kompany.core.debate_models import (
     AgentPosition,
     CEODecision,
+    Claim,
     DebateResult,
     DebateRound,
     DebateSynthesis,
+    Source,
+    SourceType,
+)
+
+
+# Shared schema description appended to every debate-style prompt. Tells
+# the LLM how to populate ``claims`` and ``evidence`` so distillation
+# can later distinguish sourced facts from inferences.
+CLAIMS_SCHEMA_HINT = (
+    "Output schema:\n"
+    "- ``claims``: a list. Each claim is one atomic factual statement.\n"
+    "  Split compound statements into multiple claims so each can be cited.\n"
+    "- Each claim has ``evidence: list[Source]`` citing concrete sources:\n"
+    "  source_type ∈ {user_input, template_default, ledger_entry, "
+    "agent_memory, audit_event, inferred}; ``source_ref`` is the entry id "
+    "/ field name / memory id; ``claim_supported`` is a short label.\n"
+    "- If you have no concrete source for a claim, attach one Source with "
+    "source_type=inferred (or leave evidence empty). Claims marked "
+    "inferred-only will be flagged in the UI and will NOT be promoted to "
+    "long-term agent memory by distillation — prefer to cite real sources "
+    "whenever you can.\n"
+    "- The deprecated ``analysis`` string field MAY be left empty; it is "
+    "kept only for backward compatibility."
 )
 
 if TYPE_CHECKING:
@@ -178,29 +202,38 @@ class DebateEngine:
         context: str,
         role: str,
     ) -> str:
-        """Build the prompt for a specific debate round."""
+        """Build the prompt for a specific debate round.
+
+        The shared :data:`CLAIMS_SCHEMA_HINT` block is appended so the LLM
+        always knows how to populate per-claim evidence. Each claim must
+        be one atomic factual statement with a ``Source`` list; the
+        deprecated free-text ``analysis`` field MAY be left empty.
+        """
         if round_type == DebateRound.POSITION:
-            return (
+            body = (
                 f'The Master asks: "{question}"\n\n'
                 f"Provide your independent position as {role.upper()}. "
-                f"Give domain-specific analysis (3-5 sentences), "
-                f"a concrete recommendation, and your confidence level."
+                f"Produce 3-5 atomic claims (one factual statement each) and "
+                f"a concrete recommendation, plus your confidence level."
             )
         elif round_type == DebateRound.REBUTTAL:
-            return (
+            body = (
                 f'The Master asks: "{question}"\n\n'
                 f"Prior positions:\n{context}\n\n"
                 f"As {role.upper()}, review all positions. "
                 f"Acknowledge valid points by name, challenge points you "
-                f"disagree with, and update your position if warranted."
+                f"disagree with, and update your claim list if warranted. "
+                f"Cite the source of every factual claim you add."
             )
         else:  # CONVERGENCE
-            return (
+            body = (
                 f'The Master asks: "{question}"\n\n'
                 f"Prior rounds:\n{context}\n\n"
                 f"As {role.upper()}, move toward consensus. "
-                f"State any concessions and any non-negotiable hard lines."
+                f"State any concessions and any non-negotiable hard lines. "
+                f"Cite the source of any new factual claim."
             )
+        return body + "\n\n" + CLAIMS_SCHEMA_HINT
 
     @staticmethod
     def _format_prior_rounds(rounds: list[list[AgentPosition]]) -> str:
