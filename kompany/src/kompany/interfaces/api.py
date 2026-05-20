@@ -91,6 +91,11 @@ class OnboardingCompleteRequest(BaseModel):
     revenue_target: float | None = Field(default=None, ge=0.0)
     customer_target: int | None = Field(default=None, ge=0)
     deadline: str | None = None  # ISO 8601 string (YYYY-MM-DD ok)
+    # Onboard-v2 task (05-19): founder-edited glossary term -> definition
+    # overrides. Applied after the template's glossary is bulk-installed,
+    # so a founder rewording "customer" lands on top of the template's
+    # default definition. Forbidden-synonym lists are preserved.
+    glossary_overrides: dict[str, str] | None = None
 
 
 class OnboardingCompleteResponse(BaseModel):
@@ -188,6 +193,7 @@ def onboarding_complete(req: OnboardingCompleteRequest) -> OnboardingCompleteRes
             revenue_target=req.revenue_target,
             customer_target=req.customer_target,
             deadline=req.deadline,
+            glossary_overrides=req.glossary_overrides,
         )
     except OnboardError as exc:
         return OnboardingCompleteResponse(
@@ -1288,20 +1294,52 @@ def run_debate(req: DebateRequest) -> dict[str, Any]:
 
 
 @app.get("/projects")
-def list_projects() -> list[dict[str, Any]]:
-    """List active projects."""
+def list_projects(include_draft: bool = False) -> list[dict[str, Any]]:
+    """List projects.
+
+    By default returns only ``status='active'`` rows (legacy behaviour
+    used by the dashboard timeline + inbox).  Pass ``?include_draft=1``
+    to additionally include rows ``Templates.apply`` staged as drafts —
+    the onboard-v2 First Move step (PRD 05-19-onboard-v2-flow) reads
+    those to render its three suggested-directive cards.
+
+    Draft rows use a literal ``'draft'`` status string that's outside
+    :class:`ProjectStatus`, so we serialise the raw value instead of
+    routing through ``Projects.list_active``.
+    """
     engine = get_engine()
-    active = engine.projects.list_active()
+    if not include_draft:
+        active = engine.projects.list_active()
+        return [
+            {
+                "id": p.id,
+                "name": p.name,
+                "type": p.type.value,
+                "status": p.status.value,
+                "target_amount": p.target_amount,
+                "funded_amount": p.funded_amount,
+            }
+            for p in active
+        ]
+    # Raw scan including drafts. We can't push these through
+    # ``_row_to_project`` because that constructor coerces status into
+    # the enum (no DRAFT member). Read the SQL row directly.
+    rows = engine.db.execute(
+        "SELECT id, name, type, status, target_amount, funded_amount "
+        "FROM projects "
+        "WHERE status IN ('active', 'draft') "
+        "ORDER BY created_at DESC"
+    ).fetchall()
     return [
         {
-            "id": p.id,
-            "name": p.name,
-            "type": p.type.value,
-            "status": p.status.value,
-            "target_amount": p.target_amount,
-            "funded_amount": p.funded_amount,
+            "id": r["id"],
+            "name": r["name"],
+            "type": r["type"],
+            "status": r["status"],
+            "target_amount": r["target_amount"],
+            "funded_amount": r["funded_amount"],
         }
-        for p in active
+        for r in rows
     ]
 
 
@@ -1460,6 +1498,98 @@ def execute_project(project_id: str) -> dict[str, Any]:
     if not p:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
     return engine.execute_project(project_id)
+
+
+@app.post("/projects/{project_id}/activate")
+def activate_project(project_id: str) -> dict[str, Any]:
+    """Promote a ``status='draft'`` project to ``active``.
+
+    Used by the onboard-v2 "First Move" step (PRD 05-19-onboard-v2-flow):
+    after ``apply_template`` stages suggested directives as draft
+    projects, the founder picks one and we flip its status so the engine
+    will pick it up on the next directive sweep. The two unselected
+    drafts stay in ``draft`` for later activation.
+
+    Returns ``404`` when no project matches the id. Idempotent: an
+    already-active project is returned unchanged.
+    """
+    engine = get_engine()
+    # Touch the raw row first so we can distinguish "not found" from the
+    # ``status != 'draft'`` branch ``Projects.get`` would happily return.
+    row = engine.db.execute(
+        "SELECT id, status FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    current_status = row["status"]
+    if current_status == "active":
+        # Idempotent — caller can replay this safely (e.g. retry after a
+        # network blip during First Move submit).
+        proj = engine.projects.get(project_id)
+        return {
+            "id": project_id,
+            "status": "active",
+            "previous_status": "active",
+            "name": proj.name if proj else None,
+        }
+    # Flip the literal status string (``ProjectStatus`` has no DRAFT
+    # member; ``Templates.apply`` writes ``'draft'`` directly).
+    engine.db.execute(
+        "UPDATE projects SET status = 'active', updated_at = datetime('now') "
+        "WHERE id = ?",
+        (project_id,),
+    )
+    engine.db.commit()
+    engine.audit.record(
+        event_type="project.activated",
+        action=f"Activated project from {current_status} to active",
+        detail={
+            "project_id": project_id,
+            "previous_status": current_status,
+            "source": "onboarding.first_move",
+        },
+        project_id=project_id,
+    )
+    proj = engine.projects.get(project_id)
+    return {
+        "id": project_id,
+        "status": "active",
+        "previous_status": current_status,
+        "name": proj.name if proj else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# LLM spend summary (onboard-v2 cost chip + dashboard cost chip)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/llm/spend/summary")
+def llm_spend_summary() -> dict[str, Any]:
+    """Aggregate AI_COST ledger rows for the dashboard LLM spend chip.
+
+    The PREVIEW / STREAM / LEDGER discipline (memory:
+    [[engineering-cost-visibility-discipline]]) requires every LLM call
+    to land an ``AI_COST`` ledger row. This endpoint sums them so the
+    cyberpunk header can render a running total without subscribing to
+    SSE just to keep a counter. The chip refreshes on every ``llm.spend``
+    SSE envelope (incremental) and reconciles against this endpoint on
+    page load / focus-restore (authoritative).
+    """
+    engine = get_engine()
+    try:
+        totals = engine.ledger.get_totals()
+    except Exception:
+        return {"total_usd": 0.0, "row_count": 0}
+    # ledger amount for AI_COST rows is stored as a negative number
+    # (it's an expense). The chip wants the magnitude.
+    raw = float(totals.get("ai_cost", 0.0))
+    total_usd = abs(raw)
+    row = engine.db.execute(
+        "SELECT COUNT(*) AS c FROM ledger WHERE category = 'ai_cost'"
+    ).fetchone()
+    row_count = int(row["c"]) if row else 0
+    return {"total_usd": total_usd, "row_count": row_count}
 
 
 # ---------------------------------------------------------------------------

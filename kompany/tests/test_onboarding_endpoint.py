@@ -106,6 +106,8 @@ def test_complete_with_valid_body_returns_ready(
         revenue_target: float | None = None,
         customer_target: int | None = None,
         deadline: str | None = None,
+        # Onboard-v2 task (05-19) — founder-edited glossary terms.
+        glossary_overrides: dict[str, str] | None = None,
     ) -> OnboardResult:
         captured["call"] = {
             "provider": provider,
@@ -118,6 +120,7 @@ def test_complete_with_valid_body_returns_ready(
             "revenue_target": revenue_target,
             "customer_target": customer_target,
             "deadline": deadline,
+            "glossary_overrides": glossary_overrides,
         }
         return OnboardResult(
             status="completed",

@@ -896,6 +896,7 @@ def onboard_headless(
     revenue_target: float | None = None,
     customer_target: int | None = None,
     deadline: str | None = None,
+    glossary_overrides: dict[str, str] | None = None,
     engine_factory: Callable[[], Any] | None = None,
 ) -> OnboardResult:
     """Run a fully-headless onboarding pass.
@@ -1050,6 +1051,36 @@ def onboard_headless(
                     result.template_id = template_id
             except ValueError as exc:
                 raise OnboardError("template_error", str(exc)) from exc
+
+        # ----- Glossary overrides (onboard-v2 task 05-19) ----------------
+        # Founder-edited definitions are applied AFTER the template's
+        # bulk_install so they overlay the template defaults. Forbidden-
+        # synonym lists are preserved (we only mutate the definition).
+        # Unknown terms (founder typed a new term in the inline editor)
+        # are appended with ``added_by='founder'`` and empty forbidden
+        # list. Failures are non-fatal: onboarding still succeeds.
+        if not reused and glossary_overrides:
+            try:
+                glossary_svc = getattr(engine, "glossary", None)
+                if glossary_svc is not None:
+                    for term, definition in glossary_overrides.items():
+                        if not isinstance(term, str) or not isinstance(definition, str):
+                            continue
+                        term = term.strip()
+                        definition = definition.strip()
+                        if not term or not definition:
+                            continue
+                        existing = glossary_svc.get(term)
+                        if existing is not None:
+                            glossary_svc.update(term, definition=definition)
+                        else:
+                            glossary_svc.add(
+                                term=term,
+                                definition=definition,
+                                added_by="founder",
+                            )
+            except Exception as exc:  # noqa: BLE001
+                result.notes.append(f"glossary overrides skipped: {exc}")
 
         # ----- Kick off team target feasibility review -------------------
         # Non-blocking: failure here is informational — onboarding still

@@ -707,3 +707,316 @@ body.onboarding-body { padding-bottom: 40px; }
   min-height: 80px;
   resize: vertical;
 }
+
+/* ----------------------------------------------------------------
+ * Onboard v2 — multi-step wizard layouts (PRD 05-19-onboard-v2-flow)
+ * ---------------------------------------------------------------- */
+
+.onb-step-host {
+  width: 100%;
+}
+
+/* General inputs inside the new wizard (no longer wrapped by <form>). */
+.onb-step-host input[type="password"],
+.onb-step-host input[type="text"],
+.onb-step-host input[type="url"],
+.onb-step-host input[type="email"],
+.onb-step-host input[type="search"],
+.onb-step-host input[type="number"],
+.onb-step-host input[type="date"],
+.onb-step-host textarea {
+  background: rgba(0, 255, 65, 0.04);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: 0;
+  caret-color: #00ff41;
+  border-radius: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.onb-step-host input:focus,
+.onb-step-host textarea:focus {
+  border-color: #00ff41;
+  background-color: rgba(0, 255, 65, 0.08);
+}
+.onb-step-host input::placeholder,
+.onb-step-host textarea::placeholder {
+  color: rgba(0, 255, 65, 0.35);
+}
+
+/* Resume banner */
+.onb-resume {
+  max-width: 720px;
+  margin: 0 auto 18px auto;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 170, 0, 0.55);
+  background: rgba(255, 170, 0, 0.05);
+}
+.onb-resume-head { color: #ffaa00; font-weight: bold; }
+.onb-resume-body { font-size: 12px; color: rgba(0, 255, 65, 0.75); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
+.onb-resume-note { color: rgba(255, 170, 0, 0.85); font-style: italic; }
+.onb-resume-actions { display: flex; gap: 10px; margin-top: 10px; }
+.onb-resume-expired { border-color: #ff4444; background: rgba(255, 68, 68, 0.06); }
+.onb-resume-expired .onb-resume-head { color: #ff4444; }
+
+/* Step 0 — Boot */
+.onb-boot { display: flex; flex-direction: column; gap: 8px; }
+.onb-boot-sub { color: rgba(0, 255, 65, 0.6); font-size: 11px; }
+.onb-boot-lines {
+  background: transparent;
+  color: #00ff41;
+  font-family: inherit;
+  font-size: 12px;
+  margin: 0;
+  white-space: pre;
+  line-height: 1.5;
+  min-height: 200px;
+}
+.onb-btn-skip { align-self: flex-end; }
+
+/* Step 1 — Connection */
+.onb-conn-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 4px 0 18px 0;
+  flex-wrap: wrap;
+}
+.onb-conn-result { font-size: 12px; padding: 6px 10px; border: 1px solid transparent; }
+.onb-conn-ok { color: #00ff41; border-color: rgba(0, 255, 65, 0.5); }
+.onb-conn-err { color: #ff4444; border-color: rgba(255, 68, 68, 0.5); background: rgba(255, 68, 68, 0.05); }
+.onb-btn-test { border-color: rgba(255, 170, 0, 0.7); color: #ffaa00; }
+.onb-btn-test:hover:not(:disabled) { background: rgba(255, 170, 0, 0.1); }
+
+/* Step 2 — Faction */
+.onb-faction-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; color: rgba(0, 255, 65, 0.85);
+}
+.onb-link-escape {
+  background: transparent;
+  border: none;
+  color: rgba(255, 170, 0, 0.85);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+}
+.onb-link-escape:hover { color: #ffaa00; text-decoration: underline; }
+.onb-faction-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.onb-faction-card {
+  text-align: left;
+  background: transparent;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 0.1s, background 0.1s;
+}
+.onb-faction-card:hover { border-color: #00ff41; background: rgba(0, 255, 65, 0.05); }
+.onb-fc-alias { font-weight: bold; letter-spacing: 0.1em; color: #00ff41; }
+.onb-fc-tagline { font-size: 12px; color: rgba(0, 255, 65, 0.65); font-style: italic; }
+.onb-fc-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.85);
+}
+.onb-fc-stats span { color: rgba(0, 255, 65, 0.5); }
+.onb-fc-vocab { font-size: 11px; color: rgba(0, 255, 65, 0.6); }
+.onb-fc-vocab summary { cursor: pointer; outline: none; }
+.onb-fc-vocab-list { padding: 4px 0 0 18px; color: rgba(0, 255, 65, 0.55); }
+.onb-niche { margin: 4px 0 16px 0; }
+.onb-niche summary { cursor: pointer; color: rgba(0, 255, 65, 0.7); outline: none; }
+.onb-niche-list { padding: 6px 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+.onb-niche-row {
+  background: transparent;
+  border: 1px dashed rgba(0, 255, 65, 0.25);
+  color: #00ff41;
+  font-family: inherit;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.onb-niche-row:hover { border-color: rgba(0, 255, 65, 0.7); background: rgba(0, 255, 65, 0.04); }
+.onb-niche-row span { color: rgba(0, 255, 65, 0.55); margin-left: 4px; }
+
+/* Step 3 — Mission Briefing */
+.onb-mission-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.onb-mission-left { display: flex; flex-direction: column; gap: 12px; }
+.onb-mission-row { gap: 4px; }
+.onb-mission-row label {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.7);
+  letter-spacing: 0.08em;
+}
+.onb-mission-right {
+  border-left: 1px dashed rgba(0, 255, 65, 0.25);
+  padding-left: 18px;
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.85);
+}
+.onb-preview-head { color: rgba(0, 255, 65, 0.65); letter-spacing: 0.06em; }
+.onb-preview-sub { margin-top: 10px; }
+.onb-preview-rows { display: flex; flex-direction: column; gap: 2px; font-family: inherit; }
+.onb-preview-rows div { display: flex; justify-content: space-between; gap: 12px; }
+.onb-preview-rows span { color: rgba(0, 255, 65, 0.55); }
+.onb-preview-rows b { color: #00ff41; }
+.onb-preview-warning {
+  margin-top: 8px;
+  padding: 6px 10px;
+  color: #ffaa00;
+  border: 1px dashed rgba(255, 170, 0, 0.55);
+  background: rgba(255, 170, 0, 0.06);
+}
+.onb-preview-directives { display: flex; flex-direction: column; gap: 2px; }
+.onb-preview-dir { color: rgba(0, 255, 65, 0.85); font-size: 12px; }
+.onb-preview-dir-empty { color: rgba(0, 255, 65, 0.4); font-style: italic; }
+
+/* Glossary inline editor */
+.onb-glossary { margin-top: 6px; }
+.onb-glossary summary { cursor: pointer; color: rgba(0, 255, 65, 0.7); outline: none; font-size: 11px; }
+.onb-glossary-list { padding: 8px 0 0 0; display: flex; flex-direction: column; gap: 4px; }
+.onb-glossary-row { display: flex; gap: 8px; align-items: center; }
+.onb-glossary-term { min-width: 110px; font-size: 11px; color: rgba(0, 255, 65, 0.7); }
+.onb-glossary-input { flex: 1 1 auto; font-size: 12px; }
+
+/* Step 4 — Review wrapper */
+.onb-review-frame { display: flex; flex-direction: column; gap: 10px; }
+.onb-review-failure {
+  padding: 12px 14px;
+  border: 1px solid #ff4444;
+  background: rgba(255, 68, 68, 0.08);
+  color: #ff4444;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.onb-review-failure-msg { font-weight: bold; }
+.onb-review-failure-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.onb-btn-warn { border-color: #ff4444; color: #ff4444; }
+.onb-btn-warn:hover:not(:disabled) { background: rgba(255, 68, 68, 0.1); }
+
+/* Step 5 — First Move */
+.onb-firstmove-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; color: rgba(0, 255, 65, 0.85); }
+.onb-firstmove-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.onb-firstmove-card {
+  text-align: left;
+  background: transparent;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.onb-firstmove-card:hover { background: rgba(0, 255, 65, 0.04); }
+.onb-firstmove-card.selected { border-color: #00ff41; background: rgba(0, 255, 65, 0.1); }
+.onb-firstmove-title { font-size: 13px; color: #00ff41; }
+.onb-firstmove-meta { font-size: 11px; color: rgba(0, 255, 65, 0.55); margin-top: 4px; }
+.onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
+
+/* Step 6 — Provisioning */
+.onb-provision-lines { display: flex; flex-direction: column; gap: 2px; font-family: inherit; font-size: 12px; }
+.onb-provision-line { color: #00ff41; }
+.onb-provision-strip {
+  margin-top: 12px;
+  padding: 6px 10px;
+  border-top: 1px dashed rgba(0, 255, 65, 0.3);
+  color: rgba(0, 255, 65, 0.65);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+/* Multi-step shared button modifiers */
+.onb-btn-back { border-color: rgba(0, 200, 255, 0.55); color: rgba(0, 200, 255, 0.85); }
+.onb-btn-back:hover:not(:disabled) { background: rgba(0, 200, 255, 0.08); }
+.onb-btn-submit { border-color: rgba(0, 255, 65, 0.85); color: #00ff41; }
+.onb-btn-resume { border-color: rgba(0, 255, 65, 0.85); color: #00ff41; }
+.onb-btn-discard { border-color: rgba(255, 170, 0, 0.7); color: #ffaa00; }
+.onb-actions { gap: 10px; }
+
+/* Mission grid stacks on small screens */
+@media (max-width: 720px) {
+  .onb-mission-grid { grid-template-columns: 1fr; }
+  .onb-mission-right { border-left: none; padding-left: 0; border-top: 1px dashed rgba(0, 255, 65, 0.25); padding-top: 12px; }
+  .onb-faction-grid { grid-template-columns: 1fr; }
+}
+
+/* ----------------------------------------------------------------
+ * LLM spend chip (dashboard) + cost preview modal (PR4)
+ * ---------------------------------------------------------------- */
+
+.cost-chip-stat b {
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+#stat-llmspend.ok { color: rgba(0, 255, 65, 0.85); }
+#stat-llmspend.warn { color: #ffaa00; }
+#stat-llmspend.hot { color: #ff4444; }
+
+.cost-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.cost-modal {
+  width: min(560px, 90vw);
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #000;
+  padding: 16px 18px;
+}
+.cost-modal-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.cost-modal-row label { font-size: 11px; color: rgba(0, 255, 65, 0.65); letter-spacing: 0.08em; }
+.cost-modal-row-inline { flex-direction: row; align-items: center; gap: 12px; }
+.cost-modal-row-inline label { min-width: 160px; }
+.cost-modal-prompt {
+  background: rgba(0, 255, 65, 0.04);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  padding: 8px 10px;
+  min-height: 80px;
+  resize: vertical;
+}
+.cost-modal-model, .cost-modal-maxout {
+  background: rgba(0, 255, 65, 0.04);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  padding: 6px 10px;
+}
+.cost-modal-result {
+  border: 1px dashed rgba(0, 255, 65, 0.35);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cost-modal-result div { display: flex; justify-content: space-between; }
+.cost-modal-result span { color: rgba(0, 255, 65, 0.55); }
+.cost-modal-result b { color: #00ff41; }
+.cost-modal-actions { margin-top: 14px; display: flex; justify-content: flex-end; }

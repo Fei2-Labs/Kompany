@@ -10,6 +10,7 @@ import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js";
 import { renderEpisodes } from "/ui/static/modules/ui/episodes.js";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
+import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 
 async function boot() {
   // 0. Onboarding gate — Tauri shell points the WebView at /ui/ on every
@@ -67,6 +68,7 @@ async function boot() {
   renderInbox(store.state.inbox || []);
   renderEpisodes(store.state.episodes || []);
   renderLedger(store.state.status || {});
+  initCostChip();
   initTimeline();
   initDirective(async (text) => {
     pushTimeline({ level: "warn", text: `directive submitted: ${text}` });
@@ -112,6 +114,12 @@ function handleEvent(evt) {
     level,
     text: `${type}${data.action ? " " + data.action : ""}${data.agent_role ? " [" + data.agent_role + "]" : ""}`,
   });
+
+  // LLM spend chip — incremental update.
+  if (type === "llm.spend") {
+    const chip = getCostChip();
+    if (chip) chip.onSpend(data || {});
+  }
 
   // Dispatch type-specific store refreshes.
   if (type === "inbox.updated") {

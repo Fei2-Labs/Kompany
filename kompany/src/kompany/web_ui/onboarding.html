@@ -4,206 +4,41 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kompany // First Boot</title>
-  <link rel="stylesheet" href="/ui/static/style.css?v=2">
+  <link rel="stylesheet" href="/ui/static/style.css?v=3">
 </head>
 <body class="onboarding-body">
-  <div class="header">
-    <div class="brand">&#9612;KOMPANY//<span>FIRST-BOOT</span> <span class="blink">&#9608;</span></div>
+  <!-- Step-aware header. The label after the slash is rewritten by JS
+       as the founder advances through the wizard. -->
+  <div class="header" id="onb-header">
+    <div class="brand">&#9612;KOMPANY//<span id="onb-step-label">FIRST-BOOT</span> <span class="blink">&#9608;</span></div>
     <div class="stats">
-      <div class="stat"><span>status:</span> <b id="onb-status">waiting for founder</b></div>
+      <div class="stat"><span>step:</span> <b id="onb-step-count">0/7</b></div>
+      <div class="stat"><span>status:</span> <b id="onb-status">awaiting input</b></div>
     </div>
   </div>
 
+  <!-- Resume banner — surfaces an existing localStorage draft. Hidden by
+       default; the state machine flips ``hidden`` after detecting a
+       draft on boot. -->
+  <div class="onb-resume" id="onb-resume" hidden>
+    <div class="onb-resume-head">▾ RESUME PREVIOUS SESSION</div>
+    <div class="onb-resume-body" id="onb-resume-body">
+      <span id="onb-resume-meta">saved earlier</span>
+      <span class="onb-resume-note">API key cleared for security — please re-enter.</span>
+    </div>
+    <div class="onb-resume-actions">
+      <button type="button" class="onb-btn onb-btn-resume" id="onb-resume-yes">[ resume ]</button>
+      <button type="button" class="onb-btn onb-btn-discard" id="onb-resume-no">[ start fresh ]</button>
+    </div>
+  </div>
+
+  <!-- Single shell container; every step renders into ``#onb-step``. -->
   <div class="onboarding-shell">
-    <div class="frame" data-label="WELCOME">
-      <p class="onb-lede">
-        Welcome, founder. Spin up your autonomous C-suite in 90 seconds.
-        Pick a model provider, drop in an API key, choose a starter
-        company, and you're live.
-      </p>
-    </div>
+    <div class="onb-step-host" id="onb-step"></div>
 
-    <form id="onboarding-form" class="frame" data-label="CONFIGURE //">
-      <div class="onb-field">
-        <label for="onb-provider-button">// LLM PROVIDER</label>
-        <input type="hidden" id="onb-provider" name="provider" value="anthropic" required>
-        <div
-          class="cyb-combobox"
-          id="onb-provider-combobox"
-          aria-expanded="false"
-          data-target="onb-provider"
-        >
-          <button
-            type="button"
-            id="onb-provider-button"
-            class="cyb-combobox-button"
-            aria-haspopup="listbox"
-            aria-controls="onb-provider-list"
-          >anthropic (Claude)</button>
-          <ul
-            id="onb-provider-list"
-            class="cyb-combobox-list"
-            role="listbox"
-            aria-labelledby="onb-provider-button"
-          >
-            <li class="cyb-combobox-option" role="option" data-value="anthropic" aria-selected="true">anthropic (Claude)</li>
-            <li class="cyb-combobox-option" role="option" data-value="openai">openai (GPT)</li>
-            <li class="cyb-combobox-option" role="option" data-value="gemini">gemini (Google)</li>
-            <li class="cyb-combobox-option" role="option" data-value="glm">glm (Zhipu)</li>
-            <li class="cyb-combobox-option" role="option" data-value="kimi">kimi (Moonshot)</li>
-            <li class="cyb-combobox-option" role="option" data-value="custom">custom (OpenAI-compatible)</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="onb-field" id="onb-base-url-field" hidden>
-        <label for="onb-base-url">// BASE URL</label>
-        <input
-          id="onb-base-url"
-          name="base_url"
-          type="url"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="https://your-endpoint.example.com/v1"
-        >
-        <p class="onb-hint">Required for custom providers. Must be OpenAI-compatible (Chat Completions API).</p>
-      </div>
-
-      <div class="onb-field">
-        <label for="onb-api-key">// API KEY</label>
-        <input
-          id="onb-api-key"
-          name="api_key"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="sk-..."
-          required
-        >
-        <p class="onb-hint">Stored encrypted in the local vault. Never leaves your machine.</p>
-      </div>
-
-      <div class="onb-field">
-        <label>// STARTER COMPANY</label>
-        <div class="onb-templates">
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="blank">
-            <span class="t-title">blank</span>
-            <span class="t-mission">Start from a clean slate.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="saas-startup" checked>
-            <span class="t-title">saas-startup</span>
-            <span class="t-mission">Launch a B2B SaaS product.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="indie-tool">
-            <span class="t-title">indie-tool</span>
-            <span class="t-mission">Ship a small paid tool.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="content-creator">
-            <span class="t-title">content-creator</span>
-            <span class="t-mission">Grow a media business.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="ecommerce">
-            <span class="t-title">ecommerce</span>
-            <span class="t-mission">Run a DTC storefront.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="consulting-firm">
-            <span class="t-title">consulting-firm</span>
-            <span class="t-mission">Sell senior-time consulting.</span>
-          </label>
-          <label class="onb-template">
-            <input type="radio" name="template_id" value="community">
-            <span class="t-title">community</span>
-            <span class="t-mission">Build a paid community.</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="onb-field onb-targets" data-label="COMPANY TARGETS">
-        <label class="onb-targets-label">// COMPANY TARGETS</label>
-        <div class="onb-targets-grid">
-          <div class="onb-target-cell">
-            <label for="onb-budget">initial budget ($)</label>
-            <input
-              id="onb-budget"
-              name="initial_budget"
-              type="number"
-              min="0"
-              step="100"
-              autocomplete="off"
-              placeholder="5000"
-            >
-          </div>
-          <div class="onb-target-cell">
-            <label for="onb-revenue-target">revenue target ($)</label>
-            <input
-              id="onb-revenue-target"
-              name="revenue_target"
-              type="number"
-              min="0"
-              step="100"
-              autocomplete="off"
-              placeholder="10000"
-            >
-          </div>
-          <div class="onb-target-cell">
-            <label for="onb-customer-target">customer target (optional)</label>
-            <input
-              id="onb-customer-target"
-              name="customer_target"
-              type="number"
-              min="0"
-              step="1"
-              autocomplete="off"
-              placeholder="50"
-            >
-          </div>
-          <div class="onb-target-cell">
-            <label for="onb-deadline">deadline</label>
-            <input
-              id="onb-deadline"
-              name="deadline"
-              type="date"
-              autocomplete="off"
-              class="onb-date"
-            >
-          </div>
-        </div>
-        <p class="onb-hint">
-          Defaults follow your starter template. Deadline defaults to today + 90 days.
-        </p>
-      </div>
-
-      <div class="onb-field">
-        <label for="onb-directive">// FIRST DIRECTIVE (OPTIONAL)</label>
-        <textarea
-          id="onb-directive"
-          name="directive"
-          rows="3"
-          placeholder="e.g. 'Launch a landing page for our beta this week.'"
-        ></textarea>
-      </div>
-
-      <div class="onb-actions">
-        <button type="submit" id="onb-submit" class="onb-btn">
-          &#9656; PROVISION COMPANY
-        </button>
-      </div>
-
-      <div id="onb-progress" class="onb-progress" hidden>
-        <span class="onb-spinner">&#9608;</span>
-        <span id="onb-progress-text">Provisioning your company...</span>
-      </div>
-
-      <div id="onb-error" class="onb-error" hidden></div>
-    </form>
+    <div id="onb-error" class="onb-error" hidden></div>
   </div>
 
-  <script type="module" src="/ui/static/modules/ui/onboarding.js?v=2"></script>
+  <script type="module" src="/ui/static/modules/ui/onboarding.js?v=3"></script>
 </body>
 </html>
