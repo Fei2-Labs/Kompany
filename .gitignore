@@ -41,7 +41,13 @@ data/*.sqlite
 secrets/
 *.pem
 *.key
-AGENTS.md
+
+# Per-developer local AGENTS notes (root AGENTS.md is tracked; only *.local variants ignored)
+AGENTS.local.md
+AGENTS.*.local.md
 
 # Trellis — per-developer identity only; track structure and spec
 .trellis/.developer
+
+# Lazyweb — local design-brainstorm references (heavy PNGs); not part of OSS repo
+.lazyweb/

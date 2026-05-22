@@ -27,3 +27,6 @@ Product vision (RPG interface), user interaction (directive / query / override),
 
 ## [Execution Rules](docs/context/execution-rules.md)
 Runtime invariants for agent routing, cost tracking, time handling, and governed behavior changes.
+
+## [Open-Core Model](docs/context/open-core-model.md)
+Apache-2.0 boundary: Core (engine + plugin contract) is open; Pro (workflow library + agent souls + integrations) is private repo; Cloud is future SaaS. Early Backer tier for 10 presale buyers (299 CNY each, undelivered as of 2026-05-22). See [ADR-0001](docs/adr/0001-open-core-with-plugin-contract.md).
