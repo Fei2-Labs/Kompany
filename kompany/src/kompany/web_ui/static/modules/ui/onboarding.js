@@ -506,12 +506,17 @@ function providerDisplayLabel(p) {
 
 function renderPingResult(host, payload) {
   host.hidden = false;
+  const tested = payload && payload.model_tested;
+  const count = payload && payload.available_models ? payload.available_models.length : null;
+  const testedLine = tested
+    ? `<div class="onb-conn-tested">// model_tested: <b>${escapeHtml(tested)}</b>${count ? ` (1 of ${count} discovered)` : ""}</div>`
+    : "";
   if (payload && payload.ok) {
     const model = payload.model || "unknown";
     const px = payload.pricing;
     const pxText = px ? ` · $${px.in_per_mtok} in / $${px.out_per_mtok} out per 1M` : "";
     host.className = "onb-conn-result onb-conn-ok";
-    host.innerHTML = `✓ connected: <b>${escapeHtml(model)}</b>${escapeHtml(pxText)}`;
+    host.innerHTML = `✓ connected: <b>${escapeHtml(model)}</b>${escapeHtml(pxText)}${testedLine}`;
     return;
   }
   const code = (payload && payload.error_code) || "unknown";
@@ -522,7 +527,7 @@ function renderPingResult(host, payload) {
   else if (code === "network") hint = " — provider unreachable from this machine";
   else if (code === "provider_error") hint = " — provider returned 5xx; not your key";
   host.className = "onb-conn-result onb-conn-err";
-  host.innerHTML = `✗ <b>[${escapeHtml(code)}]</b> ${escapeHtml(msg)}${escapeHtml(hint)}`;
+  host.innerHTML = `✗ <b>[${escapeHtml(code)}]</b> ${escapeHtml(msg)}${escapeHtml(hint)}${testedLine}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -138,6 +138,8 @@ class PingResponse(BaseModel):
 
     ok: bool
     model: str | None = None
+    model_tested: str | None = None
+    available_models: list[str] | None = None
     pricing: PingPricing | None = None
     # One of: unauthorized | rate_limited | network | provider_error | unknown
     error_code: str | None = None
@@ -324,13 +326,19 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
     ``unauthorized | rate_limited | network | provider_error | unknown``.
     See :func:`_classify_ping_error`.
     """
+    import logging
+
     from kompany.config.settings import KompanySettings
     from kompany.installer.onboard import (
         PROVIDER_VAULT_KEYS,
+        _list_custom_models,
+        _pick_latest_custom_model,
         _ping_llm,
         _ping_model_for_provider,
     )
     from kompany.llm.models import PRICING
+
+    log = logging.getLogger("kompany.onboarding.ping")
 
     def _settings_factory() -> KompanySettings:
         # Build a transient settings shim so ``_ping_llm`` can read the
@@ -347,15 +355,71 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
             setattr(settings, "custom_base_url", req.base_url)
         return settings
 
+    # For custom provider: discover models first so failures surface as
+    # classified errors and the model used for the ping is recorded +
+    # returned to the UI.
+    model_override: str | None = None
+    available_models: list[str] | None = None
+    if req.provider == "custom":
+        if not req.base_url:
+            return PingResponse(
+                ok=False,
+                model=None,
+                model_tested=None,
+                available_models=None,
+                pricing=None,
+                error_code="provider_error",
+                error_message="custom provider requires base_url",
+            )
+        try:
+            available_models = _list_custom_models(req.base_url, req.api_key)
+        except Exception as exc:  # noqa: BLE001
+            detail = f"{type(exc).__name__}: {exc}"
+            log.warning("custom /models list failed: %s", detail)
+            return PingResponse(
+                ok=False,
+                model=None,
+                model_tested=None,
+                available_models=None,
+                pricing=None,
+                error_code=_classify_ping_error(detail),
+                error_message=f"models.list failed: {detail}",
+            )
+        model_override = _pick_latest_custom_model(available_models)
+        if not model_override:
+            return PingResponse(
+                ok=False,
+                model=None,
+                model_tested=None,
+                available_models=available_models,
+                pricing=None,
+                error_code="provider_error",
+                error_message="custom endpoint returned no models",
+            )
+        log.info(
+            "custom ping: discovered %d models, testing with %s",
+            len(available_models),
+            model_override,
+        )
+
     ok, detail = _ping_llm(
         req.provider,
         req.api_key,
         settings_factory=_settings_factory,
+        model_override=model_override,
     )
     if not ok:
+        log.warning(
+            "ping failed: provider=%s model=%s detail=%s",
+            req.provider,
+            model_override or "(auto)",
+            detail,
+        )
         return PingResponse(
             ok=False,
             model=None,
+            model_tested=model_override,
+            available_models=available_models,
             pricing=None,
             error_code=_classify_ping_error(detail),
             error_message=detail,
@@ -364,7 +428,8 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
     # Success path: figure out the model that was actually pinged + its
     # pricing. Read pricing from the static ``llm.models.PRICING`` table.
     settings = _settings_factory()
-    model = _ping_model_for_provider(req.provider, settings)
+    model = model_override or _ping_model_for_provider(req.provider, settings)
+    log.info("ping ok: provider=%s model=%s", req.provider, model)
     pricing_entry = PRICING.get(model)
     pricing = (
         PingPricing(
@@ -377,6 +442,8 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
     return PingResponse(
         ok=True,
         model=model,
+        model_tested=model,
+        available_models=available_models,
         pricing=pricing,
         error_code=None,
         error_message=None,

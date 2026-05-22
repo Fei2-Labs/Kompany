@@ -110,7 +110,8 @@
     padding-bottom: 12px; margin-bottom: 16px;
     border-bottom: 1px dashed rgba(0,255,65,0.2);
   }
-  .hdr .brand { font-weight: 700; font-size: 14px; text-shadow: 0 0 8px var(--green); }
+  .hdr .brand { font-weight: 700; font-size: 14px; text-shadow: 0 0 8px var(--green); display: flex; align-items: center; gap: 5px; }
+  .hdr .brand-logo { height: 14px; width: auto; image-rendering: -webkit-optimize-contrast; }
   .hdr .brand span { color: var(--cyan); }
   .hdr .stat { font-size: 11px; color: var(--green-dim); }
   .hdr .stat b { color: var(--green); font-weight: 400; }
@@ -350,7 +351,7 @@
 
   <div class="frame" data-label="POST">
     <div class="hdr">
-      <div class="brand">▌KOMPANY//<span>FIRST-BOOT</span> <span class="blink">█</span></div>
+      <div class="brand"><img src="/ui/static/logo.png" alt="K" class="brand-logo">KOMPANY//<span>FIRST-BOOT</span> <span class="blink">█</span></div>
       <div class="stat"><span>build:</span> <b>v0.1.0 · aarch64-apple-darwin</b></div>
     </div>
     <div class="boot">

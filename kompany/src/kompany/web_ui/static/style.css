@@ -91,6 +91,16 @@ body::after {
   font-size: 18px;
   font-weight: 700;
   text-shadow: 0 0 8px #00ff41;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.brand-logo {
+  height: 18px;
+  width: auto;
+  display: inline-block;
+  vertical-align: middle;
+  image-rendering: -webkit-optimize-contrast;
 }
 .blink { animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }

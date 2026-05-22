@@ -30,11 +30,14 @@ need a real API key. Production runs always issue a real ping.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 import typer
 from rich.console import Console
@@ -298,6 +301,7 @@ def _ping_llm(
     api_key: str,
     *,
     settings_factory: Callable[[], Any] | None = None,
+    model_override: str | None = None,
 ) -> tuple[bool, str]:
     """Single tiny LLM call to confirm the key works.
 
@@ -315,6 +319,7 @@ def _ping_llm(
         from kompany.config.settings import KompanySettings
         from kompany.llm.client import LLMClient
         from kompany.llm.cost_tracker import CostTracker
+        from kompany.llm.providers import Provider
         from kompany.state.database import Database
         from kompany.state.ledger import Ledger
     except Exception as exc:  # pragma: no cover — import errors surface elsewhere
@@ -346,7 +351,12 @@ def _ping_llm(
             # for a one-shot reachability ping.
             watchdog=None,
         )
-        model = _ping_model_for_provider(provider, settings)
+        model = model_override or _ping_model_for_provider(provider, settings)
+        logger.info("ping using provider=%s model=%s", provider, model)
+        try:
+            provider_enum = Provider(provider)
+        except ValueError:
+            provider_enum = None
         try:
             client.call(
                 model=model,
@@ -354,10 +364,49 @@ def _ping_llm(
                 prompt="ping",
                 agent_name="onboard",
                 max_tokens=8,
+                provider_override=provider_enum,
             )
         except Exception as exc:  # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"
     return True, "ok"
+
+
+_CUSTOM_MODEL_PRIORITY: tuple[str, ...] = (
+    "gpt-5",
+    "gpt-4.1",
+    "gpt-4o",
+    "claude-opus-4",
+    "claude-sonnet-4",
+    "claude-haiku-4",
+    "gemini-2",
+    "gemini-1.5",
+    "deepseek",
+    "qwen",
+    "glm-4",
+    "moonshot",
+)
+
+
+def _list_custom_models(base_url: str, api_key: str) -> list[str]:
+    """Fetch model ids from an OpenAI-compatible ``/models`` endpoint."""
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
+    page = client.models.list()
+    ids = [m.id for m in getattr(page, "data", []) if getattr(m, "id", None)]
+    return ids
+
+
+def _pick_latest_custom_model(ids: list[str]) -> str | None:
+    if not ids:
+        return None
+    lowered = [(i, i.lower()) for i in ids]
+    for prefix in _CUSTOM_MODEL_PRIORITY:
+        matches = [orig for orig, low in lowered if low.startswith(prefix)]
+        if matches:
+            matches.sort(reverse=True)
+            return matches[0]
+    return sorted(ids, reverse=True)[0]
 
 
 def _ping_model_for_provider(provider: str, settings: Any) -> str:
@@ -374,8 +423,11 @@ def _ping_model_for_provider(provider: str, settings: Any) -> str:
         return "glm-4-flash"
     if provider == "kimi":
         return "moonshot-v1-8k"
-    # Custom: fall back to whatever the settings already advertise.
-    return getattr(settings, "model_economy", "claude-haiku-4-20250414")
+    # Custom: discovery happens at the API boundary (so failures surface
+    # as classified ping errors). If we get here without an override, the
+    # caller didn't discover — return a neutral placeholder that won't
+    # match any provider prefix.
+    return "custom-unset"
 
 
 def _step_provider(

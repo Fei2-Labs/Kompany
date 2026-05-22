@@ -182,6 +182,7 @@ class LLMClient:
         task_id: str | None = None,
         project_id: str | None = None,
         action_type: str | None = None,
+        provider_override: Provider | None = None,
     ) -> LLMResponse:
         """Make a freeform LLM call, dispatching to the correct provider.
 
@@ -208,7 +209,7 @@ class LLMClient:
         Optional; when ``None`` the spend event falls back to
         ``"other"``.
         """
-        provider = self._resolve_provider(model)
+        provider = provider_override or self._resolve_provider(model)
         if self.watchdog is None:
             # Legacy unguarded path for callers (or tests) that haven't
             # wired a watchdog. Preserves prior behaviour exactly.
