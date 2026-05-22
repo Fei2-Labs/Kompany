@@ -878,6 +878,20 @@ body.onboarding-body { padding-bottom: 40px; }
   color: rgba(0, 255, 65, 0.7);
   letter-spacing: 0.08em;
 }
+.onb-date-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.onb-date-row input[type="date"] {
+  flex: 1 1 220px;
+}
+.onb-date-today {
+  flex: 0 0 auto;
+  min-width: 92px;
+  white-space: nowrap;
+}
 .onb-mission-right {
   border-left: 1px dashed rgba(0, 255, 65, 0.25);
   padding-left: 18px;

@@ -672,7 +672,10 @@ async function renderMission() {
         </div>
         <div class="onb-field onb-mission-row">
           <label for="onb-deadline">DEADLINE (ISO date)</label>
-          <input id="onb-deadline" type="date" autocomplete="off">
+          <div class="onb-date-row">
+            <input id="onb-deadline" type="date" class="onb-date" autocomplete="off">
+            <button type="button" class="onb-btn onb-date-today" id="onb-deadline-today" aria-label="Set deadline to today" title="Jump to today">[ • today ]</button>
+          </div>
         </div>
         <details class="onb-glossary" id="onb-glossary">
           <summary id="onb-glossary-summary">▾ VOCABULARY OVERRIDE (0 terms)</summary>
@@ -708,6 +711,7 @@ async function renderMission() {
   const revEl = document.getElementById("onb-revenue-target");
   const custEl = document.getElementById("onb-customer-target");
   const dlEl = document.getElementById("onb-deadline");
+  const todayBtn = document.getElementById("onb-deadline-today");
 
   budgetEl.placeholder = tplBudget ? `${tplBudget} (template default)` : "5000";
   revEl.placeholder = tplRev ? `${tplRev} (template default)` : "10000";
@@ -718,6 +722,12 @@ async function renderMission() {
   revEl.value = state.data.revenue_target != null ? String(state.data.revenue_target) : "";
   custEl.value = state.data.customer_target != null ? String(state.data.customer_target) : "";
   dlEl.value = state.data.deadline || defaultDeadline();
+  todayBtn.addEventListener("click", () => {
+    dlEl.value = formatLocalISODate(new Date());
+    state.data.deadline = dlEl.value;
+    saveDraft();
+    refreshPreview(manifest);
+  });
 
   function onChange() {
     state.data.initial_budget = budgetEl.value ? Number(budgetEl.value) : null;
@@ -779,9 +789,13 @@ async function renderMission() {
 function defaultDeadline() {
   const d = new Date();
   d.setDate(d.getDate() + 90);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+  return formatLocalISODate(d);
+}
+
+function formatLocalISODate(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }
 
