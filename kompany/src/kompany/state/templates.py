@@ -295,12 +295,15 @@ class Templates:
     # ------------------------------------------------------------------
 
     def _iter_template_dirs(self) -> list[Any]:
-        """Walk the packaged ``templates/`` directory and yield each
-        template's own directory traversable.
+        """Walk the packaged ``templates/`` directory + any Pro templates
+        registered via the ``kompany.templates`` entry-point group, and
+        yield each template's own directory traversable.
 
-        Order: built-in templates first (alphabetical by id thanks to the
-        sorted scan in ``list_templates``), then community templates.
-        The ``community/`` directory is optional — missing it is fine.
+        Order: built-in templates first (alphabetical by id thanks to
+        the sorted scan in ``list_templates``), then community templates,
+        then Pro plugin templates. The ``community/`` directory is
+        optional — missing it is fine. Pro plugin discovery is also
+        optional; a failing plugin does not block the others.
         """
         root = importlib.resources.files(_PACKAGE).joinpath(_TEMPLATES_DIR)
         results: list[Any] = []
@@ -328,7 +331,46 @@ class Templates:
                         results.append(child)
             except (FileNotFoundError, NotADirectoryError):
                 pass
+        results.extend(self._iter_pro_template_dirs())
         return results
+
+    def _iter_pro_template_dirs(self) -> list[Any]:
+        """Discover Pro Template plugins via the entry-point loader.
+
+        Each Pro plugin exposes a ``manifest_path`` pointing at the
+        manifest.json that lives inside the plugin's wheel; the parent
+        directory of that manifest is treated as the template directory,
+        matching the layout the built-in scan expects.
+
+        Returns an empty list if the loader cannot be imported (e.g.
+        during very early bootstrap) or if no Pro plugins are installed.
+        Loader / plugin errors are swallowed here — they surface via
+        ``kompany.plugins.loader.discover()`` ``_errors`` for tooling.
+        """
+        from pathlib import Path
+
+        try:
+            from kompany.plugins.loader import discover
+        except Exception:
+            return []
+
+        dirs: list[Any] = []
+        try:
+            plugins = discover().get("template", [])
+        except Exception:
+            return []
+
+        for tpl in plugins:
+            manifest = getattr(tpl, "manifest_path", None)
+            if not manifest:
+                continue
+            try:
+                p = Path(manifest)
+                if p.is_file() and p.name == "manifest.json":
+                    dirs.append(p.parent)
+            except Exception:
+                continue
+        return dirs
 
     def _load_manifest(self, template_dir: Any) -> CompanyTemplate:
         """Parse ``<template_dir>/manifest.json`` into a CompanyTemplate."""
