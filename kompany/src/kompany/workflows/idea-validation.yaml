@@ -1,0 +1,53 @@
+workflow_id: idea-validation
+display_name: Validate a business idea
+description: |
+  Three-step probe to decide whether a fresh idea is worth a week of work.
+  CV surfaces demand signals, CPO drafts a one-pager, CEO calls go / no-go.
+
+steps:
+  - id: probe_demand
+    agent_role: cv
+    cost_estimate_usd: 0.40
+    autonomy_tier: auto
+    prompt_template: |
+      Idea: {idea}
+
+      You are evaluating whether real demand exists. Return:
+      1. Three strongest demand signals you can name (cite source category if relevant).
+      2. Three strongest anti-signals or reasons this might be saturated / over-served.
+      3. The single most important question a buyer would ask before paying.
+      Be specific, terse, no hedging.
+
+  - id: draft_one_pager
+    agent_role: cpo
+    cost_estimate_usd: 0.50
+    autonomy_tier: auto
+    prompt_template: |
+      Idea: {idea}
+
+      CV's demand probe:
+      {probe_demand}
+
+      Draft a one-pager covering:
+      - Target customer (1 sentence)
+      - Problem in their words (1 sentence)
+      - MVP scope (3 bullets max)
+      - Killer-question test (1 question whose answer kills or greenlights this)
+
+  - id: go_no_go
+    agent_role: ceo
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Idea: {idea}
+
+      Demand probe:
+      {probe_demand}
+
+      One-pager:
+      {draft_one_pager}
+
+      Make the call. Return exactly:
+      DECISION: [GO | NO-GO | TEST]
+      RATIONALE: <one paragraph>
+      IF TEST, THE TEST: <one specific action with a measurable outcome>

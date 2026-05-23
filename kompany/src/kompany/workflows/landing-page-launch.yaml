@@ -1,0 +1,83 @@
+workflow_id: landing-page-launch
+display_name: Ship a landing page (5-step launch)
+description: |
+  CPO defines ICP, CMO writes copy, CTO plans deploy, CFO sizes the cost,
+  CEO authorizes ship. Last step is approval-gated by design — landing
+  pages go live in the founder's name, so the founder must press send.
+
+steps:
+  - id: define_icp
+    agent_role: cpo
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Product / idea: {product}
+
+      Define the ICP. Return:
+      1. Specific job title or role (no "marketers" / "founders" alone — qualify)
+      2. The painful moment in their week this product attaches to
+      3. One existing tool they already pay for that this would sit next to (not replace)
+
+  - id: write_copy
+    agent_role: cmo
+    cost_estimate_usd: 0.50
+    autonomy_tier: auto
+    prompt_template: |
+      Product / idea: {product}
+      ICP defined by CPO:
+      {define_icp}
+
+      Write landing-page copy with these blocks, no marketing fluff:
+      - HEADLINE (one line, plain English, no "revolutionary")
+      - SUB (one line)
+      - BODY (3 short paragraphs)
+      - SOCIAL PROOF placeholder ("[X paying customers / N% retention / quote from Y]")
+      - CTA BUTTON TEXT (under 4 words)
+
+  - id: plan_deploy
+    agent_role: cto
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Copy from CMO:
+      {write_copy}
+
+      Plan the simplest deploy. Return:
+      - Hosting choice (vercel / netlify / GH pages / static S3 / other) with one-line reason
+      - Domain handling (root / subdomain / temp)
+      - Form / email capture (Formspree, ConvertKit, Beehiiv, raw mailto, other) with one-line reason
+      - Analytics (none for v1 / Plausible / GA4) with one-line reason
+      Total estimated hours to live: <number>
+
+  - id: size_cost
+    agent_role: cfo
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Deploy plan from CTO:
+      {plan_deploy}
+
+      Size the first 90 days of cost:
+      - Hosting USD
+      - Domain USD (if any)
+      - Form / email tool USD
+      - Analytics USD
+      - LLM cost to maintain copy (estimate)
+      TOTAL 90-day USD: <number>
+      One sentence: would you approve this spend at the current runway?
+
+  - id: ship_authorization
+    agent_role: ceo
+    cost_estimate_usd: 0.20
+    autonomy_tier: approval
+    prompt_template: |
+      Full launch packet:
+      ICP: {define_icp}
+      Copy: {write_copy}
+      Deploy plan: {plan_deploy}
+      Cost: {size_cost}
+
+      Authorize ship or block. Return:
+      DECISION: [SHIP | HOLD]
+      RATIONALE: <one paragraph>
+      IF HOLD, THE ONE THING TO FIX FIRST: <one sentence>

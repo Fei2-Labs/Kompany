@@ -1,0 +1,67 @@
+workflow_id: weekly-exec-review
+display_name: Weekly executive review
+description: |
+  Four-step Monday-morning review. CFO reads burn, CRO reads revenue,
+  CoS synthesizes pressure, CEO sets the week's priority adjustments.
+
+steps:
+  - id: burn_review
+    agent_role: cfo
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Current week metrics:
+      Budget remaining: {budget_remaining_usd} USD
+      Spend last 7 days: {spend_last_7d_usd} USD
+      Deadline: {deadline}
+
+      Identify:
+      1. Burn trend vs runway (alarming / watch / fine)
+      2. Top 2 spend categories and whether they're paying off
+      3. One spend cut you would make this week if forced
+
+  - id: revenue_review
+    agent_role: cro
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      Current week metrics:
+      Revenue last 7 days: {revenue_last_7d_usd} USD
+      Customers last 7 days: {new_customers_last_7d}
+      Revenue target: {revenue_target_usd} USD
+      Customer target: {customer_target}
+
+      Identify:
+      1. On-track / behind / way-behind vs both targets
+      2. The single highest-leverage revenue action for the coming week
+      3. One assumption from last week that proved wrong
+
+  - id: synth_pressure
+    agent_role: cos
+    cost_estimate_usd: 0.40
+    autonomy_tier: auto
+    prompt_template: |
+      Burn review (CFO):
+      {burn_review}
+
+      Revenue review (CRO):
+      {revenue_review}
+
+      Where do these two collide? Surface:
+      1. The most important tension between cash discipline and growth velocity.
+      2. Two candidate priorities for next week. Each must be concrete and measurable.
+      3. One thing the founder must decide that you cannot decide for them.
+
+  - id: priority_call
+    agent_role: ceo
+    cost_estimate_usd: 0.30
+    autonomy_tier: auto
+    prompt_template: |
+      CoS synthesis:
+      {synth_pressure}
+
+      Make the call. Return exactly:
+      PRIORITY 1 (must-do next week): <one sentence>
+      PRIORITY 2: <one sentence>
+      DECISION DEFERRED TO FOUNDER: <one sentence, framed as a question>
+      KILL OR PAUSE: <one ongoing thing we should stop, or "none">
