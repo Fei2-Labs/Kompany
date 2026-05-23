@@ -48,3 +48,20 @@ def detect_provider(model: str) -> Provider | None:
         if model_lower.startswith(prefix):
             return provider
     return None
+
+
+def list_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
+    """Fetch model ids from any OpenAI-compatible ``/models`` endpoint.
+
+    Used by the onboarding flow to populate the custom-provider model
+    picker. This call reads metadata only — no LLM completion is
+    generated — so it does NOT route through CostTracker. It lives here
+    (rather than in the installer) so the test_llm_spend_coverage scan
+    sees one well-known SDK touchpoint instead of an ad-hoc client
+    instantiation outside the llm/ layer.
+    """
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
+    page = client.models.list()
+    return [m.id for m in getattr(page, "data", []) if getattr(m, "id", None)]

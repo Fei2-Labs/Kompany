@@ -878,6 +878,18 @@ body.onboarding-body { padding-bottom: 40px; }
   color: rgba(0, 255, 65, 0.7);
   letter-spacing: 0.08em;
 }
+.onb-field-hint {
+  margin-left: 8px;
+  font-size: 10px;
+  color: rgba(0, 255, 65, 0.45);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.onb-field-note {
+  font-size: 10px;
+  color: rgba(0, 255, 65, 0.45);
+  line-height: 1.4;
+}
 .onb-date-row {
   display: flex;
   align-items: center;

@@ -652,9 +652,26 @@ async function selectFaction(templateId) {
 
 async function renderMission() {
   setStatus("mission briefing");
+  const showCustomerTarget = state.data.template_id !== "blank";
+  if (!showCustomerTarget && state.data.customer_target != null) {
+    state.data.customer_target = null;
+    saveDraft();
+  }
   const frame = document.createElement("div");
   frame.className = "frame onb-mission";
   frame.dataset.label = "MISSION_BRIEFING // 03.brief";
+  const customerTargetField = showCustomerTarget
+    ? `
+        <div class="onb-field onb-mission-row">
+          <label for="onb-customer-target">
+            CUSTOMER_TARGET
+            <span class="onb-field-hint">(optional, paying customers)</span>
+          </label>
+          <input id="onb-customer-target" type="number" min="0" step="1" autocomplete="off" placeholder="e.g. 50">
+          <div class="onb-field-note">Use this only if you want a customer-count goal alongside revenue.</div>
+        </div>
+      `
+    : "";
   frame.innerHTML = `
     <div class="onb-mission-grid">
       <div class="onb-mission-left">
@@ -666,10 +683,7 @@ async function renderMission() {
           <label for="onb-revenue-target">REVENUE_TARGET (USD)</label>
           <input id="onb-revenue-target" type="number" min="0" step="100" autocomplete="off">
         </div>
-        <div class="onb-field onb-mission-row">
-          <label for="onb-customer-target">CUSTOMER_TARGET (optional)</label>
-          <input id="onb-customer-target" type="number" min="0" step="1" autocomplete="off">
-        </div>
+        ${customerTargetField}
         <div class="onb-field onb-mission-row">
           <label for="onb-deadline">DEADLINE (ISO date)</label>
           <div class="onb-date-row">
@@ -715,12 +729,16 @@ async function renderMission() {
 
   budgetEl.placeholder = tplBudget ? `${tplBudget} (template default)` : "5000";
   revEl.placeholder = tplRev ? `${tplRev} (template default)` : "10000";
-  custEl.placeholder = tplCust != null ? `${tplCust} (template default)` : "(optional)";
+  if (custEl) {
+    custEl.placeholder = tplCust != null ? `${tplCust} (template default)` : "e.g. 50";
+  }
 
   // Re-populate from saved draft (if exists) or fall back to template default.
   budgetEl.value = state.data.initial_budget != null ? String(state.data.initial_budget) : "";
   revEl.value = state.data.revenue_target != null ? String(state.data.revenue_target) : "";
-  custEl.value = state.data.customer_target != null ? String(state.data.customer_target) : "";
+  if (custEl) {
+    custEl.value = state.data.customer_target != null ? String(state.data.customer_target) : "";
+  }
   dlEl.value = state.data.deadline || defaultDeadline();
   todayBtn.addEventListener("click", () => {
     dlEl.value = formatLocalISODate(new Date());
@@ -732,14 +750,16 @@ async function renderMission() {
   function onChange() {
     state.data.initial_budget = budgetEl.value ? Number(budgetEl.value) : null;
     state.data.revenue_target = revEl.value ? Number(revEl.value) : null;
-    state.data.customer_target = custEl.value ? Number(custEl.value) : null;
+    if (custEl) {
+      state.data.customer_target = custEl.value ? Number(custEl.value) : null;
+    }
     state.data.deadline = dlEl.value || null;
     saveDraft();
     refreshPreview(manifest);
   }
   budgetEl.addEventListener("input", onChange);
   revEl.addEventListener("input", onChange);
-  custEl.addEventListener("input", onChange);
+  if (custEl) custEl.addEventListener("input", onChange);
   dlEl.addEventListener("input", onChange);
 
   // Glossary editor
@@ -881,13 +901,23 @@ async function submitOnboarding() {
   }
 
   state.onboarding_result = result;
-  // Fetch the approval payload + draft projects in parallel.
+  // Fetch the approval payload + draft projects in parallel. Capture WHY
+  // approval may be missing so the review screen can give an honest
+  // diagnostic (no review id vs. fetch failed) instead of blaming
+  // "blank template or quota error".
   const [approval, projects] = await Promise.all([
     result.targets_review_id ? fetchApproval(result.targets_review_id) : Promise.resolve(null),
     fetchDraftProjects(),
   ]);
   state.approval = approval;
   state.draft_project_ids = projects;
+  if (!approval) {
+    state.approval_failure_reason = result.targets_review_id ? "fetch_failed" : "no_review_id";
+    state.approval_failure_id = result.targets_review_id || null;
+  } else {
+    state.approval_failure_reason = null;
+    state.approval_failure_id = null;
+  }
   goto("review");
 }
 
@@ -932,9 +962,22 @@ function renderReview() {
   stepHost.appendChild(host);
 
   if (!state.approval) {
-    // Review didn't fire (e.g. blank template or backend skipped).
-    // Surface the failure banner immediately.
-    renderReviewFailureBanner(host, "review did not run — likely blank template or quota error");
+    // Approval missing — give an honest cause from the captured reason
+    // instead of guessing "blank template or quota error".
+    let msg;
+    switch (state.approval_failure_reason) {
+      case "no_review_id":
+        msg = "review did not run — backend returned no targets_review_id "
+          + "(template may not have been applied; try re-running onboarding)";
+        break;
+      case "fetch_failed":
+        msg = "review id received but /approvals/" + (state.approval_failure_id || "?")
+          + " could not be fetched — check engine logs or retry";
+        break;
+      default:
+        msg = "review state unavailable — check engine logs";
+    }
+    renderReviewFailureBanner(host, msg);
     return;
   }
 

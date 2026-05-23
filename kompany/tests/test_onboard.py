@@ -186,6 +186,31 @@ def test_existing_install_state_flags_partial_when_db_missing_but_dir_dirty(
     assert state["db_exists"] is False
 
 
+def test_existing_install_state_flags_partial_when_db_has_no_applied_template(
+    data_dir: Path,
+) -> None:
+    """A DB that exists but never had a template applied = aborted onboarding,
+    must be treated as partial so resolve prompts overwrite rather than
+    silently skipping template apply + feasibility review.
+
+    Regression test for the bug surfaced by orphan handoff
+    .trellis/handoffs/2026-05-22-12-21.md.
+    """
+    from kompany.state.database import Database
+
+    data_dir.mkdir(parents=True)
+    # Initialise schema (creates company_config + credential_vault tables)
+    # but never apply a template.
+    Database(data_dir)
+    state = _existing_install_state(data_dir)
+    assert state["db_exists"] is True
+    assert state["template_id"] is None
+    assert state["partial"] is True, (
+        "An empty-config DB must be flagged partial — otherwise headless "
+        "onboarding silently skips template + feasibility review."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Headless full path
 # ---------------------------------------------------------------------------

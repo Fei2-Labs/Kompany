@@ -211,6 +211,18 @@ def _existing_install_state(data_dir: Path) -> dict[str, Any]:
     except sqlite3.Error:
         # Corrupt or locked DB — treat as partial so user can overwrite.
         state["partial"] = True
+
+    # A DB that exists but never had a template applied is an aborted
+    # onboarding, not a reusable install. Treat as partial so the
+    # resolve step prompts overwrite (or auto-overwrites under --yes)
+    # rather than silently skipping template apply + feasibility review.
+    # See orphan handoff .trellis/handoffs/2026-05-22-12-21.md for the
+    # incident that surfaced this bug: an empty-config DB was treated
+    # as "reused", and the frontend then misreported the missing
+    # feasibility review as "blank template or quota error".
+    if state["db_exists"] and state["template_id"] is None and not state["partial"]:
+        state["partial"] = True
+
     return state
 
 
@@ -388,13 +400,15 @@ _CUSTOM_MODEL_PRIORITY: tuple[str, ...] = (
 
 
 def _list_custom_models(base_url: str, api_key: str) -> list[str]:
-    """Fetch model ids from an OpenAI-compatible ``/models`` endpoint."""
-    import openai
+    """Fetch model ids from an OpenAI-compatible ``/models`` endpoint.
 
-    client = openai.OpenAI(api_key=api_key, base_url=base_url)
-    page = client.models.list()
-    ids = [m.id for m in getattr(page, "data", []) if getattr(m, "id", None)]
-    return ids
+    Thin wrapper over :func:`kompany.llm.providers.list_openai_compatible_models`
+    so the provider SDK touchpoint stays inside the ``llm/`` layer. See
+    :func:`tests.test_llm_spend_coverage.test_no_direct_provider_sdk_use_outside_llm_layer`.
+    """
+    from kompany.llm.providers import list_openai_compatible_models
+
+    return list_openai_compatible_models(base_url=base_url, api_key=api_key)
 
 
 def _pick_latest_custom_model(ids: list[str]) -> str | None:
