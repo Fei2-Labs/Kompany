@@ -411,12 +411,11 @@ function renderConnection() {
     </div>
 
     <div class="onb-conn-actions">
-      <button type="button" class="onb-btn onb-btn-test" id="onb-test-uplink">[ ▸ TEST UPLINK ]</button>
       <div class="onb-conn-result" id="onb-conn-result" hidden></div>
     </div>
 
     <div class="onb-actions">
-      <button type="button" class="onb-btn onb-btn-back" id="onb-next-disabled" disabled>[ ▸ NEXT ]</button>
+      <button type="button" class="onb-btn onb-btn-submit" id="onb-conn-next">[ ▸ NEXT ]</button>
     </div>
   `;
   stepHost.appendChild(frame);
@@ -426,33 +425,36 @@ function renderConnection() {
   const baseField = document.getElementById("onb-base-url-field");
   const baseInput = document.getElementById("onb-base-url");
   const apiKeyInput = document.getElementById("onb-api-key");
-  const testBtn = document.getElementById("onb-test-uplink");
   const result = document.getElementById("onb-conn-result");
-  const nextBtn = document.getElementById("onb-next-disabled");
+  const nextBtn = document.getElementById("onb-conn-next");
+  const NEXT_LABEL = "[ ▸ NEXT ]";
 
   providerInput.addEventListener("change", () => {
     state.data.provider = providerInput.value;
     if (providerInput.value === "custom") baseField.hidden = false;
     else baseField.hidden = true;
     state.ping = null;
-    nextBtn.disabled = true;
     result.hidden = true;
     saveDraft();
   });
   baseInput.addEventListener("input", () => {
     state.data.base_url = baseInput.value.trim();
     state.ping = null;
-    nextBtn.disabled = true;
     saveDraft();
   });
   apiKeyInput.addEventListener("input", () => {
     state.api_key = apiKeyInput.value;
     state.ping = null;
-    nextBtn.disabled = true;
     result.hidden = true;
   });
 
-  testBtn.addEventListener("click", async () => {
+  // NEXT auto-tests the uplink and advances on success. The previous
+  // explicit [ TEST UPLINK ] + [ NEXT ] split traded a click for a
+  // pre-commit model-pick preview that most operators didn't read —
+  // merging removes the extra click; failures still keep the founder
+  // on this step with a clear error in the result panel.
+  nextBtn.addEventListener("click", async () => {
+    if (nextBtn.disabled) return;
     state.api_key = apiKeyInput.value;
     if (!state.api_key) {
       renderPingResult(result, { ok: false, error_code: "missing_key", error_message: "API key is required" });
@@ -462,8 +464,8 @@ function renderConnection() {
       renderPingResult(result, { ok: false, error_code: "missing_base_url", error_message: "base_url is required for custom provider" });
       return;
     }
-    testBtn.disabled = true;
-    testBtn.textContent = "[ ▸ testing... ]";
+    nextBtn.disabled = true;
+    nextBtn.textContent = "[ ▸ testing uplink... ]";
     let payload;
     try {
       const res = await fetch("/onboarding/ping", {
@@ -479,16 +481,15 @@ function renderConnection() {
     } catch (err) {
       payload = { ok: false, error_code: "network", error_message: err.message };
     }
-    testBtn.disabled = false;
-    testBtn.textContent = "[ ▸ TEST UPLINK ]";
     state.ping = payload;
+    if (payload && payload.ok) {
+      // Skip the brief success render — advancing IS the success signal.
+      goto("faction");
+      return;
+    }
     renderPingResult(result, payload);
-    nextBtn.disabled = !payload || !payload.ok;
-  });
-
-  nextBtn.addEventListener("click", () => {
-    if (!state.ping || !state.ping.ok) return;
-    goto("faction");
+    nextBtn.disabled = false;
+    nextBtn.textContent = NEXT_LABEL;
   });
 }
 
