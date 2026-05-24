@@ -1063,10 +1063,26 @@ def onboard_headless(
                 setattr(engine.settings, "custom_base_url", base_url_value)
             result.api_key_storage = storage
 
+            # For custom provider, the model name must be discovered from
+            # the endpoint's /models index; calling _ping_llm without a
+            # model_override falls through to "custom-unset" and the
+            # upstream rejects with a misleading 503 / invalid-request.
+            # Mirrors the discovery the standalone /onboarding/ping path
+            # in interfaces/api.py already does.
+            model_override: str | None = None
+            if provider == "custom" and base_url:
+                try:
+                    available = _list_custom_models(base_url.strip(), api_key)
+                    model_override = _pick_latest_custom_model(available)
+                except Exception as exc:  # noqa: BLE001
+                    result.notes.append(
+                        f"custom model discovery failed ({exc}); ping will use default"
+                    )
             ok, detail = _ping_llm(
                 provider,
                 api_key,
                 settings_factory=lambda: engine.settings,
+                model_override=model_override,
             )
             if ok and detail == "skipped_test_mode":
                 result.ping_status = "skipped_test_mode"
