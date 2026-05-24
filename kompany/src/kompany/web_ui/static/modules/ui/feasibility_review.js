@@ -313,6 +313,14 @@ export function mountFeasibilityReview(host, options) {
   header.className = "fr-header";
   host.appendChild(header);
 
+  // Top-of-panel summary that names the actual numbers behind ADOPT vs
+  // KEEP. Populated lazily via setTargetsBundle so the mount doesn't
+  // block on /targets — the prose columns still render immediately.
+  const proposalCard = document.createElement("div");
+  proposalCard.className = "fr-proposal-card";
+  proposalCard.hidden = true;
+  host.appendChild(proposalCard);
+
   const banner = document.createElement("div");
   banner.className = "fr-banner";
   host.appendChild(banner);
@@ -491,8 +499,80 @@ export function mountFeasibilityReview(host, options) {
     }
   }
 
+  function renderProposalCard(bundle) {
+    if (!bundle) {
+      proposalCard.hidden = true;
+      return;
+    }
+    const f = bundle.founder || {};
+    const p = bundle.proposal;
+    if (!p) {
+      // No team_proposal recorded yet (e.g. heuristic-only run, or
+      // backend skipped it). Don't render the card — the columns are
+      // the source of truth in that case.
+      proposalCard.hidden = true;
+      return;
+    }
+    const rows = [];
+    const fmtUsdLocal = (n) =>
+      n == null
+        ? "--"
+        : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    const fmtDeadline = (s) =>
+      s ? String(s).slice(0, 10) : "--";
+    const diffNote = (yours, theirs) => {
+      if (yours == null || theirs == null || yours === theirs) return "";
+      const delta = theirs - yours;
+      const pct = yours ? Math.round((delta / yours) * 100) : null;
+      const sign = delta > 0 ? "+" : "";
+      return ` (${sign}${fmtUsdLocal(delta)}${pct != null ? `, ${sign}${pct}%` : ""})`;
+    };
+
+    function addRow(label, yours, theirs, formatter, diffFn) {
+      const sameAsYours = yours === theirs || theirs == null;
+      const theirsLabel = sameAsYours
+        ? "unchanged"
+        : `${formatter(theirs)}${diffFn ? diffFn(yours, theirs) : ""}`;
+      rows.push(`
+        <tr>
+          <td class="fr-proposal-label">${label}</td>
+          <td class="fr-proposal-yours">${formatter(yours)}</td>
+          <td class="fr-proposal-theirs">${theirsLabel}</td>
+        </tr>
+      `);
+    }
+
+    addRow("revenue", f.revenue_target, p.revenue_target, fmtUsdLocal, diffNote);
+    if (f.customer_target != null || p.customer_target != null) {
+      addRow(
+        "customers",
+        f.customer_target,
+        p.customer_target,
+        (n) => (n == null ? "--" : String(n)),
+        null,
+      );
+    }
+    addRow("deadline", f.deadline, p.deadline, fmtDeadline, null);
+
+    proposalCard.innerHTML = `
+      <div class="fr-proposal-head">// IF YOU ADOPT — team's numbers vs yours</div>
+      <table class="fr-proposal-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="fr-proposal-yours">yours</th>
+            <th class="fr-proposal-theirs">team proposes</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      </table>
+    `;
+    proposalCard.hidden = false;
+  }
+
   return {
     rerender,
+    setTargetsBundle: renderProposalCard,
     destroy: () => {
       if (sse && sse.close) sse.close();
       host.innerHTML = "";

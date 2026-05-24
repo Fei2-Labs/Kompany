@@ -1055,6 +1055,19 @@ function renderReview() {
   // — that's what the user reported in 2026-05-24 testing.
   let mounted = null;
 
+  // Fetch the founder vs team-proposal vs agreed targets trio so the
+  // mount can render an explicit "TEAM PROPOSES" summary card. Without
+  // this the founder has to read three columns of CEO prose to figure
+  // out which numbers "adopt theirs" would actually apply.
+  fetch("/targets")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((bundle) => {
+      if (bundle && mounted && typeof mounted.setTargetsBundle === "function") {
+        mounted.setTargetsBundle(bundle);
+      }
+    })
+    .catch(() => { /* non-fatal — the columns still tell the story */ });
+
   // Founder action wiring — adopt/keep/counter all share the same hop
   // to provisioning. Counter spawns a fresh approval thread server-side.
   mounted = mountFeasibilityReview(inner, {
