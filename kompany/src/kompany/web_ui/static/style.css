@@ -298,7 +298,12 @@ body::after {
 body.onboarding-body { padding-bottom: 40px; }
 
 .onboarding-shell {
-  max-width: 720px;
+  /* Fluid: never less than 720 (form fields stay readable on narrow
+   * laptops), never more than 1400 (line lengths stay scannable on
+   * widescreens), otherwise grow with the window. Affects every
+   * onboarding step — mission's 2-col grid, review's 3-col trio,
+   * first-move list — all use 1fr columns inside this shell. */
+  width: clamp(720px, 92vw, 1400px);
   margin: 0 auto;
 }
 
@@ -759,7 +764,7 @@ body.onboarding-body { padding-bottom: 40px; }
 
 /* Resume banner */
 .onb-resume {
-  max-width: 720px;
+  width: clamp(720px, 92vw, 1400px);
   margin: 0 auto 18px auto;
   padding: 12px 14px;
   border: 1px solid rgba(255, 170, 0, 0.55);
