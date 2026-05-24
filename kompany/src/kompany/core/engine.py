@@ -216,14 +216,31 @@ class KompanyEngine:
         )
 
     def _apply_vault_credentials(self) -> None:
-        if not self.settings.vault_key:
-            return
-        for name in sorted(ALLOWED_CREDENTIALS):
-            if getattr(self.settings, name, ""):
-                continue
-            value = self.credentials.get(name)
-            if value:
-                setattr(self.settings, name, value)
+        if self.settings.vault_key:
+            for name in sorted(ALLOWED_CREDENTIALS):
+                if getattr(self.settings, name, ""):
+                    continue
+                value = self.credentials.get(name)
+                if value:
+                    setattr(self.settings, name, value)
+        # Custom-provider tier override: onboarding writes the discovered
+        # model id into company_config so every engine boot re-applies
+        # the override. Without this, settings fall through to the
+        # Anthropic-tier defaults (claude-sonnet-4-*) and LLMClient
+        # routes the agent debate through the Anthropic SDK — which
+        # auth-fails against a custom-provider API key.
+        try:
+            row = self.db.execute(
+                "SELECT value FROM company_config WHERE key = ?",
+                ("custom_model_picked",),
+            ).fetchone()
+        except Exception:  # noqa: BLE001 — pre-init absence is fine
+            row = None
+        if row and row["value"]:
+            picked = row["value"]
+            self.settings.model_apex = picked
+            self.settings.model_primary = picked
+            self.settings.model_economy = picked
 
     def get_company_state(self) -> dict:
         """Get current company state for agent context."""

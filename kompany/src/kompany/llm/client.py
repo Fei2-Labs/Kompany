@@ -125,11 +125,25 @@ class LLMClient:
         return self._openai_clients[provider]
 
     def _resolve_provider(self, model: str) -> Provider:
-        """Determine which provider to use for a model."""
+        """Determine which provider to use for a model.
+
+        Resolution order:
+          1. If the operator wired a custom OpenAI-compatible endpoint
+             (both ``custom_base_url`` AND ``custom_api_key`` set), route
+             through it regardless of the model name. Custom endpoints
+             commonly proxy upstream ids (gpt-5.5, claude-sonnet-4,
+             gemini-2-flash, ...); the operator's intent when they
+             provided a base_url is "send everything through THIS
+             endpoint."
+          2. Otherwise, infer from the model name prefix.
+          3. Final fallback: custom (if only base_url is set) or
+             Anthropic.
+        """
+        if self.settings.custom_base_url and self.settings.custom_api_key:
+            return Provider.CUSTOM
         detected = detect_provider(model)
         if detected is not None:
             return detected
-        # Unknown model: route to custom if configured, else Anthropic
         if self.settings.custom_base_url:
             return Provider.CUSTOM
         return Provider.ANTHROPIC

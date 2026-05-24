@@ -1078,6 +1078,37 @@ def onboard_headless(
                     result.notes.append(
                         f"custom model discovery failed ({exc}); ping will use default"
                     )
+                # Override the engine's three model tiers so every
+                # downstream agent call routes through the custom
+                # endpoint instead of falling through to the Anthropic
+                # default model names (which LLMClient routes to the
+                # Anthropic SDK and which would auth-fail with the
+                # custom-provider key). Use the same picked model for
+                # all three tiers — the custom endpoint's pricing tier
+                # is opaque to us, so we don't pretend to differentiate.
+                if model_override:
+                    engine.settings.model_apex = model_override
+                    engine.settings.model_primary = model_override
+                    engine.settings.model_economy = model_override
+                    # Persist so future engine boots (Tauri sidecar
+                    # restart, REST process recycle) re-apply the same
+                    # tier override. Engine.__init__ reads this and
+                    # overrides settings before any LLM call wires up.
+                    try:
+                        engine.db.execute(
+                            """INSERT INTO company_config (key, value, updated_at)
+                               VALUES (?, ?, datetime('now'))
+                               ON CONFLICT(key) DO UPDATE SET
+                                 value = excluded.value,
+                                 updated_at = datetime('now')""",
+                            ("custom_model_picked", model_override),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        result.notes.append(
+                            f"custom_model_picked persist failed ({exc}); "
+                            "ping will work this session but tier overrides "
+                            "are lost on engine restart"
+                        )
             ok, detail = _ping_llm(
                 provider,
                 api_key,
