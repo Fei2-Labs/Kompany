@@ -696,6 +696,15 @@ body.onboarding-body { padding-bottom: 40px; }
 .fr-diff-stable { opacity: 0.85; }
 .fr-diff-empty { color: rgba(0, 255, 65, 0.45); font-style: italic; }
 .fr-total { color: rgba(0, 255, 65, 0.8); border-top: 1px solid rgba(0, 255, 65, 0.3); padding-top: 6px; }
+/* Instruction line above the action buttons. */
+.fr-hint {
+  color: rgba(0, 255, 65, 0.8);
+  font-size: 13px;
+  margin-top: 4px;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+.fr-hint b { color: #00ff41; }
 .fr-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .fr-btn {
   background: transparent;
@@ -708,10 +717,24 @@ body.onboarding-body { padding-bottom: 40px; }
 }
 .fr-btn:hover:not(:disabled) { background: rgba(0, 255, 65, 0.08); }
 .fr-btn:disabled { opacity: 0.5; cursor: progress; }
-.fr-btn-adopt { border-color: rgba(0, 255, 65, 0.85); }
-.fr-btn-counter { border-color: rgba(255, 170, 0, 0.75); color: rgba(255, 170, 0, 0.95); }
-.fr-btn-keep { border-color: rgba(0, 200, 255, 0.5); color: rgba(0, 200, 255, 0.85); }
+/* KEEP = primary (founder authority is the product default).
+ * ADOPT = secondary blue. COUNTER = secondary amber to signal it
+ * opens the counter-proposal textarea below. */
+.fr-btn-keep {
+  border-color: rgba(0, 255, 65, 0.95);
+  color: #00ff41;
+  background: rgba(0, 255, 65, 0.06);
+  font-weight: bold;
+}
+.fr-btn-keep:hover:not(:disabled) { background: rgba(0, 255, 65, 0.14); }
+.fr-btn-adopt { border-color: rgba(0, 200, 255, 0.55); color: rgba(0, 200, 255, 0.9); }
+.fr-btn-counter { border-color: rgba(255, 170, 0, 0.6); color: rgba(255, 170, 0, 0.85); }
 .fr-counter { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+/* The hidden attribute alone is overridden by the display:flex above —
+ * explicitly opt back out so toggleCounter(false) actually hides the
+ * counter-proposal textarea + SEND TO TEAM button. Without this, both
+ * showed during initial mount even though counterBox.hidden=true. */
+.fr-counter[hidden] { display: none; }
 .fr-counter-busy { opacity: 0.7; }
 .fr-counter-text {
   background: rgba(0, 0, 0, 0.5);

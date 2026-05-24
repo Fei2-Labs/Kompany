@@ -332,6 +332,17 @@ export function mountFeasibilityReview(host, options) {
   total.className = "fr-total";
   host.appendChild(total);
 
+  // Instruction sentence so the founder doesn't have to infer the
+  // decision shape from button labels alone. Keep terse — three
+  // verbs, one line.
+  const hint = document.createElement("div");
+  hint.className = "fr-hint";
+  hint.innerHTML =
+    "Team reviewed your numbers. Pick one: " +
+    "<b>keep</b> yours, <b>adopt</b> theirs, or " +
+    "<b>counter</b> with new info.";
+  host.appendChild(hint);
+
   const actions = document.createElement("div");
   actions.className = "fr-actions";
 
@@ -344,6 +355,15 @@ export function mountFeasibilityReview(host, options) {
     return b;
   }
 
+  // Visual hierarchy: KEEP MY NUMBERS = primary (green). Founder
+  // authority is Kompany's product story default — team challenges,
+  // founder decides. ADOPT (blue) + COUNTER (amber) are secondary,
+  // equally available, less assertive.
+  const keepBtn = makeBtn(
+    "[ ▸ KEEP MY NUMBERS ]",
+    "fr-btn-keep",
+    () => opts.onKeep && opts.onKeep(),
+  );
   const adoptBtn = makeBtn(
     "[ ADOPT TEAM PROPOSAL ]",
     "fr-btn-adopt",
@@ -354,14 +374,9 @@ export function mountFeasibilityReview(host, options) {
     "fr-btn-counter",
     () => toggleCounter(true),
   );
-  const keepBtn = makeBtn(
-    "[ KEEP MY NUMBERS ]",
-    "fr-btn-keep",
-    () => opts.onKeep && opts.onKeep(),
-  );
+  actions.appendChild(keepBtn);
   actions.appendChild(adoptBtn);
   actions.appendChild(counterBtn);
-  actions.appendChild(keepBtn);
   host.appendChild(actions);
 
   const counterBox = document.createElement("div");
