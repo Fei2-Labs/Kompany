@@ -2273,3 +2273,134 @@ def serve(
         reload=reload,
         log_level="info",
     )
+
+
+# ---------------------------------------------------------------------------
+# kompany reset — wipe DB + state with safety-tiered confirmation.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_data_dir_for_cli(override: str | None):
+    """Match the resolution order used by the REST sidecar so reset
+    targets the same on-disk store the desktop app boots against
+    (unless the user explicitly overrides via --data-dir)."""
+    import os
+    from pathlib import Path as _Path
+
+    if override:
+        return _Path(override).expanduser()
+    env = os.environ.get("KOMPANY_DATA_DIR", "").strip()
+    if env:
+        return _Path(env).expanduser()
+    return _Path("~/.kompany").expanduser()
+
+
+@app.command()
+def reset(
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip the y/N prompt for onboarded (non-live) state. Live state still requires --force.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Skip the typed-RESET confirmation even for live state. Use with care.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the auto-backup. Irreversible — use only for disposable state.",
+    ),
+    keep_credentials: bool = typer.Option(
+        False,
+        "--keep-credentials",
+        help="Wipe everything except credential_vault rows so the API key survives.",
+    ),
+    data_dir: str = typer.Option(
+        None,
+        "--data-dir",
+        help="Override the data directory (defaults to KOMPANY_DATA_DIR env or ~/.kompany).",
+    ),
+) -> None:
+    """Wipe a Kompany install so onboarding starts from scratch.
+
+    Three confirmation tiers based on detected state:
+
+    \b
+      * fresh (no template applied)        — no prompt.
+      * onboarded, no projects + no spend  — y/N prompt; --yes skips.
+      * live (>=1 project OR ledger spend) — must type RESET; --force skips.
+
+    An auto-backup is written to ``<data_dir>.backup-<ISO>`` unless
+    ``--no-backup`` is passed.
+    """
+    from kompany.installer.reset import (
+        ResetError,
+        inspect_state,
+        reset as do_reset,
+    )
+
+    target = _resolve_data_dir_for_cli(data_dir)
+    console.print(f"[bold]Resetting:[/bold] {target}")
+
+    state = inspect_state(target)
+    if not state.exists or state.is_fresh:
+        console.print("  [dim]nothing applied — wiping any leftover files[/dim]")
+    else:
+        console.print(
+            f"  template: [cyan]{state.template_id}[/cyan]   "
+            f"projects: [cyan]{state.project_count}[/cyan]   "
+            f"episodes: [cyan]{state.episode_count}[/cyan]   "
+            f"total_spend: [cyan]${state.total_spend_usd:.2f}[/cyan]"
+        )
+        if state.revenue_target_usd is not None:
+            console.print(
+                f"  agreed_revenue_target: [cyan]${state.revenue_target_usd:,.2f}[/cyan]   "
+                f"deadline: [cyan]{state.deadline or '--'}[/cyan]"
+            )
+
+    if not no_backup and (state.exists and not state.is_fresh):
+        console.print("  [dim]backup will be written to a sibling .backup-<ISO> dir[/dim]")
+
+    def _confirm(summary, expected: str) -> bool:
+        if expected:
+            console.print(
+                "[yellow]Live state detected[/yellow] — type "
+                "[bold]RESET[/bold] to confirm (anything else aborts):"
+            )
+            try:
+                typed = typer.prompt("  >", default="", show_default=False)
+            except typer.Abort:
+                return False
+            return typed.strip() == expected
+        try:
+            return typer.confirm("Proceed?", default=False)
+        except typer.Abort:
+            return False
+
+    try:
+        result = do_reset(
+            target,
+            yes=yes,
+            force=force,
+            no_backup=no_backup,
+            keep_credentials=keep_credentials,
+            confirm_callback=_confirm,
+        )
+    except ResetError as exc:
+        console.print(f"[red]✗ reset aborted: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if result.backup_path:
+        console.print(f"  [green]✓[/green] backup: {result.backup_path}")
+    if result.credentials_kept:
+        console.print("  [green]✓[/green] credential_vault preserved (--keep-credentials)")
+    if result.files_removed:
+        console.print(f"  [green]✓[/green] files removed: {', '.join(result.files_removed)}")
+    if result.dirs_removed:
+        console.print(f"  [green]✓[/green] dirs removed: {', '.join(result.dirs_removed)}")
+    for note in result.notes:
+        console.print(f"  [dim]{note}[/dim]")
+    console.print("[green]reset complete[/green]")
