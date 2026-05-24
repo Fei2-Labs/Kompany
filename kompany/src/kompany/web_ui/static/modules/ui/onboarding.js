@@ -672,7 +672,13 @@ async function renderMission() {
         </div>
       `
     : "";
+  const stalePill = state.approval_stale
+    ? `<div class="onb-stale-pill" id="onb-stale-pill">
+         ⚠ Team review is stale. Submitting will discard the previous review and re-run with fresh numbers (one LLM debate, ~$0.50).
+       </div>`
+    : "";
   frame.innerHTML = `
+    ${stalePill}
     <div class="onb-mission-grid">
       <div class="onb-mission-left">
         <div class="onb-field onb-mission-row">
@@ -799,10 +805,16 @@ async function renderMission() {
     if (!state.data.revenue_target && tplRev) state.data.revenue_target = tplRev;
     if (state.data.customer_target == null && tplCust != null) state.data.customer_target = tplCust;
     if (!state.data.deadline) state.data.deadline = defaultDeadline();
+    // Re-submit invalidates any prior review. submitOnboarding() will
+    // re-fetch a fresh approval (explicitly POSTing /targets/review on
+    // the backend reuse path, which currently skips the auto re-run).
+    const wasStale = state.approval_stale;
+    state.approval = null;
+    state.approval_stale = false;
+    state.approval_failure_reason = null;
+    state.approval_failure_id = null;
     saveDraft();
-    // Submitting to team kicks off /onboarding/complete which runs the
-    // feasibility review server-side and returns approval id.
-    submitOnboarding();
+    submitOnboarding({ forceReview: wasStale });
   });
 }
 
@@ -861,7 +873,7 @@ function refreshPreview(manifest) {
 // Onboarding submit + review setup
 // ---------------------------------------------------------------------------
 
-async function submitOnboarding() {
+async function submitOnboarding(opts = {}) {
   setStatus("submitting...");
   clearError();
   const body = {
@@ -901,19 +913,34 @@ async function submitOnboarding() {
   }
 
   state.onboarding_result = result;
+  // When the user backed out of review to revise mission and is now
+  // re-submitting, /onboarding/complete takes the "reused" path which
+  // currently skips auto re-running the feasibility review. Force a
+  // fresh review via POST /targets/review so the new numbers actually
+  // get debated.
+  let reviewId = result.targets_review_id || null;
+  if (opts.forceReview && !reviewId) {
+    try {
+      const rr = await fetch("/targets/review", { method: "POST" });
+      if (rr.ok) {
+        const fresh = await rr.json();
+        reviewId = fresh.id || fresh.targets_review_id || null;
+      }
+    } catch (_) { /* fall through to no-review handling below */ }
+  }
   // Fetch the approval payload + draft projects in parallel. Capture WHY
   // approval may be missing so the review screen can give an honest
   // diagnostic (no review id vs. fetch failed) instead of blaming
   // "blank template or quota error".
   const [approval, projects] = await Promise.all([
-    result.targets_review_id ? fetchApproval(result.targets_review_id) : Promise.resolve(null),
+    reviewId ? fetchApproval(reviewId) : Promise.resolve(null),
     fetchDraftProjects(),
   ]);
   state.approval = approval;
   state.draft_project_ids = projects;
   if (!approval) {
-    state.approval_failure_reason = result.targets_review_id ? "fetch_failed" : "no_review_id";
-    state.approval_failure_id = result.targets_review_id || null;
+    state.approval_failure_reason = reviewId ? "fetch_failed" : "no_review_id";
+    state.approval_failure_id = reviewId;
   } else {
     state.approval_failure_reason = null;
     state.approval_failure_id = null;
@@ -960,6 +987,20 @@ function renderReview() {
   host.className = "frame onb-review-frame";
   host.dataset.label = "TEAM_FEASIBILITY_REVIEW // 04.review";
   stepHost.appendChild(host);
+
+  // Back nav: revising mission targets in light of what the team said.
+  // Marks the in-memory approval as stale so renderMission shows the
+  // banner; the actual re-run happens on submit (see submitOnboarding).
+  const navBar = document.createElement("div");
+  navBar.className = "onb-actions onb-actions-top";
+  navBar.innerHTML = `
+    <button type="button" class="onb-btn onb-btn-back" id="onb-back-review">[ ◂ back to mission ]</button>
+  `;
+  host.appendChild(navBar);
+  navBar.querySelector("#onb-back-review").addEventListener("click", () => {
+    state.approval_stale = !!state.approval;
+    goto("mission");
+  });
 
   if (!state.approval) {
     // Approval missing — give an honest cause from the captured reason
@@ -1097,11 +1138,13 @@ async function renderFirstMove() {
     </div>
     <div class="onb-firstmove-list" id="onb-firstmove-list"></div>
     <div class="onb-actions">
+      <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
       <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START SELECTED ]</button>
     </div>
   `;
   stepHost.appendChild(frame);
 
+  document.getElementById("onb-back-firstmove").addEventListener("click", () => goto("review"));
   document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
     state.data.first_directive_project_id = null;
     saveDraft();

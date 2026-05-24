@@ -987,6 +987,19 @@ body.onboarding-body { padding-bottom: 40px; }
 .onb-btn-resume { border-color: rgba(0, 255, 65, 0.85); color: #00ff41; }
 .onb-btn-discard { border-color: rgba(255, 170, 0, 0.7); color: #ffaa00; }
 .onb-actions { gap: 10px; }
+.onb-actions-top {
+  margin-bottom: 12px;
+  justify-content: flex-start;
+}
+.onb-stale-pill {
+  background: rgba(255, 170, 0, 0.08);
+  border: 1px solid rgba(255, 170, 0, 0.45);
+  color: #ffaa00;
+  padding: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+}
 
 /* Mission grid stacks on small screens */
 @media (max-width: 720px) {
