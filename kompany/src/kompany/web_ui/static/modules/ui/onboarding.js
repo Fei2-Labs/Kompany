@@ -1002,8 +1002,6 @@ async function fetchDraftProjects() {
 // Step 4 — Team Feasibility Review (delegates to feasibility_review.js)
 // ---------------------------------------------------------------------------
 
-const REVIEW_TIMEOUT_MS = 60_000;
-
 function renderReview() {
   setStatus("team review");
   const host = document.createElement("div");
@@ -1049,22 +1047,18 @@ function renderReview() {
   inner.className = "onb-review-inner";
   host.appendChild(inner);
 
-  let timeoutHandle = null;
+  // No timeout watchdog here: state.approval is already a complete
+  // payload (submitOnboarding awaits it before goto("review")), and
+  // mountFeasibilityReview is synchronous. A timer would always fire
+  // a misleading "timed out" banner on top of a fully-rendered panel
+  // — that's what the user reported in 2026-05-24 testing.
   let mounted = null;
-  let bannerShown = false;
-  function showTimeout() {
-    if (bannerShown) return;
-    bannerShown = true;
-    renderReviewFailureBanner(host, "review timed out after 60s");
-  }
-  timeoutHandle = setTimeout(showTimeout, REVIEW_TIMEOUT_MS);
 
   // Founder action wiring — adopt/keep/counter all share the same hop
   // to provisioning. Counter spawns a fresh approval thread server-side.
   mounted = mountFeasibilityReview(inner, {
     approval: state.approval,
     onAdopt: async () => {
-      clearTimeout(timeoutHandle);
       // Adopting the team proposal means accepting their counter-numbers.
       // The engine wires that through the approval approve path; for now
       // we just advance — the targets snapshot was already persisted.
@@ -1078,7 +1072,6 @@ function renderReview() {
       goto("first_move");
     },
     onKeep: async () => {
-      clearTimeout(timeoutHandle);
       try {
         await fetch(`/approvals/${encodeURIComponent(state.approval.id)}/reject`, {
           method: "POST",
