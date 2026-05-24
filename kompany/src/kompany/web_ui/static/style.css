@@ -631,8 +631,13 @@ body.onboarding-body { padding-bottom: 40px; }
 }
 .claim-row:last-child { border-bottom: none; }
 .claim-row-inferred { border-left: 2px solid rgba(255, 170, 0, 0.7); padding-left: 6px; }
+/* Mixed-inferred rows: at least one source is inferred, at least one
+ * is concrete. Less alarming than inferred-only — dashed amber left
+ * border, lighter marker. */
+.claim-row-mixed { border-left: 2px dashed rgba(255, 170, 0, 0.45); padding-left: 6px; }
 .claim-marker { color: rgba(0, 255, 65, 0.8); min-width: 1.2em; }
 .claim-row-inferred .claim-marker { color: #ffaa00; }
+.claim-row-mixed .claim-marker { color: rgba(255, 170, 0, 0.75); }
 .claim-text { flex: 1 1 auto; color: rgba(0, 255, 65, 0.9); }
 .claim-evidence-chip {
   background: transparent;
@@ -644,6 +649,16 @@ body.onboarding-body { padding-bottom: 40px; }
   cursor: pointer;
 }
 .claim-evidence-chip-open { background: rgba(0, 255, 65, 0.08); }
+/* Chip recoloring — surfaces the inferred status at the chip itself
+ * so the founder sees "this row has speculation" without expanding. */
+.claim-evidence-chip-inferred {
+  border-color: rgba(255, 170, 0, 0.75);
+  color: #ffaa00;
+}
+.claim-evidence-chip-mixed {
+  border-color: rgba(255, 170, 0, 0.5);
+  color: rgba(255, 170, 0, 0.85);
+}
 .claim-evidence-panel {
   width: 100%;
   margin: 4px 0 0 18px;

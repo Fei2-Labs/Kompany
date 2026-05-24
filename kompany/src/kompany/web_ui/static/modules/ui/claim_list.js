@@ -29,6 +29,20 @@ function isInferredOnly(claim) {
   return ev.every((s) => (s.source_type || "").toLowerCase() === INFERRED);
 }
 
+function hasAnyInferred(claim) {
+  const ev = Array.isArray(claim.evidence) ? claim.evidence : [];
+  if (ev.length === 0) return true;
+  return ev.some((s) => (s.source_type || "").toLowerCase() === INFERRED);
+}
+
+function countSources(claim) {
+  const ev = Array.isArray(claim.evidence) ? claim.evidence : [];
+  return {
+    total: ev.length,
+    inferred: ev.filter((s) => (s.source_type || "").toLowerCase() === INFERRED).length,
+  };
+}
+
 function escapeHtml(s) {
   return String(s == null ? "" : s)
     .replaceAll("&", "&amp;")
@@ -49,13 +63,24 @@ function sourceLabel(src) {
 }
 
 function makeEvidenceChip(claim) {
-  const ev = Array.isArray(claim.evidence) ? claim.evidence : [];
+  const { total, inferred } = countSources(claim);
   const chip = document.createElement("button");
   chip.type = "button";
   chip.className = "claim-evidence-chip";
-  chip.textContent = ev.length === 0
-    ? "[0 sources]"
-    : `[${ev.length} source${ev.length === 1 ? "" : "s"}]`;
+  if (total === 0) {
+    // Zero sources is treated as inferred-only by isInferredOnly,
+    // so the row's amber treatment already signals the warning.
+    chip.classList.add("claim-evidence-chip-inferred");
+    chip.textContent = "[0 sources]";
+  } else if (inferred === total) {
+    chip.classList.add("claim-evidence-chip-inferred");
+    chip.textContent = `[${total} inferred]`;
+  } else if (inferred > 0) {
+    chip.classList.add("claim-evidence-chip-mixed");
+    chip.textContent = `[${total} src · ${inferred} inferred]`;
+  } else {
+    chip.textContent = `[${total} source${total === 1 ? "" : "s"}]`;
+  }
   return chip;
 }
 
@@ -89,14 +114,20 @@ function makeClaimRow(claim) {
   const row = document.createElement("div");
   row.className = "claim-row";
   const inferred = isInferredOnly(claim);
+  const mixed = !inferred && hasAnyInferred(claim);
   if (inferred) row.classList.add("claim-row-inferred");
+  else if (mixed) row.classList.add("claim-row-mixed");
 
   const marker = document.createElement("span");
   marker.className = "claim-marker";
-  marker.textContent = inferred ? "⚠" : "▸";
+  marker.textContent = inferred ? "⚠" : mixed ? "◌" : "▸";
   marker.setAttribute(
     "aria-label",
-    inferred ? "inferred or unsourced claim" : "sourced claim",
+    inferred
+      ? "inferred or unsourced claim"
+      : mixed
+        ? "claim partially backed by inferred sources"
+        : "sourced claim",
   );
 
   const text = document.createElement("span");
