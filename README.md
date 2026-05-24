@@ -23,6 +23,12 @@
 
 Give Kompany a directive and a budget. The CEO agent conducts the team, delegates tasks, creates revenue projects when funds are short, and **never downgrades your mission**. Every AI cost is tracked as a real business expense. Works standalone via CLI, REST API, MCP, or SDK.
 
+> **Open-core.** This repo is the whole engine under Apache-2.0 — no
+> crippled "community edition." Commercial extensions (curated playbooks,
+> specialist agent souls, business integrations) live in a separate
+> proprietary package, `kompany-pro`. Details:
+> [Open Core — Core / Pro / Cloud](#open-core--core--pro--cloud).
+
 ## Why This Exists
 
 Solo founders make high-stakes decisions daily across product, engineering, finance, marketing, sales, and operations — often without anyone to challenge their thinking. Single-agent AI tools answer questions in isolation. They don't debate, push back, or synthesize cross-functional perspectives.
@@ -108,6 +114,7 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
 - [Project Structure](#project-structure)
 - [Configuration](#configuration)
 - [Running Tests](#running-tests)
+- [Open Core — Core / Pro / Cloud](#open-core--core--pro--cloud)
 - [Contributing](#contributing)
 - [Support](#support)
 - [License](#license)
@@ -770,6 +777,60 @@ Balance before: €50.00 → Balance after: €49.82
 ```
 
 Use `kompany ledger` to see all transactions including AI costs.
+
+---
+
+## Open Core — Core / Pro / Cloud
+
+Kompany follows an open-core model. The engine you see in this repo is
+the whole engine — there is no crippled "community edition." Commercial
+extensions live in a separate package.
+
+| Tier | What's in it | License | Where |
+|---|---|---|---|
+| **Kompany Core** *(this repo)* | Full agent engine, debate runtime, cost ledger, budget tracking, CLI, REST API, MCP server, plugin contract (5 stable ABCs), 11 base C-suite + 5 subagent souls, 7 starter templates, 3 reference workflows (`idea-validation`, `weekly-exec-review`, `landing-page-launch`) | **Apache-2.0** — modify, redistribute, sell, fork, all fine | [`Fei2-Labs/Kompany`](https://github.com/Fei2-Labs/Kompany) |
+| **Kompany Pro** | Curated deep playbooks above the 7 Core seeds, specialist agent souls (industry-specific roles like SaaS Compliance Officer / Ecom Inventory Manager — additive over Core's 11+5, never replacement), business integrations (Stripe, Polar, Notion, Slack, …) | Proprietary | `Fei2-Labs/kompany-pro` (private repo, access via subscription or Early Backer grant) |
+| **Kompany Cloud** | Hosted SaaS — managed runtime, dashboard, scheduling, persistence, integrations | TBD pricing | Not yet launched |
+
+**Pro is additive, never replacement.** Every Core artifact — the 11
+C-suite souls, the 7 template seeds, the 3 reference workflows — is
+permanent and fully functional. Pro adds net-new categories above them.
+If a Core artifact has a bug, it's fixed in Core, not crowbar-replaced
+by a Pro module.
+
+**Pro contents are public; Pro code is gated.** The list of Pro modules
+(workflow names, soul names, integration names) is published. Only the
+source code stays behind authorization.
+
+**How Pro plugs in.** Pro packages register contributions via Python
+entry points defined by Core's plugin contract
+(`kompany.plugins.contract`, v1.0.0). Discovery happens at engine init:
+
+```bash
+pip install kompany kompany-pro     # Pro from authorized index
+python -c "from kompany.plugins.loader import discover; print(discover())"
+```
+
+Pro plugins appear alongside Core ones in the Templates picker, agent
+registry, and workflow registry with no special-casing at call sites.
+Version compatibility is enforced by pip dep pinning: a Core contract
+major bump (`kompany 0.x → 0.y`) blocks `pip install -U kompany` until
+a compatible Pro release ships. Intentional design — see
+[ADR-0002](docs/adr/0002-plugin-contract-design.md).
+
+**Early Backer grant.** Anyone who paid the Kompany 299 CNY presale
+before the public OSS launch was automatically promoted to the
+Kompany Early Backer tier — Core source (Apache-2.0, same as everyone)
+plus 12 months of Pro source access, Cloud credit when Cloud ships,
+private Discord, and one roadmap-input call. Full terms:
+[`docs/early-backer-grant.md`](docs/early-backer-grant.md).
+
+**Why this model.** The agent runtime is forkable in a week — gating it
+would be performative. Real moat lives in curated workflows + Cloud
+ops, which are content + operational, not gated by code obfuscation.
+Decision context:
+[`docs/context/open-core-model.md`](docs/context/open-core-model.md) +
+[ADR-0001](docs/adr/0001-open-core-with-plugin-contract.md).
 
 ---
 
