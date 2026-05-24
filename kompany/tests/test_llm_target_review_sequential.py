@@ -190,12 +190,17 @@ def test_review_returns_three_claim_lists_plus_rationale(engine: Any) -> None:
         founder, cash=founder.initial_budget, recommended=recommended
     )
     assert isinstance(out, tuple)
-    assert len(out) == 4
-    cfo_claims, cos_claims, ceo_claims, rationale = out
+    assert len(out) == 5
+    cfo_claims, cos_claims, ceo_claims, rationale, per_agent_cost = out
     assert all(isinstance(c, Claim) for c in cfo_claims)
     assert all(isinstance(c, Claim) for c in cos_claims)
     assert all(isinstance(c, Claim) for c in ceo_claims)
     assert isinstance(rationale, str)
+    # New: tuple's 5th element carries the per-agent input/output/cost
+    # snapshot so the UI can seed cost meters without an SSE subscription.
+    assert set(per_agent_cost.keys()) == {"cfo", "cos", "ceo"}
+    for agent_costs in per_agent_cost.values():
+        assert set(agent_costs.keys()) == {"input_tokens", "output_tokens", "cost_usd"}
 
 
 def test_payload_carries_rounds_array_after_first_review(engine: Any) -> None:

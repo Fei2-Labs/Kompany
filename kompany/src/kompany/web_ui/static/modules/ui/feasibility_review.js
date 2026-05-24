@@ -137,6 +137,28 @@ class TeamCostBoard {
     this._ceoOnly = false;
   }
 
+  /** Seed meters from a per-agent snapshot persisted on the approval
+   * payload (round.per_agent_cost = { cfo: {input_tokens, output_tokens,
+   * cost_usd}, cos: {...}, ceo: {...} }). Called once on mount so the
+   * historical debate cost (which already happened server-side before
+   * the UI subscribed to SSE) is visible without waiting for events
+   * that won't fire. */
+  seedFromRound(perAgentCost) {
+    if (!perAgentCost || typeof perAgentCost !== "object") return;
+    for (const roleKey of this._order) {
+      const snap = perAgentCost[roleKey];
+      if (!snap) continue;
+      const m = this.meters.get(roleKey);
+      if (!m) continue;
+      m.input = Number(snap.input_tokens || 0);
+      m.output = Number(snap.output_tokens || 0);
+      m.cost = Number(snap.cost_usd || 0);
+      // Calls count: we know there was exactly one round-1 LLM call
+      // per agent that contributed to these totals.
+      if (m.input > 0 || m.output > 0 || m.cost > 0) m.calls = 1;
+    }
+  }
+
   setCeoOnly(flag) {
     this._ceoOnly = !!flag;
     this._nextRoleIdx = 0;
@@ -472,6 +494,28 @@ export function mountFeasibilityReview(host, options) {
     return opts.priorPayload || null;
   }
   rerender(approval, priorFromRounds(payload));
+
+  // Seed cost meters from the per_agent_cost snapshot persisted on the
+  // latest round of the approval payload. The debate ran server-side
+  // before this UI mounted, so no llm.spend SSE events will fire for
+  // it — the meters would otherwise stay at "0 in / 0 out · $0.00"
+  // forever, contradicting the LEDGER chip on the dashboard.
+  const _seedRound =
+    payload && Array.isArray(payload.rounds) && payload.rounds.length
+      ? payload.rounds[payload.rounds.length - 1]
+      : null;
+  if (_seedRound && _seedRound.per_agent_cost) {
+    board.seedFromRound(_seedRound.per_agent_cost);
+    for (const role of ROLES) {
+      const col = colsByRole[role.key];
+      const costRow = col.querySelector(".fr-col-cost");
+      if (costRow) board.meters.get(role.key).renderInto(costRow);
+    }
+    const seedTotal = board.totalCost();
+    if (seedTotal > 0) {
+      total.textContent = `TOTAL THIS REVIEW: ${formatUsd(seedTotal)}`;
+    }
+  }
 
   // SSE wiring for the live cost meters. We only subscribe when the
   // host page has an SSE endpoint mounted (Tauri / browser).

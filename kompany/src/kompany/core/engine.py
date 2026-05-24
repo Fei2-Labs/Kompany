@@ -3029,6 +3029,11 @@ class KompanyEngine:
             "targets": targets.model_dump(mode="json"),
         }
 
+    @staticmethod
+    def _zero_per_agent_cost() -> dict[str, dict[str, float]]:
+        zero = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+        return {"cfo": dict(zero), "cos": dict(zero), "ceo": dict(zero)}
+
     def run_target_feasibility_review(
         self,
         *,
@@ -3183,8 +3188,19 @@ class KompanyEngine:
                         revision_hint=revision_hint,
                         prior_rounds=prior_rounds,
                     )
+                    # No fresh CFO/CoS calls happened on this iteration —
+                    # only CEO. Carry the per-agent cost forward from the
+                    # frozen round so the meters show the historical
+                    # totals, then we'd attribute the current CEO cost
+                    # but that's not surfaced via _ceo_only_response yet;
+                    # zero it for now.
+                    per_agent_cost = {
+                        "cfo": frozen.get("per_agent_cost", {}).get("cfo", {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}),
+                        "cos": frozen.get("per_agent_cost", {}).get("cos", {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}),
+                        "ceo": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0},
+                    }
                 else:
-                    cfo_claims, cos_claims, ceo_claims, rationale = (
+                    cfo_claims, cos_claims, ceo_claims, rationale, per_agent_cost = (
                         self._llm_target_review(
                             founder,
                             cash=cash,
@@ -3212,6 +3228,10 @@ class KompanyEngine:
                 cfo_claims = [Claim(text=cfo_view)]
                 cos_claims = [Claim(text=cos_view)]
                 ceo_claims = [Claim(text=ceo_proposal)]
+                per_agent_cost = self._zero_per_agent_cost()
+        # Heuristic / test path doesn't set per_agent_cost; default zeros.
+        if "per_agent_cost" not in locals():
+            per_agent_cost = self._zero_per_agent_cost()
 
         this_round_dump = {
             "generation": current_generation,
@@ -3220,6 +3240,7 @@ class KompanyEngine:
             "ceo_claims": [c.model_dump(mode="json") for c in ceo_claims],
             "revision_hint": revision_hint,
             "ceo_only": ceo_only,
+            "per_agent_cost": per_agent_cost,
         }
         rounds_history = list(prior_rounds) + [this_round_dump]
 
@@ -3486,7 +3507,29 @@ class KompanyEngine:
         ceo_claims = _safe_claims(ceo_resp, "(CEO returned no claims)")
 
         rationale = "llm_review_revise" if revision_hint else "llm_review"
-        return (cfo_claims, cos_claims, ceo_claims, rationale)
+        # Per-agent cost / token snapshot so the review UI can show real
+        # numbers in the per-column meters without waiting for an SSE
+        # subscription that will miss the events (the debate happens
+        # server-side before any client subscribes). Defaults to zeros
+        # when a response doesn't carry the field (e.g. CEO-only path).
+        per_agent_cost = {
+            "cfo": {
+                "input_tokens": int(getattr(cfo_resp, "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(cfo_resp, "output_tokens", 0) or 0),
+                "cost_usd": float(getattr(cfo_resp, "cost_usd", 0.0) or 0.0),
+            },
+            "cos": {
+                "input_tokens": int(getattr(cos_resp, "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(cos_resp, "output_tokens", 0) or 0),
+                "cost_usd": float(getattr(cos_resp, "cost_usd", 0.0) or 0.0),
+            },
+            "ceo": {
+                "input_tokens": int(getattr(ceo_resp, "input_tokens", 0) or 0),
+                "output_tokens": int(getattr(ceo_resp, "output_tokens", 0) or 0),
+                "cost_usd": float(getattr(ceo_resp, "cost_usd", 0.0) or 0.0),
+            },
+        }
+        return (cfo_claims, cos_claims, ceo_claims, rationale, per_agent_cost)
 
     # ------------------------------------------------------------------
     # Helpers for the sequential trio review + revise flow
