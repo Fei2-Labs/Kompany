@@ -800,7 +800,10 @@ async function renderMission() {
 
   refreshPreview(manifest);
 
-  document.getElementById("onb-submit-mission").addEventListener("click", () => {
+  const submitBtn = document.getElementById("onb-submit-mission");
+  const backBtn = document.getElementById("onb-back-mission");
+  submitBtn.addEventListener("click", async () => {
+    if (submitBtn.disabled) return;        // belt + braces against double-fire
     if (!state.data.initial_budget && tplBudget) state.data.initial_budget = tplBudget;
     if (!state.data.revenue_target && tplRev) state.data.revenue_target = tplRev;
     if (state.data.customer_target == null && tplCust != null) state.data.customer_target = tplCust;
@@ -814,7 +817,27 @@ async function renderMission() {
     state.approval_failure_reason = null;
     state.approval_failure_id = null;
     saveDraft();
-    submitOnboarding({ forceReview: wasStale });
+    // Lock the button + back nav so the founder can't fire duplicate
+    // /onboarding/complete requests (the call takes 30-60s: template
+    // apply + LLM feasibility debate). Restore on failure so the
+    // founder can retry; on success goto() re-renders.
+    const originalLabel = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = "[ ▸ submitting team review (30-60s)... ]";
+    backBtn.disabled = true;
+    try {
+      await submitOnboarding({ forceReview: wasStale });
+    } finally {
+      // submitOnboarding navigates to "review" on success and stays
+      // on this step on failure (showError already called). Re-enable
+      // only when we're still on this step — the goto/render path
+      // throws this DOM away anyway.
+      if (state.step === "mission") {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalLabel;
+        backBtn.disabled = false;
+      }
+    }
   });
 }
 
