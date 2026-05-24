@@ -1096,18 +1096,34 @@ function renderReview() {
       goto("first_move");
     },
     onCounter: async (text) => {
-      // POST counter → fetch new approval → return for re-render.
+      // POST counter → fetch the successor approval → return for re-render.
+      // Backend returns {original, successor} (see
+      // engine.request_approval_revision). The successor is the new
+      // pending approval the founder must act on next.
       const res = await fetch(`/approvals/${encodeURIComponent(state.approval.id)}/revise`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ counter: text }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        showError("counter-propose failed: HTTP " + res.status);
+        return null;
+      }
       const payload = await res.json();
-      const newId = payload.new_request_id || payload.id;
-      if (!newId) return null;
+      const newId =
+        (payload.successor && payload.successor.id) ||
+        payload.new_request_id ||
+        payload.id;
+      if (!newId) {
+        showError("counter-propose returned no successor approval id");
+        return null;
+      }
       const newApproval = await fetchApproval(newId);
-      if (newApproval) state.approval = newApproval;
+      if (!newApproval) {
+        showError("counter-propose succeeded but /approvals/" + newId + " failed to fetch");
+        return null;
+      }
+      state.approval = newApproval;
       return newApproval;
     },
   });
