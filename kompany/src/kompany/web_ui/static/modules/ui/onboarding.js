@@ -1180,30 +1180,24 @@ function renderReviewFailureBanner(host, message) {
 // Step 5 — First Move
 // ---------------------------------------------------------------------------
 
-async function renderFirstMove() {
+async function renderFirstMove(opts) {
   setStatus("first move");
+  opts = opts || {};
 
-  // Step 1: resolve any existing draft projects. These come from either
-  // the template's pre-staged suggested_directives OR a previous team
-  // proposal that was persisted but not yet acted on (idempotent
-  // resume).
+  // Step 1: resolve any existing draft projects.
   let projects = state.draft_project_ids;
   if (!projects || projects.length === 0) {
     projects = await fetchDraftProjects();
     state.draft_project_ids = projects;
   }
 
-  // Step 2: if zero drafts but the founder has agreed targets, ask the
-  // team to PROPOSE the first three directives. This honors the
-  // contract documented in docs/context/operations.md:60-62 + the
-  // engineering-team-proposes-plan shared memory: solo founders
-  // shouldn't be staring at a blank textarea — the AI C-suite they
-  // hired is meant to design the plan and present it for approval.
-  //
-  // Loading state is the same look as counter-propose (amber spinner,
-  // live timer) so the wait reads as "team thinking" not "stuck."
+  // Step 2: if zero drafts, ask the team to PROPOSE the first three
+  // directives. Contract: docs/context/operations.md:60-62 +
+  // engineering-team-proposes-plan memory.
   let teamProposalPending = false;
   let teamProposalElapsed = 0;
+  let proposalError = null;       // { code, message, provider } when team fails
+  let proposalStatus = "ok";       // ok | team_failed | heuristic | no_targets
   if ((projects || []).length === 0) {
     const frame = document.createElement("div");
     frame.className = "frame onb-firstmove";
@@ -1239,24 +1233,58 @@ async function renderFirstMove() {
 
     teamProposalPending = true;
     try {
+      const body = opts.forceHeuristic ? { force_heuristic: true } : {};
       const res = await fetch("/onboarding/propose_first_directives", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         const payload = await res.json();
-        projects = (payload && payload.directives) || [];
+        proposalStatus = (payload && payload.status) || "ok";
+        if (proposalStatus === "team_failed") {
+          proposalError = {
+            code: payload.error_code || "unknown",
+            message: payload.error_message || "(no detail)",
+            provider: payload.provider || "provider",
+          };
+          projects = [];
+        } else {
+          projects = (payload && payload.directives) || [];
+        }
         state.draft_project_ids = projects;
+      } else {
+        // Endpoint failed entirely (sidecar crash / 5xx)
+        proposalStatus = "team_failed";
+        proposalError = {
+          code: "unknown",
+          message: `HTTP ${res.status}`,
+          provider: "unknown",
+        };
+        projects = [];
       }
-    } catch (_err) {
-      // Network blip → leave projects empty; the textarea fallback below
-      // catches that path.
+    } catch (err) {
+      proposalStatus = "team_failed";
+      proposalError = {
+        code: "network",
+        message: err && err.message || String(err),
+        provider: "unknown",
+      };
+      projects = [];
     } finally {
       clearInterval(timerHandle);
       teamProposalPending = false;
-      // Tear down the loading frame so the real one re-renders below.
       stepHost.innerHTML = "";
     }
+  }
+
+  // Team-failed branch: render an honest error screen with retry +
+  // "use starter pack" + skip. This is what Claude Code / Codex /
+  // Windsurf do when LLM provider quota is gone — surface the real
+  // problem, don't silently substitute a fake "AI plan."
+  if (proposalError) {
+    renderFirstMoveError(proposalError);
+    return;
   }
 
   const projectCount = (projects || []).length;
@@ -1267,16 +1295,11 @@ async function renderFirstMove() {
   frame.dataset.label = "FIRST_MOVE // 05.directive";
 
   const headerCopy = hasStaged
-    ? `Your team proposes ${projectCount} first-week directive${projectCount === 1 ? "" : "s"}. Pick one to start:`
-    : "Team didn't return a proposal (provider unavailable). Type your own first directive:";
+    ? (proposalStatus === "heuristic"
+        ? `Starter pack: 3 generic first-week directives (LLM not used). Pick one to start:`
+        : `Your team proposes ${projectCount} first-week directive${projectCount === 1 ? "" : "s"}. Pick one to start:`)
+    : "No agreed targets yet — go back to the team review first.";
 
-  // Two-mode UI:
-  //   - hasStaged: render the cards-list + START SELECTED. Each card
-  //     shows team's title, proposer role, and rationale so the
-  //     founder picks with full context.
-  //   - !hasStaged: rare fallback — LLM unreachable. Textarea + START.
-  //     Calls /directive (CEO classifier) so the founder still moves
-  //     forward instead of being trapped.
   frame.innerHTML = `
     <div class="onb-firstmove-head">
       <span>${escapeHtml(headerCopy)}</span>
@@ -1284,18 +1307,17 @@ async function renderFirstMove() {
     </div>
     ${hasStaged
       ? `<div class="onb-firstmove-list" id="onb-firstmove-list"></div>
-         ${teamProposalElapsed > 0
+         ${teamProposalElapsed > 0 && proposalStatus === "ok"
            ? `<p class="onb-firstmove-hint">✓ team finished in ${teamProposalElapsed < 60 ? teamProposalElapsed + "s" : Math.floor(teamProposalElapsed/60) + "m " + (teamProposalElapsed%60) + "s"}.</p>`
-           : ""}`
-      : `<textarea class="onb-firstmove-input" id="onb-firstmove-input"
-                   rows="3"
-                   placeholder="e.g. Launch a landing page and start collecting waitlist signups."
-                   autocomplete="off"
-                   spellcheck="false"></textarea>
-         <p class="onb-firstmove-hint">CEO will classify this and assemble the team. Costs you ~$0.05-0.20 in LLM spend.</p>`}
+           : (proposalStatus === "heuristic"
+              ? `<p class="onb-firstmove-hint onb-firstmove-hint-warn">⚠ heuristic seeds — your AI team didn't actually propose these. To get real team-designed directives, fix your LLM provider in settings and retry.</p>`
+              : "")}`
+      : `<p class="onb-empty">Go back to the team-review step and pick keep / adopt / counter first.</p>`}
     <div class="onb-actions">
       <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
-      <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START ${hasStaged ? "SELECTED" : ""} ]</button>
+      ${hasStaged
+        ? `<button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START SELECTED ]</button>`
+        : ""}
     </div>
   `;
   stepHost.appendChild(frame);
@@ -1352,47 +1374,96 @@ async function renderFirstMove() {
     return;
   }
 
-  // Fallback branch: team didn't return a proposal (LLM unreachable).
-  // Free-form directive submission so the founder isn't trapped.
-  const inputEl = document.getElementById("onb-firstmove-input");
-  inputEl.addEventListener("input", () => {
-    startBtn.disabled = inputEl.value.trim().length === 0;
+}
+
+
+function _firstMoveErrorCopy(code, provider) {
+  // Quota / auth / network / provider_error / unknown.
+  // Keep copy parallel to Claude Code / Codex / Windsurf so the
+  // founder sees a familiar shape: what's wrong, why, what to do.
+  switch (code) {
+    case "rate_limited":
+      return {
+        title: `Your ${provider} quota is used up.`,
+        body:
+          `The team can't propose directives without an LLM call. ` +
+          `Add a fallback provider in settings, top up ${provider}, ` +
+          `or wait for the next billing cycle.`,
+      };
+    case "unauthorized":
+      return {
+        title: `${provider} rejected your API key.`,
+        body:
+          `Your key may be revoked, mistyped, or missing scope. ` +
+          `Fix it in settings and retry.`,
+      };
+    case "network":
+      return {
+        title: `Couldn't reach ${provider}.`,
+        body:
+          `Check your network connection or your custom endpoint URL. ` +
+          `Retry once the connection comes back.`,
+      };
+    case "provider_error":
+      return {
+        title: `${provider} is having problems right now.`,
+        body:
+          `Their service returned an unexpected error. ` +
+          `Retry in a minute, or switch to a different provider in settings.`,
+      };
+    default:
+      return {
+        title: `Team couldn't propose directives.`,
+        body:
+          `Unknown error from ${provider}. See full message below. ` +
+          `Retry, or use the built-in starter pack to continue with ` +
+          `generic seeds (no AI involvement).`,
+      };
+  }
+}
+
+
+function renderFirstMoveError(errInfo) {
+  // errInfo = { code, message, provider }
+  const copy = _firstMoveErrorCopy(errInfo.code, errInfo.provider);
+  const frame = document.createElement("div");
+  frame.className = "frame onb-firstmove";
+  frame.dataset.label = "FIRST_MOVE // 05.directive";
+  frame.innerHTML = `
+    <div class="onb-firstmove-head">
+      <span>⚠ ${escapeHtml(copy.title)}</span>
+      <button type="button" class="onb-link-escape" id="onb-firstmove-skip">[ ⨯ skip — show me empty dashboard ]</button>
+    </div>
+    <p class="onb-firstmove-error-body">${escapeHtml(copy.body)}</p>
+    <details class="onb-firstmove-error-detail">
+      <summary>full provider message</summary>
+      <pre>${escapeHtml(errInfo.message || "(no detail)")}</pre>
+    </details>
+    <div class="onb-actions onb-firstmove-error-actions">
+      <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
+      <button type="button" class="onb-btn onb-btn-warn" id="onb-firstmove-heuristic">[ use built-in starter pack ]</button>
+      <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-retry">[ ▸ retry team proposal ]</button>
+    </div>
+  `;
+  stepHost.appendChild(frame);
+
+  document.getElementById("onb-back-firstmove").addEventListener("click", () => goto("review"));
+  document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
+    state.data.first_directive_project_id = null;
+    saveDraft();
+    goto("provisioning");
   });
-  startBtn.addEventListener("click", async () => {
-    const text = inputEl.value.trim();
-    if (!text) return;
-    const originalLabel = startBtn.textContent;
-    startBtn.disabled = true;
-    inputEl.disabled = true;
-    const startedAt = Date.now();
-    const fmtSec = (s) => (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
-    startBtn.textContent = "[ ▸ CEO classifying… 0s ]";
-    const timer = setInterval(() => {
-      startBtn.textContent = `[ ▸ CEO classifying… ${fmtSec(Math.floor((Date.now()-startedAt)/1000))} ]`;
-    }, 1000);
-    try {
-      const res = await fetch("/directive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
-      const newProjectId =
-        result.project_id || result.directive_id ||
-        (result.project && result.project.id) || null;
-      if (newProjectId) state.data.first_directive_project_id = newProjectId;
-      saveDraft();
-      goto("provisioning");
-    } catch (err) {
-      clearInterval(timer);
-      startBtn.disabled = false;
-      inputEl.disabled = false;
-      startBtn.textContent = originalLabel;
-      showError("directive failed: " + err.message);
-      return;
-    }
-    clearInterval(timer);
+  document.getElementById("onb-firstmove-retry").addEventListener("click", () => {
+    // Re-enter step from scratch — the propose call fires again.
+    state.draft_project_ids = [];
+    renderFirstMove();
+  });
+  document.getElementById("onb-firstmove-heuristic").addEventListener("click", () => {
+    // Explicit opt-in: founder accepts generic seeds. POSTs
+    // force_heuristic=true so the backend persists them with the
+    // distinct ``team_proposal_first_week_heuristic`` source marker.
+    state.draft_project_ids = [];
+    renderFirstMove({ forceHeuristic: true });
   });
 }
 

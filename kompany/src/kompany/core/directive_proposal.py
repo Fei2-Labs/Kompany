@@ -82,50 +82,111 @@ class DirectiveProposalMixin:
         self,
         *,
         skip_llm: bool | None = None,
-    ) -> list[dict[str, Any]]:
+        force_heuristic: bool = False,
+    ) -> dict[str, Any]:
         """Read agreed_targets + company state, run a short CEO pass,
-        write 3 draft projects, return them as dicts. Idempotent.
+        write 3 draft projects, return a structured result. Idempotent.
 
-        ``skip_llm`` short-circuits to a heuristic when set; defaults
-        to True under ``KOMPANY_TEST_MODE=1`` so tests don't need a
-        live API key. Production runs always invoke the LLM.
+        Returns a dict with shape::
+
+            {
+                "status": "ok" | "team_failed" | "no_targets" | "heuristic",
+                "directives": [...],     # may be empty when status != ok
+                "error_code": str|None,  # network / unauthorized /
+                                         # rate_limited / provider_error
+                                         # / unknown; only set on
+                                         # team_failed
+                "error_message": str|None,
+                "provider": str|None,    # which provider was tried
+            }
+
+        Distinct from the previous silent-fallback shape — the caller
+        (REST endpoint + onboarding UI) needs to know whether the
+        AI actually proposed the directives or whether we fell through
+        to generic seeds. Lying to the founder ("here's your AI's
+        plan!") when the LLM never ran erodes trust. ``force_heuristic``
+        explicit-opts into the local fallback (user clicked "use
+        starter pack" on the error screen).
+
+        ``skip_llm`` short-circuits to the heuristic without trying
+        the LLM; defaults to True under ``KOMPANY_TEST_MODE=1`` so
+        tests don't need a live API key.
         """
         import os
 
         existing = self._existing_draft_projects()
         if existing:
-            return existing
+            return {
+                "status": "ok",
+                "directives": existing,
+                "error_code": None,
+                "error_message": None,
+                "provider": None,
+            }
 
         agreed = get_targets_state(self.db, "agreed")
         if agreed is None:
-            # No agreed targets — caller is upstream of the
-            # feasibility-review flow. Return empty so the UI shows
-            # the bare-text fallback rather than fabricating a plan
-            # off zero context.
-            return []
+            return {
+                "status": "no_targets",
+                "directives": [],
+                "error_code": "no_targets",
+                "error_message": "Agreed targets not set; complete the team review first.",
+                "provider": None,
+            }
 
         if skip_llm is None:
             skip_llm = os.environ.get("KOMPANY_TEST_MODE", "") == "1"
 
-        directives: list[dict[str, Any]] = []
-        if skip_llm:
-            directives = self._heuristic_first_directives(agreed)
-        else:
-            try:
-                directives = self._llm_first_directives(agreed)
-            except Exception as exc:  # noqa: BLE001
-                # Never block onboarding because the LLM hiccuped.
-                # Fall back to the heuristic so the founder always sees
-                # at least three concrete cards.
-                directives = self._heuristic_first_directives(agreed)
-                directives.append({
-                    "title": "(LLM proposal failed — heuristic used)",
-                    "rationale": f"Provider error: {exc}",
-                    "proposer_role": "ceo",
-                    "_heuristic_fallback": True,
-                })
+        provider = self._active_provider_name()
 
-        return self._persist_proposed_directives(directives)
+        if skip_llm or force_heuristic:
+            directives = self._heuristic_first_directives(agreed)
+            persisted = self._persist_proposed_directives(
+                directives, source="team_proposal_first_week_heuristic"
+            )
+            return {
+                "status": "heuristic",
+                "directives": persisted,
+                "error_code": None,
+                "error_message": None,
+                "provider": provider,
+            }
+
+        try:
+            directives = self._llm_first_directives(agreed)
+        except Exception as exc:  # noqa: BLE001 — surfaced to UI
+            from kompany.interfaces.api import _classify_ping_error
+
+            detail = f"{type(exc).__name__}: {exc}"
+            code = _classify_ping_error(detail)
+            return {
+                "status": "team_failed",
+                "directives": [],
+                "error_code": code,
+                "error_message": detail,
+                "provider": provider,
+            }
+
+        persisted = self._persist_proposed_directives(directives)
+        return {
+            "status": "ok",
+            "directives": persisted,
+            "error_code": None,
+            "error_message": None,
+            "provider": provider,
+        }
+
+    def _active_provider_name(self) -> str:
+        """Best-effort guess at which provider name is active for
+        labelling errors. Reads vault-loaded settings; falls back to
+        'unknown'. Display-only — never used for routing."""
+        if getattr(self.settings, "custom_base_url", ""):
+            return "custom"
+        for name in ("anthropic", "openai", "gemini", "glm", "kimi"):
+            attr = f"{name}_api_key"
+            if getattr(self.settings, attr, ""):
+                return name
+        return "unknown"
 
     # ------------------------------------------------------------------
     # Internal — LLM, heuristic, persistence
@@ -207,10 +268,16 @@ class DirectiveProposalMixin:
     def _persist_proposed_directives(
         self,
         directives: list[dict[str, Any]],
+        *,
+        source: str = "team_proposal_first_week",
     ) -> list[dict[str, Any]]:
         """Write each proposed directive as a status='draft' project,
         then return ``[{id, name, type, status, rationale, proposer}]``
-        rows the REST layer + UI can render directly."""
+        rows the REST layer + UI can render directly.
+
+        ``source`` distinguishes team-LLM directives from heuristic
+        starter packs so downstream consumers (distillation, audit
+        timeline) can tell them apart."""
         rows: list[dict[str, Any]] = []
         for d in directives[:3]:
             project = Project(
@@ -220,7 +287,7 @@ class DirectiveProposalMixin:
                     "suggested_directive": d["title"],
                     "rationale": d.get("rationale", ""),
                     "proposer_role": d.get("proposer_role", "ceo"),
-                    "source": "team_proposal_first_week",
+                    "source": source,
                 },
                 assigned_agents=[],
             )

@@ -55,16 +55,24 @@ def _set_agreed_targets(engine, *, revenue=1000.0, customer=None,
     engine.db.commit()
 
 
-def test_propose_returns_empty_when_no_agreed_targets(engine):
-    """Without agreed targets the engine refuses to fabricate a plan."""
-    assert engine.propose_first_directives(skip_llm=True) == []
+def test_propose_no_targets(engine):
+    """Without agreed targets the engine refuses to fabricate a plan,
+    surfacing the structured no_targets status to the UI."""
+    result = engine.propose_first_directives(skip_llm=True)
+    assert result["status"] == "no_targets"
+    assert result["directives"] == []
+    assert result["error_code"] == "no_targets"
 
 
 def test_propose_heuristic_writes_three_drafts(engine):
+    """KOMPANY_TEST_MODE skips the LLM and returns heuristic seeds
+    with an explicit `status='heuristic'` so the UI can label them."""
     _set_agreed_targets(engine, revenue=5000.0)
 
-    items = engine.propose_first_directives()
+    result = engine.propose_first_directives()
 
+    assert result["status"] == "heuristic"
+    items = result["directives"]
     assert isinstance(items, list)
     assert len(items) == 3
     for item in items:
@@ -76,37 +84,42 @@ def test_propose_heuristic_writes_three_drafts(engine):
 
 
 def test_propose_is_idempotent(engine):
-    """Calling twice returns existing drafts — no second LLM spend."""
+    """Calling twice returns existing drafts — no second LLM spend.
+    Idempotent calls report status='ok' regardless of how the original
+    drafts got created."""
     _set_agreed_targets(engine)
 
     first = engine.propose_first_directives()
     second = engine.propose_first_directives()
 
-    assert [r["id"] for r in second] == [r["id"] for r in first]
+    assert second["status"] == "ok"
+    assert [r["id"] for r in second["directives"]] == [r["id"] for r in first["directives"]]
 
 
-def test_propose_persists_status_draft_and_source_marker(engine):
-    """Drafts must use the literal 'draft' status string the rest of
-    the codebase + REST filter expect, with a plan source marker so
-    template-staged drafts can be told apart from team-proposed."""
+def test_propose_heuristic_uses_distinct_source_marker(engine):
+    """Heuristic seeds get source='team_proposal_first_week_heuristic'
+    so downstream filtering can tell them apart from real team
+    proposals — important for distillation (don't learn from generic
+    seeds) and for the timeline ('team thought' vs 'fallback used')."""
     _set_agreed_targets(engine)
-    items = engine.propose_first_directives()
+    result = engine.propose_first_directives()
 
-    placeholders = ",".join("?" * len(items))
+    placeholders = ",".join("?" * len(result["directives"]))
     rows = engine.db.execute(
         f"SELECT id, status, plan FROM projects WHERE id IN ({placeholders})",
-        [r["id"] for r in items],
+        [r["id"] for r in result["directives"]],
     ).fetchall()
     assert {r["status"] for r in rows} == {"draft"}
     for r in rows:
         plan = json.loads(r["plan"])
-        assert plan.get("source") == "team_proposal_first_week"
+        # Heuristic path under KOMPANY_TEST_MODE
+        assert plan.get("source") == "team_proposal_first_week_heuristic"
 
 
 def test_existing_template_drafts_short_circuit(engine):
     """If template-staged drafts already exist, propose_first_directives
-    returns them without spending another LLM call AND without writing
-    new team_proposal_first_week rows."""
+    returns them with status='ok' without spending another LLM call
+    AND without writing new team_proposal_first_week rows."""
     _set_agreed_targets(engine)
     engine.apply_template("saas-startup")  # ships pre-staged drafts
 
@@ -115,25 +128,63 @@ def test_existing_template_drafts_short_circuit(engine):
     ).fetchone()
     assert pre["n"] >= 1
 
-    items = engine.propose_first_directives()
+    result = engine.propose_first_directives()
+    assert result["status"] == "ok"
     sources = []
-    for item in items:
+    for item in result["directives"]:
         row = engine.db.execute(
             "SELECT plan FROM projects WHERE id = ?", (item["id"],)
         ).fetchone()
         plan = json.loads(row["plan"]) if row["plan"] else {}
         sources.append(plan.get("source") or "")
     assert "team_proposal_first_week" not in sources
+    assert "team_proposal_first_week_heuristic" not in sources
+
+
+def test_propose_team_failed_surfaces_classified_error(engine, monkeypatch):
+    """When the LLM call raises, the result must carry status='team_failed'
+    plus a classified error_code so the UI can render the right
+    quota/auth/network/provider_error guidance."""
+    _set_agreed_targets(engine)
+    monkeypatch.delenv("KOMPANY_TEST_MODE", raising=False)
+
+    def boom(_self, _agreed):
+        raise RuntimeError("Error code: 429 - rate limited, you exceeded your quota")
+
+    monkeypatch.setattr(
+        "kompany.core.directive_proposal.DirectiveProposalMixin._llm_first_directives",
+        boom,
+    )
+
+    result = engine.propose_first_directives()
+    assert result["status"] == "team_failed"
+    assert result["error_code"] == "rate_limited"
+    assert "quota" in result["error_message"].lower()
+    assert result["directives"] == []
 
 
 # -------- REST -----------------------------------------------------------
 
 
-def test_rest_endpoint_returns_directives(client):
+def test_rest_endpoint_returns_structured_result(client):
     res = client.post("/onboarding/propose_first_directives")
-    # No agreed targets in the fresh fixture install → empty list,
-    # not an error. The frontend's fallback textarea covers this case.
     assert res.status_code == 200
     body = res.json()
-    assert "directives" in body
+    # New shape — UI distinguishes ok / team_failed / heuristic / no_targets.
+    assert {"status", "directives", "error_code", "error_message", "provider"} <= set(body)
     assert isinstance(body["directives"], list)
+
+
+def test_rest_endpoint_force_heuristic_opt_in(client):
+    """When the founder clicks "use starter pack" on the error screen,
+    the frontend POSTs {force_heuristic: true} so the heuristic path
+    is explicit, not silent."""
+    # Fresh install has no agreed targets so still no_targets result,
+    # but force_heuristic should still be accepted as a body field.
+    res = client.post(
+        "/onboarding/propose_first_directives",
+        json={"force_heuristic": True},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert "status" in body

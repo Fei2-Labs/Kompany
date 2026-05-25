@@ -1152,6 +1152,40 @@ body.onboarding-body { padding-bottom: 40px; }
   margin: 0 0 12px 0;
   letter-spacing: 0.02em;
 }
+.onb-firstmove-hint-warn {
+  color: rgba(255, 170, 0, 0.85);
+}
+
+/* Team-failed error screen — parallel to Claude Code / Codex quota
+ * notices: surface the real problem, give a retry, give a clear
+ * opt-in heuristic fallback labelled as such, give a skip. */
+.onb-firstmove-error-body {
+  color: rgba(0, 255, 65, 0.85);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+.onb-firstmove-error-detail {
+  margin: 10px 0;
+  font-size: 11px;
+}
+.onb-firstmove-error-detail summary {
+  cursor: pointer;
+  color: rgba(255, 170, 0, 0.75);
+  letter-spacing: 0.04em;
+}
+.onb-firstmove-error-detail pre {
+  background: rgba(255, 170, 0, 0.05);
+  border-left: 2px solid rgba(255, 170, 0, 0.4);
+  color: rgba(255, 170, 0, 0.85);
+  padding: 8px 10px;
+  margin-top: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.onb-firstmove-error-actions { flex-wrap: wrap; }
 
 /* Step 6 — Provisioning */
 .onb-provision-lines { display: flex; flex-direction: column; gap: 2px; font-family: inherit; font-size: 12px; }
