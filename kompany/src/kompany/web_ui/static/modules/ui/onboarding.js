@@ -1426,7 +1426,7 @@ async function start() {
           // Hydrate the saved form data if any — so back-nav from
           // review re-fills mission inputs correctly.
           if (draft && draft.data) Object.assign(state.data, draft.data);
-          setStatus("resumed at team-review (debate already ran — no extra tokens spent)");
+          setStatus("welcome back — team finished reviewing your targets");
           goto("review");
           return;
         }

@@ -78,6 +78,44 @@ A *partial* install (data dir has artefacts but no usable `kompany.db`)
 is treated as an overwrite candidate: under `--yes` we wipe and start
 fresh; interactively we ask **Overwrite / Cancel**.
 
+## Resume-from-review (mid-onboarding interruption)
+
+The wizard step where most LLM cost lives is the team feasibility
+review: after SUBMIT TO TEAM, the CEO+CFO+CoS debate runs server-side
+(30-60s, ~$0.10-0.50). If the founder closes the app between submit
+and the keep/adopt/counter decision — laptop sleeps, crash, network
+drop, deliberate quit — the cost is already burned. Restarting from
+the wizard's connection step would re-run the debate and re-charge.
+
+To avoid that, `GET /onboarding/status` reports two resume signals:
+
+- `pending_target_feasibility_approval_id` — id of a still-pending
+  `target_feasibility` approval, if any.
+- `agreed_targets_set` — true once `company_config['targets.agreed']`
+  is populated by the founder's keep/adopt/counter choice.
+
+On launch the routing is:
+
+- `onboarded == false` → wizard from step 1.
+- `onboarded == true && pending_target_feasibility_approval_id is set
+  && agreed_targets_set == false` → wizard lands on **step 4 (review)**
+  with the existing approval pre-loaded. No re-debate. No extra spend.
+- `onboarded == true && agreed_targets_set == true` → dashboard.
+
+The redirect logic lives in two places that must stay in sync:
+
+- `web_ui/static/app.js`: dashboard entrypoint forwards to the wizard
+  when the resume signal fires.
+- `web_ui/static/modules/ui/onboarding.js::start()`: wizard probes
+  the same endpoint and skips its localStorage-draft path when the
+  server says resume-to-review.
+
+Steps 5 (first_move) and 6 (provisioning) currently have no
+server-side resume: if the founder closes there, the dashboard is the
+right next destination — the inbox surfaces any draft projects and
+the directive prompt is the same affordance the wizard's first_move
+was offering. No LLM spend is lost.
+
 ## Test-mode escape hatch
 
 Set `KOMPANY_TEST_MODE=1` to skip the LLM ping. This is what the unit
