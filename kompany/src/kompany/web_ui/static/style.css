@@ -802,6 +802,10 @@ body.onboarding-body { padding-bottom: 40px; }
   color: rgba(255, 170, 0, 0.95);
   padding: 4px 0;
 }
+/* display:flex above wins against the hidden attribute's UA
+ * display:none — re-assert it so counterStatus.hidden=true actually
+ * hides the row. Same pattern as .fr-counter[hidden]. */
+.fr-counter-status[hidden] { display: none; }
 .fr-counter-spinner {
   display: inline-block;
   width: 10px;
