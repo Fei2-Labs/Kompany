@@ -72,6 +72,15 @@ class OnboardingStatusResponse(BaseModel):
     onboarded: bool
     template_id: str | None = None
     provider: str | None = None
+    # Resume-from-review: when the wizard was interrupted between
+    # SUBMIT TO TEAM and the founder acting on the team feasibility
+    # review, the template is applied (onboarded=true) but the founder
+    # still owes a keep/adopt/counter decision. The desktop shell uses
+    # this id to land back on the wizard's review step instead of
+    # dropping the founder on the dashboard (losing the LLM debate
+    # they already paid for).
+    pending_target_feasibility_approval_id: str | None = None
+    agreed_targets_set: bool = False
 
 
 class OnboardingCompleteRequest(BaseModel):
@@ -161,11 +170,51 @@ def onboarding_status() -> OnboardingStatusResponse:
     Read-only and safe to call before any engine spin-up — the Tauri
     shell hits this on every WebView load so the SPA can redirect to
     the in-window wizard when no template has been applied yet.
+
+    Also surfaces the resume signal: if a ``target_feasibility``
+    approval is still pending OR ``targets.agreed`` is unset, the
+    desktop / web shell should drop the founder on the wizard's
+    review step instead of the dashboard. Otherwise the LLM debate
+    they already paid for is buried in the inbox.
     """
     from kompany.installer import is_onboarded
 
     snap = is_onboarded(_resolved_data_dir())
-    return OnboardingStatusResponse(**snap)
+    resp_kwargs: dict[str, Any] = dict(snap)
+
+    # Probe the DB directly (no engine spin-up) for the resume signal.
+    # Pre-onboarded installs simply return None / False, matching the
+    # default response.
+    if snap.get("onboarded"):
+        import sqlite3
+
+        db_path = _resolved_data_dir().expanduser() / "kompany.db"
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                row = conn.execute(
+                    "SELECT id FROM approval_requests "
+                    "WHERE action_type = 'target_feasibility' "
+                    "AND status = 'pending' "
+                    "ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                if row:
+                    resp_kwargs["pending_target_feasibility_approval_id"] = row["id"]
+            except sqlite3.OperationalError:
+                pass
+            try:
+                row = conn.execute(
+                    "SELECT value FROM company_config WHERE key = 'targets.agreed'"
+                ).fetchone()
+                resp_kwargs["agreed_targets_set"] = bool(row and row["value"])
+            except sqlite3.OperationalError:
+                pass
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+    return OnboardingStatusResponse(**resp_kwargs)
 
 
 @app.post(

@@ -67,7 +67,15 @@ def test_status_reports_false_for_fresh_install(client: TestClient) -> None:
     res = client.get("/onboarding/status")
     assert res.status_code == 200
     body = res.json()
-    assert body == {"onboarded": False, "template_id": None, "provider": None}
+    assert body == {
+        "onboarded": False,
+        "template_id": None,
+        "provider": None,
+        # New resume-from-review fields default to "no resume needed"
+        # on a fresh install.
+        "pending_target_feasibility_approval_id": None,
+        "agreed_targets_set": False,
+    }
 
 
 def test_status_reports_true_after_install(

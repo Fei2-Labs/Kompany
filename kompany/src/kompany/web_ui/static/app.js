@@ -29,6 +29,19 @@ async function boot() {
         window.location.replace("/ui/onboarding.html");
         return;
       }
+      // Resume-from-review: template applied but the founder never
+      // acted on the team feasibility approval. Drop them back on the
+      // wizard's review step so the LLM debate they already paid for
+      // isn't buried in the inbox.
+      if (
+        snap &&
+        snap.onboarded === true &&
+        snap.pending_target_feasibility_approval_id &&
+        snap.agreed_targets_set === false
+      ) {
+        window.location.replace("/ui/onboarding.html");
+        return;
+      }
     }
   } catch (_err) {
     // Network blip — fall through to normal boot.

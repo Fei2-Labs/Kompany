@@ -1401,11 +1401,40 @@ function initCombobox(rootId) {
 // Boot the wizard (resume gate first)
 // ---------------------------------------------------------------------------
 
-function start() {
+async function start() {
   const draft = loadDraft();
   const firstBootDone = (() => {
     try { return !!localStorage.getItem(FIRST_BOOT_KEY); } catch (_) { return false; }
   })();
+
+  // SERVER-SIDE resume signal beats the localStorage draft. If the
+  // founder already paid for the team feasibility debate (LLM tokens
+  // burned) and only abandoned the review step, jump straight back to
+  // review with the existing approval — don't make them restart and
+  // re-burn tokens. The /onboarding/status endpoint returns
+  // pending_target_feasibility_approval_id when the trail is hot.
+  try {
+    const statusRes = await fetch("/onboarding/status");
+    if (statusRes.ok) {
+      const status = await statusRes.json();
+      if (status.pending_target_feasibility_approval_id && !status.agreed_targets_set) {
+        const approval = await fetchApproval(status.pending_target_feasibility_approval_id);
+        if (approval) {
+          state.approval = approval;
+          state.approval_failure_reason = null;
+          state.approval_failure_id = null;
+          // Hydrate the saved form data if any — so back-nav from
+          // review re-fills mission inputs correctly.
+          if (draft && draft.data) Object.assign(state.data, draft.data);
+          setStatus("resumed at team-review (debate already ran — no extra tokens spent)");
+          goto("review");
+          return;
+        }
+      }
+    }
+  } catch (_) {
+    // Status probe is best-effort. Fall through to the local-draft path.
+  }
 
   if (draft && draft.step && STEP_ORDER.includes(draft.step)) {
     const expired = draftIsExpired(draft);
