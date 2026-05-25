@@ -175,6 +175,53 @@ def test_rest_endpoint_returns_structured_result(client):
     assert isinstance(body["directives"], list)
 
 
+def test_heuristic_carries_rich_fields(engine):
+    """Heuristic directives must populate week_plan + success_metric +
+    expected_cost_usd + other_agents_involved so the UI cards aren't
+    abstract."""
+    _set_agreed_targets(engine)
+    items = engine.propose_first_directives()["directives"]
+    for d in items:
+        assert isinstance(d.get("week_plan"), list) and len(d["week_plan"]) >= 3
+        assert d.get("success_metric")
+        assert isinstance(d.get("expected_cost_usd"), float)
+        assert isinstance(d.get("other_agents_involved"), list)
+
+
+def test_discuss_rejects_empty_question(engine):
+    _set_agreed_targets(engine)
+    engine.propose_first_directives()
+    result = engine.discuss_first_directives("   ")
+    assert result["status"] == "team_failed"
+    assert result["error_code"] == "empty_question"
+
+
+def test_discuss_requires_existing_directives(engine):
+    _set_agreed_targets(engine)
+    # No proposal yet → discussion is meaningless.
+    result = engine.discuss_first_directives("which one should I pick?")
+    assert result["status"] == "no_directives"
+
+
+def test_discuss_no_targets(engine):
+    result = engine.discuss_first_directives("hello")
+    assert result["status"] == "no_targets"
+
+
+def test_discuss_team_failed_classifies_error(engine, monkeypatch):
+    _set_agreed_targets(engine)
+    engine.propose_first_directives()  # seed drafts
+
+    class _BoomAgent:
+        def call_structured(self, **_kw):
+            raise RuntimeError("Error code: 401 - invalid api key")
+
+    monkeypatch.setattr(engine.registry, "get", lambda *a, **kw: _BoomAgent())
+    result = engine.discuss_first_directives("why option 2?")
+    assert result["status"] == "team_failed"
+    assert result["error_code"] == "unauthorized"
+
+
 def test_rest_endpoint_force_heuristic_opt_in(client):
     """When the founder clicks "use starter pack" on the error screen,
     the frontend POSTs {force_heuristic: true} so the heuristic path

@@ -1334,26 +1334,142 @@ async function renderFirstMove(opts) {
   if (hasStaged) {
     const listEl = document.getElementById("onb-firstmove-list");
     let selectedId = null;
-    for (const p of projects) {
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "onb-firstmove-card";
-      card.dataset.projectId = p.id;
-      const proposer = (p.proposer_role || "").toUpperCase();
-      const rationale = p.rationale || "";
-      card.innerHTML = `
-        <div class="onb-firstmove-title">▸ ${escapeHtml(p.name)}</div>
-        ${proposer ? `<div class="onb-firstmove-proposer">proposed by <b>${escapeHtml(proposer)}</b></div>` : ""}
-        ${rationale ? `<div class="onb-firstmove-rationale">${escapeHtml(rationale)}</div>` : ""}
-      `;
-      card.addEventListener("click", () => {
-        listEl.querySelectorAll(".onb-firstmove-card").forEach((c) => c.classList.remove("selected"));
-        card.classList.add("selected");
-        selectedId = p.id;
-        startBtn.disabled = false;
-      });
-      listEl.appendChild(card);
-    }
+    const renderCards = () => {
+      listEl.innerHTML = "";
+      for (const p of projects) {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "onb-firstmove-card";
+        card.dataset.projectId = p.id;
+        const proposer = (p.proposer_role || "").toUpperCase();
+        const rationale = p.rationale || "";
+        const weekPlan = Array.isArray(p.week_plan) ? p.week_plan : [];
+        const successMetric = p.success_metric || "";
+        const cost = Number(p.expected_cost_usd || 0);
+        const others = (p.other_agents_involved || [])
+          .map((r) => String(r).toUpperCase());
+        const costLabel = cost > 0
+          ? `~$${cost.toFixed(cost >= 10 ? 0 : 2)} cash spend`
+          : "$0 cash spend (LLM tokens only)";
+        const planBlock = weekPlan.length
+          ? `<div class="onb-firstmove-week">
+               <div class="onb-firstmove-section-head">// week plan</div>
+               <ul class="onb-firstmove-weeklist">${
+                 weekPlan.map((line) => `<li>${escapeHtml(line)}</li>`).join("")
+               }</ul>
+             </div>`
+          : "";
+        const metricBlock = successMetric
+          ? `<div class="onb-firstmove-metric">
+               <span class="onb-firstmove-section-head">// success metric</span>
+               <span>${escapeHtml(successMetric)}</span>
+             </div>`
+          : "";
+        const collabBlock = others.length
+          ? `<div class="onb-firstmove-collab">+ ${others.map(escapeHtml).join(", ")}</div>`
+          : "";
+        card.innerHTML = `
+          <div class="onb-firstmove-title">▸ ${escapeHtml(p.name)}</div>
+          ${proposer ? `<div class="onb-firstmove-proposer">proposed by <b>${escapeHtml(proposer)}</b> ${collabBlock}</div>` : ""}
+          ${rationale ? `<div class="onb-firstmove-rationale">${escapeHtml(rationale)}</div>` : ""}
+          ${planBlock}
+          ${metricBlock}
+          <div class="onb-firstmove-cost">${escapeHtml(costLabel)}</div>
+        `;
+        card.addEventListener("click", () => {
+          listEl.querySelectorAll(".onb-firstmove-card").forEach((c) => c.classList.remove("selected"));
+          card.classList.add("selected");
+          selectedId = p.id;
+          startBtn.disabled = false;
+        });
+        listEl.appendChild(card);
+      }
+    };
+    renderCards();
+
+    // Founder Q&A panel — ask the team follow-up questions before
+    // picking. Sits below the cards; each Q&A pair stacks. If the
+    // CEO revises directives in response, cards re-render in place.
+    const discussFrame = document.createElement("div");
+    discussFrame.className = "onb-firstmove-discuss";
+    discussFrame.innerHTML = `
+      <div class="onb-firstmove-section-head">// ask the team</div>
+      <div class="onb-firstmove-thread" id="onb-firstmove-thread"></div>
+      <textarea class="onb-firstmove-input" id="onb-firstmove-question"
+                rows="2"
+                placeholder="e.g. Which is best if I have only 5 hours this week?"
+                autocomplete="off" spellcheck="false"></textarea>
+      <div class="onb-firstmove-discuss-actions">
+        <button type="button" class="onb-btn onb-btn-discuss" id="onb-firstmove-ask" disabled>[ ▸ ASK CEO ]</button>
+      </div>
+    `;
+    stepHost.querySelector(".onb-firstmove").appendChild(discussFrame);
+
+    const questionEl = document.getElementById("onb-firstmove-question");
+    const askBtn = document.getElementById("onb-firstmove-ask");
+    const threadEl = document.getElementById("onb-firstmove-thread");
+    questionEl.addEventListener("input", () => {
+      askBtn.disabled = questionEl.value.trim().length === 0;
+    });
+    askBtn.addEventListener("click", async () => {
+      const text = questionEl.value.trim();
+      if (!text) return;
+      const startedAt = Date.now();
+      const fmtSec = (s) => (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
+      askBtn.disabled = true;
+      questionEl.disabled = true;
+      const origLabel = askBtn.textContent;
+      askBtn.textContent = "[ ▸ CEO thinking… 0s ]";
+      const tHandle = setInterval(() => {
+        askBtn.textContent = `[ ▸ CEO thinking… ${fmtSec(Math.floor((Date.now()-startedAt)/1000))} ]`;
+      }, 1000);
+      // Echo the question in the thread immediately.
+      const youBlock = document.createElement("div");
+      youBlock.className = "onb-firstmove-qa onb-firstmove-qa-you";
+      youBlock.innerHTML = `<div class="onb-firstmove-qa-head">you</div><div>${escapeHtml(text)}</div>`;
+      threadEl.appendChild(youBlock);
+      let result = null;
+      try {
+        const res = await fetch("/onboarding/discuss_first_directives", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ question: text }),
+        });
+        result = res.ok ? await res.json() : { status: "team_failed", error_message: `HTTP ${res.status}` };
+      } catch (err) {
+        result = { status: "team_failed", error_message: err.message };
+      } finally {
+        clearInterval(tHandle);
+        askBtn.disabled = false;
+        askBtn.textContent = origLabel;
+        questionEl.disabled = false;
+      }
+      const ceoBlock = document.createElement("div");
+      ceoBlock.className = "onb-firstmove-qa onb-firstmove-qa-team";
+      if (result.status === "ok" && result.answer) {
+        const changed = !!result.directives_changed;
+        ceoBlock.innerHTML = `
+          <div class="onb-firstmove-qa-head">CEO ${changed ? '<span class="onb-firstmove-qa-revised">(revised the plan ↑)</span>' : ""}</div>
+          <div>${escapeHtml(result.answer)}</div>
+        `;
+        if (changed && Array.isArray(result.directives) && result.directives.length) {
+          projects = result.directives;
+          state.draft_project_ids = projects;
+          selectedId = null;
+          startBtn.disabled = true;
+          renderCards();
+        }
+      } else {
+        ceoBlock.innerHTML = `
+          <div class="onb-firstmove-qa-head onb-firstmove-qa-head-fail">CEO unavailable</div>
+          <div>${escapeHtml(result.error_message || "(no detail)")}</div>
+        `;
+      }
+      threadEl.appendChild(ceoBlock);
+      threadEl.scrollTop = threadEl.scrollHeight;
+      questionEl.value = "";
+      askBtn.disabled = true;
+    });
     startBtn.addEventListener("click", async () => {
       if (!selectedId) return;
       const originalLabel = startBtn.textContent;

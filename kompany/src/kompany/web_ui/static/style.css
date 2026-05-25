@@ -1120,6 +1120,100 @@ body.onboarding-body { padding-bottom: 40px; }
   margin-top: 6px;
   line-height: 1.4;
 }
+.onb-firstmove-section-head {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(0, 200, 255, 0.7);
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+.onb-firstmove-week ul.onb-firstmove-weeklist {
+  margin: 4px 0 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.85);
+  line-height: 1.5;
+}
+.onb-firstmove-metric {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.85);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.onb-firstmove-cost {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 170, 0, 0.85);
+  letter-spacing: 0.02em;
+}
+.onb-firstmove-collab {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  color: rgba(0, 200, 255, 0.7);
+  letter-spacing: 0.04em;
+}
+
+/* Founder Q&A panel under the cards. */
+.onb-firstmove-discuss {
+  margin-top: 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 200, 255, 0.35);
+  background: rgba(0, 200, 255, 0.03);
+}
+.onb-firstmove-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.onb-firstmove-qa {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-left: 2px solid rgba(0, 255, 65, 0.25);
+}
+.onb-firstmove-qa-you {
+  color: rgba(0, 255, 65, 0.85);
+  border-left-color: rgba(0, 255, 65, 0.6);
+}
+.onb-firstmove-qa-team {
+  color: rgba(0, 200, 255, 0.95);
+  border-left-color: rgba(0, 200, 255, 0.6);
+  background: rgba(0, 200, 255, 0.04);
+}
+.onb-firstmove-qa-head {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  opacity: 0.7;
+}
+.onb-firstmove-qa-head-fail { color: rgba(255, 80, 80, 0.85); }
+.onb-firstmove-qa-revised {
+  color: rgba(255, 170, 0, 0.95);
+  margin-left: 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.onb-firstmove-discuss-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.onb-btn-discuss {
+  border-color: rgba(0, 200, 255, 0.7);
+  color: rgba(0, 200, 255, 0.95);
+}
+.onb-btn-discuss:hover:not(:disabled) {
+  background: rgba(0, 200, 255, 0.08);
+}
 .onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
 
 /* Free-form directive input shown when the template staged 0 drafts

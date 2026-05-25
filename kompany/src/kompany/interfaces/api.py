@@ -898,6 +898,27 @@ def post_propose_first_directives(
     return engine.propose_first_directives(force_heuristic=force)
 
 
+class _DiscussFirstDirectivesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
+
+
+@app.post("/onboarding/discuss_first_directives")
+def post_discuss_first_directives(
+    req: _DiscussFirstDirectivesRequest,
+) -> dict[str, Any]:
+    """Founder Q&A on the current first-week directives.
+
+    Runs ONE CEO LLM call that takes (a) the founder's question and
+    (b) the current draft directives; returns the CEO's answer and
+    optionally a revised directive list. The frontend stacks each
+    Q&A pair below the cards; when ``directives_changed=true`` it
+    re-renders the cards in place.
+    """
+    engine = get_engine()
+    return engine.discuss_first_directives(req.question)
+
+
 # ---------------------------------------------------------------------------
 # Company glossary (glossary-and-drift-detection task 05-19)
 # ---------------------------------------------------------------------------

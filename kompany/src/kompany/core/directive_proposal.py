@@ -29,18 +29,65 @@ from kompany.state.targets import get_state as get_targets_state
 
 
 class _ProposedDirective(BaseModel):
-    """One first-week directive the team recommends."""
+    """One first-week directive the team recommends.
+
+    Includes the concrete week plan + success metric + cost estimate
+    so the founder picks with enough information to decide. Bare
+    title + one-line rationale is too abstract for a founder who
+    doesn't know the domain (the whole point of paying for the AI
+    team is they spell out the WHAT and HOW)."""
 
     title: str = Field(min_length=4, max_length=140)
     rationale: str = Field(min_length=10, max_length=600)
     proposer_role: str = Field(
         default="ceo",
-        description="Which C-suite role led this proposal: ceo / cro / cpo.",
+        description="Which C-suite role led this proposal: ceo / cro / cpo / cmo / cfo.",
+    )
+    week_plan: list[str] = Field(
+        default_factory=list,
+        description=(
+            "3-5 short bullets describing what gets done day-by-day. "
+            "Concrete enough that the founder could start tomorrow."
+        ),
+    )
+    success_metric: str = Field(
+        default="",
+        max_length=240,
+        description=(
+            "One sentence naming the measurable outcome that decides "
+            "whether this week succeeded."
+        ),
+    )
+    expected_cost_usd: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Rough USD spend this directive needs (ad spend, tools, "
+            "subscriptions). 0.0 = no monetary cost beyond LLM tokens."
+        ),
+    )
+    other_agents_involved: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Beyond the proposer, which other C-suite or subagent "
+            "roles will collaborate. Lower-case role keys."
+        ),
     )
 
 
 class _ProposedDirectiveList(BaseModel):
     directives: list[_ProposedDirective] = Field(min_length=2, max_length=4)
+
+
+class _DiscussionResponse(BaseModel):
+    """CEO's reply to a founder's follow-up question.
+
+    May optionally include a refined directive list; when present, the
+    engine replaces the old drafts with the new ones."""
+
+    answer: str = Field(min_length=10, max_length=2000)
+    directives_changed: bool = False
+    directives: list[_ProposedDirective] | None = None
 
 
 _PROMPT_TEMPLATE = """The founder has just agreed to these targets for the company:
@@ -59,19 +106,65 @@ on the targets. **You are NOT asking the founder what to do next** —
 they're a solo founder who hired you precisely so you'd design the plan.
 
 Propose exactly THREE first-week directives the founder should pick
-ONE of to start. Each directive must:
+ONE of to start. Each directive must include ALL fields below — bare
+titles and one-line rationales are not enough for a founder who can't
+evaluate the abstract idea against their own context.
 
-- be a concrete, single-week, single-owner action (not a quarter-long
-  initiative);
-- cite which C-suite role proposed it (CEO / CRO / CPO / CMO);
-- give a one-sentence rationale tied to the agreed budget + deadline
-  (e.g. "needed to validate ICP before week-2 spend" or "highest
-  expected ROI per dollar this week");
-- be diverse — at least one should be cheap/fast (validation), one
-  should move money toward the revenue target, one should reduce
-  unknowns about the customer.
+Required fields per directive:
 
-Format as the structured ClaimList schema.
+  - title:               single sentence, ≤ 140 chars, concrete (not "build
+                         marketing strategy" — say "ship landing page +
+                         capture 50 waitlist signups")
+  - rationale:           why THIS move now, tied to budget + deadline
+                         + agreed targets. 2-3 sentences.
+  - proposer_role:       CEO / CRO / CPO / CMO / CFO
+  - week_plan:           3-5 day-level bullets ("Mon: write copy",
+                         "Tue: deploy", ...). Concrete enough to start
+                         tomorrow.
+  - success_metric:      one sentence naming the measurable outcome that
+                         decides this week succeeded (e.g. "≥30 waitlist
+                         signups", "5 customer interview write-ups",
+                         "Stripe sandbox processes test charge").
+  - expected_cost_usd:   rough USD spend beyond LLM tokens (ad spend,
+                         tools, subscriptions). 0 if none.
+  - other_agents_involved: lower-case list of OTHER roles collaborating
+                         (e.g. ["cto", "cmo"]).
+
+Make the three diverse: at least one cheap-fast validation move, one
+move that pushes money toward the revenue target, one that reduces a
+customer / ICP unknown.
+"""
+
+
+_DISCUSSION_PROMPT_TEMPLATE = """You proposed these first-week directives to the founder:
+
+{existing_directives}
+
+The founder is asking a follow-up question before picking:
+
+  "{question}"
+
+Reply with:
+
+  - answer: 2-5 sentences directly addressing the founder's question.
+    Speak as the CEO. Reference the current 3 directives when relevant.
+
+  - directives_changed: true ONLY if the founder's question or new
+    information genuinely changed your recommendation. Don't flip
+    on a whim; the team already debated this.
+
+  - directives: if (and only if) directives_changed == true, supply
+    the NEW list of 2-4 directives in the same schema as before
+    (title + rationale + proposer_role + week_plan + success_metric
+    + expected_cost_usd + other_agents_involved). Otherwise omit.
+
+Context — the founder's agreed targets:
+
+  Initial budget   : ${initial_budget:,.2f} USD
+  Revenue target   : ${revenue_target:,.2f} USD
+  Customer target  : {customer_target}
+  Deadline         : {deadline}
+  Company goal     : {company_goal}
 """
 
 
@@ -176,6 +269,137 @@ class DirectiveProposalMixin:
             "provider": provider,
         }
 
+    def discuss_first_directives(self, question: str) -> dict[str, Any]:
+        """Founder follow-up Q&A on the current first-week directives.
+
+        Loads agreed_targets + the current draft directives, runs ONE
+        CEO LLM call, returns ``{ status, answer, directives_changed,
+        directives, error_code, error_message, provider }``.
+
+        When the CEO decides the question warrants a revised plan
+        (``directives_changed=True``), the existing drafts are deleted
+        and the new ones persisted with source
+        ``team_proposal_first_week_revised`` so the timeline shows the
+        founder's Q&A triggered the change.
+        """
+        provider = self._active_provider_name()
+
+        question = (question or "").strip()
+        if not question:
+            return {
+                "status": "team_failed",
+                "answer": "",
+                "directives_changed": False,
+                "directives": [],
+                "error_code": "empty_question",
+                "error_message": "Question is empty.",
+                "provider": provider,
+            }
+
+        agreed = get_targets_state(self.db, "agreed")
+        if agreed is None:
+            return {
+                "status": "no_targets",
+                "answer": "",
+                "directives_changed": False,
+                "directives": [],
+                "error_code": "no_targets",
+                "error_message": "Agreed targets not set; complete the team review first.",
+                "provider": provider,
+            }
+        existing = self._existing_draft_projects()
+        if not existing:
+            return {
+                "status": "no_directives",
+                "answer": "",
+                "directives_changed": False,
+                "directives": [],
+                "error_code": "no_directives",
+                "error_message": "No draft directives to discuss yet.",
+                "provider": provider,
+            }
+
+        try:
+            ceo = self.registry.get(
+                "ceo", company_state=self.get_company_state()
+            )
+            existing_block = "\n".join(
+                f"  {i+1}. [{(d.get('proposer_role') or 'ceo').upper()}] "
+                f"{d['name']} — {d.get('rationale','')}"
+                for i, d in enumerate(existing)
+            )
+            prompt = _DISCUSSION_PROMPT_TEMPLATE.format(
+                existing_directives=existing_block,
+                question=question,
+                initial_budget=float(agreed.initial_budget or 0),
+                revenue_target=float(agreed.revenue_target or 0),
+                customer_target=(
+                    "not set"
+                    if agreed.customer_target is None
+                    else str(agreed.customer_target)
+                ),
+                deadline=str(agreed.deadline or "not set"),
+                company_goal=self.settings.company_goal or "(none provided)",
+            )
+            resp = ceo.call_structured(
+                prompt=prompt,
+                output_schema=_DiscussionResponse,
+                max_tokens=1200,
+                action_type="first_directive_discussion",
+            )
+        except Exception as exc:  # noqa: BLE001
+            from kompany.interfaces.api import _classify_ping_error
+
+            detail = f"{type(exc).__name__}: {exc}"
+            return {
+                "status": "team_failed",
+                "answer": "",
+                "directives_changed": False,
+                "directives": [],
+                "error_code": _classify_ping_error(detail),
+                "error_message": detail,
+                "provider": provider,
+            }
+
+        parsed = getattr(resp, "parsed", None)
+        answer = (getattr(parsed, "answer", "") or "").strip()
+        changed = bool(getattr(parsed, "directives_changed", False))
+        new_directives_raw = list(getattr(parsed, "directives", []) or [])
+
+        if changed and new_directives_raw:
+            # Replace the old drafts.
+            self.db.execute("DELETE FROM projects WHERE status = 'draft'")
+            self.db.commit()
+            new_dicts = [self._directive_to_dict(d) for d in new_directives_raw[:3]]
+            persisted = self._persist_proposed_directives(
+                new_dicts, source="team_proposal_first_week_revised"
+            )
+        else:
+            persisted = existing
+            changed = False
+
+        try:
+            self.audit.record(
+                event_type="first_directive_discussion",
+                action="Founder asked a follow-up about first directives",
+                detail={
+                    "question": question[:200],
+                    "directives_changed": changed,
+                },
+            )
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+
+        return {
+            "status": "ok",
+            "answer": answer,
+            "directives_changed": changed,
+            "directives": persisted,
+            "error_code": None,
+            "error_message": None,
+            "provider": provider,
+        }
+
     def _active_provider_name(self) -> str:
         """Best-effort guess at which provider name is active for
         labelling errors. Reads vault-loaded settings; falls back to
@@ -221,47 +445,93 @@ class DirectiveProposalMixin:
             raise ValueError("LLM returned zero directives")
         out: list[dict[str, Any]] = []
         for d in items[:3]:
-            out.append({
-                "title": d.title,
-                "rationale": d.rationale,
-                "proposer_role": (d.proposer_role or "ceo").lower(),
-            })
+            out.append(self._directive_to_dict(d))
         return out
+
+    @staticmethod
+    def _directive_to_dict(d) -> dict[str, Any]:
+        """Coerce a ``_ProposedDirective`` Pydantic instance to the plain
+        dict shape the rest of the engine + UI work with."""
+        return {
+            "title": getattr(d, "title", "") or "",
+            "rationale": getattr(d, "rationale", "") or "",
+            "proposer_role": (getattr(d, "proposer_role", "") or "ceo").lower(),
+            "week_plan": list(getattr(d, "week_plan", []) or []),
+            "success_metric": getattr(d, "success_metric", "") or "",
+            "expected_cost_usd": float(getattr(d, "expected_cost_usd", 0.0) or 0.0),
+            "other_agents_involved": [
+                str(r).lower()
+                for r in (getattr(d, "other_agents_involved", []) or [])
+            ],
+        }
 
     def _heuristic_first_directives(self, agreed) -> list[dict[str, Any]]:
         """Three safe defaults when LLM is unavailable / disabled.
 
         Each is intentionally generic enough to apply to any company
         shape; the LLM path is what produces founder-specific wording.
+        Fields match the LLM schema 1:1 so the UI renders them
+        identically — but the source marker upstream tells consumers
+        these are starter-pack seeds, not real team output.
         """
         rev = float(agreed.revenue_target or 0)
         return [
             {
                 "title": "Run 5 customer interviews to lock the ICP",
                 "rationale": (
-                    "Cheapest unknown-reducing move this week. CV asks "
-                    "every interviewee the same 4 questions; CRO writes "
-                    "the discovery script. ~$0 in tools, ~5 hours."
+                    "Cheapest unknown-reducing move this week. Without "
+                    "a sharp ICP, every later move spends money guessing. "
+                    "5 calls reveal whether the founder's hypothesis "
+                    "matches the market's pain."
                 ),
                 "proposer_role": "cpo",
+                "week_plan": [
+                    "Mon: CRO drafts a 4-question discovery script",
+                    "Tue-Wed: founder books + runs 3 calls",
+                    "Thu: runs 2 more calls; transcripts collected",
+                    "Fri: CV writes a 1-page ICP synthesis",
+                ],
+                "success_metric": "5 interview write-ups + one ICP statement the team agrees with",
+                "expected_cost_usd": 0.0,
+                "other_agents_involved": ["cro", "cv"],
             },
             {
                 "title": "Ship a landing page + waitlist (1 week)",
                 "rationale": (
-                    "CMO writes copy from the ICP, CTO deploys, CRO sets "
-                    "up the lead-capture funnel. Concrete artefact that "
-                    f"starts moving toward the ${rev:,.0f} revenue target."
+                    f"Concrete artefact starts moving toward the ${rev:,.0f} "
+                    "revenue target. Even no purchases this week, a "
+                    "waitlist gives the team an audience to test pricing + "
+                    "messaging against in week 2."
                 ),
                 "proposer_role": "cmo",
+                "week_plan": [
+                    "Mon: CMO writes copy from ICP / value prop",
+                    "Tue: CTO deploys static page (Vercel / Netlify)",
+                    "Wed: CRO wires form → email capture",
+                    "Thu: founder shares to 3 communities + LinkedIn",
+                    "Fri: measure signup rate, log refusals",
+                ],
+                "success_metric": "≥ 30 waitlist signups OR a clear refusal pattern documented",
+                "expected_cost_usd": 20.0,
+                "other_agents_involved": ["cto", "cro"],
             },
             {
                 "title": "Define pricing + payment rail (Stripe sandbox)",
                 "rationale": (
-                    "CFO sizes the unit economics, CRO picks the pricing "
-                    "tiers, CTO wires the Stripe sandbox. No real money "
-                    "moves yet — clears the path for first paid customer."
+                    "Clears the path for first paid customer without "
+                    "committing real money. CFO sizes the unit economics "
+                    "so pricing isn't pulled out of thin air."
                 ),
                 "proposer_role": "cro",
+                "week_plan": [
+                    "Mon: CFO models 3 pricing tiers vs cost-of-delivery",
+                    "Tue: CRO picks recommended tier with rationale",
+                    "Wed-Thu: CTO wires Stripe sandbox + test checkout",
+                    "Fri: end-to-end dry run with founder as customer",
+                ],
+                "success_metric": "Stripe sandbox processes a test charge; pricing memo signed off",
+                "expected_cost_usd": 0.0,
+                "other_agents_involved": ["cfo", "cto"],
             },
         ]
 
@@ -287,9 +557,13 @@ class DirectiveProposalMixin:
                     "suggested_directive": d["title"],
                     "rationale": d.get("rationale", ""),
                     "proposer_role": d.get("proposer_role", "ceo"),
+                    "week_plan": d.get("week_plan", []) or [],
+                    "success_metric": d.get("success_metric", ""),
+                    "expected_cost_usd": float(d.get("expected_cost_usd", 0.0) or 0.0),
+                    "other_agents_involved": d.get("other_agents_involved", []) or [],
                     "source": source,
                 },
-                assigned_agents=[],
+                assigned_agents=list(d.get("other_agents_involved", []) or []),
             )
             # Reuse the Templates helper's raw insert so the draft row
             # ends up with status='draft' just like template-staged
@@ -303,6 +577,10 @@ class DirectiveProposalMixin:
                 "status": "draft",
                 "rationale": d.get("rationale", ""),
                 "proposer_role": d.get("proposer_role", "ceo"),
+                "week_plan": d.get("week_plan", []) or [],
+                "success_metric": d.get("success_metric", ""),
+                "expected_cost_usd": float(d.get("expected_cost_usd", 0.0) or 0.0),
+                "other_agents_involved": d.get("other_agents_involved", []) or [],
             })
 
         # Audit event so the action is visible in the timeline.
@@ -343,5 +621,9 @@ class DirectiveProposalMixin:
                 "status": "draft",
                 "rationale": plan.get("rationale", ""),
                 "proposer_role": plan.get("proposer_role", ""),
+                "week_plan": plan.get("week_plan", []) or [],
+                "success_metric": plan.get("success_metric", ""),
+                "expected_cost_usd": float(plan.get("expected_cost_usd", 0.0) or 0.0),
+                "other_agents_involved": plan.get("other_agents_involved", []) or [],
             })
         return out
