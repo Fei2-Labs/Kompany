@@ -785,7 +785,50 @@ body.onboarding-body { padding-bottom: 40px; }
  * counter-proposal textarea + SEND TO TEAM button. Without this, both
  * showed during initial mount even though counterBox.hidden=true. */
 .fr-counter[hidden] { display: none; }
-.fr-counter-busy { opacity: 0.7; }
+.fr-counter-busy {
+  /* Pulsing amber glow so the wait is unambiguous — opacity 0.7 alone
+   * was too subtle to read as "in progress." */
+  animation: fr-counter-pulse 1.4s ease-in-out infinite;
+}
+@keyframes fr-counter-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 170, 0, 0.0); }
+  50%      { box-shadow: 0 0 12px 2px rgba(255, 170, 0, 0.4); }
+}
+.fr-counter-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 170, 0, 0.95);
+  padding: 4px 0;
+}
+.fr-counter-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffaa00;
+  animation: fr-counter-spinner-blink 0.9s ease-in-out infinite;
+}
+@keyframes fr-counter-spinner-blink {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+/* Animated dots appended to the status text. CSS-only — no JS interval. */
+.fr-counter-status-text::after {
+  content: "";
+  display: inline-block;
+  width: 1.5em;
+  text-align: left;
+  animation: fr-counter-dots 1.2s steps(4, end) infinite;
+}
+@keyframes fr-counter-dots {
+  0%   { content: ""; }
+  25%  { content: "."; }
+  50%  { content: ".."; }
+  75%  { content: "..."; }
+  100% { content: ""; }
+}
 .fr-counter-text {
   background: rgba(0, 0, 0, 0.5);
   color: rgba(0, 255, 65, 0.9);

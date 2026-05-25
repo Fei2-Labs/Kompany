@@ -417,12 +417,26 @@ export function mountFeasibilityReview(host, options) {
   counterText.placeholder =
     "I have part-time consulting income covering my burn. " +
     "Treat $50 as a project-only budget for tools/ads.";
-  const counterSend = makeBtn("[ SEND TO TEAM ]", "fr-btn-send", async () => {
+  // Status line displayed during the counter LLM debate so the founder
+  // sees the wait is intentional (the call runs a full 3-agent debate,
+  // 30-60s). Hidden until SEND TO TEAM fires.
+  const counterStatus = document.createElement("div");
+  counterStatus.className = "fr-counter-status";
+  counterStatus.hidden = true;
+  counterStatus.innerHTML =
+    '<span class="fr-counter-spinner"></span>' +
+    '<span class="fr-counter-status-text">team is rethinking with your counter — 30-60s</span>';
+
+  const SEND_LABEL = "[ ▸ SEND TO TEAM ]";
+  const counterSend = makeBtn(SEND_LABEL, "fr-btn-send", async () => {
     const text = (counterText.value || "").trim();
     if (!text) return;
     counterSend.disabled = true;
     counterBtn.disabled = true;
+    counterText.disabled = true;
     counterBox.classList.add("fr-counter-busy");
+    counterStatus.hidden = false;
+    counterSend.textContent = "[ ▸ team rethinking… ]";
     try {
       if (opts.onCounter) {
         const newApproval = await opts.onCounter(text);
@@ -438,10 +452,14 @@ export function mountFeasibilityReview(host, options) {
     } finally {
       counterSend.disabled = false;
       counterBtn.disabled = false;
+      counterText.disabled = false;
       counterBox.classList.remove("fr-counter-busy");
+      counterStatus.hidden = true;
+      counterSend.textContent = SEND_LABEL;
     }
   });
   counterBox.appendChild(counterText);
+  counterBox.appendChild(counterStatus);
   counterBox.appendChild(counterSend);
   host.appendChild(counterBox);
 
