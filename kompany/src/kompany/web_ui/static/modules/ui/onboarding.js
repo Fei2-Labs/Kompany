@@ -1182,18 +1182,48 @@ function renderReviewFailureBanner(host, message) {
 
 async function renderFirstMove() {
   setStatus("first move");
+
+  // Resolve draft projects FIRST so the header reflects the real count.
+  // The mission step's submit handler pre-populated state.draft_project_ids
+  // via fetchDraftProjects(); refresh if missing or on resume.
+  let projects = state.draft_project_ids;
+  if (!projects || projects.length === 0) {
+    projects = await fetchDraftProjects();
+    state.draft_project_ids = projects;
+  }
+  const projectCount = (projects || []).length;
+  const hasStaged = projectCount > 0;
+
   const frame = document.createElement("div");
   frame.className = "frame onb-firstmove";
   frame.dataset.label = "FIRST_MOVE // 05.directive";
+
+  const headerCopy = hasStaged
+    ? `${projectCount} directive${projectCount === 1 ? "" : "s"} staged. Pick one to start:`
+    : "No directives pre-staged for this template. Type your first directive:";
+
+  // Two-mode UI:
+  //   - hasStaged: render the existing cards-list + START SELECTED
+  //   - !hasStaged: render a textarea + START. SUBMIT calls /directive
+  //     which routes through the CEO classifier and creates the project
+  //     server-side; the founder doesn't have to live with "no directives
+  //     yet — go to the dashboard."
   frame.innerHTML = `
     <div class="onb-firstmove-head">
-      <span>3 directives staged. Pick one to start:</span>
+      <span>${escapeHtml(headerCopy)}</span>
       <button type="button" class="onb-link-escape" id="onb-firstmove-skip">[ ⨯ skip — show me empty dashboard ]</button>
     </div>
-    <div class="onb-firstmove-list" id="onb-firstmove-list"></div>
+    ${hasStaged
+      ? '<div class="onb-firstmove-list" id="onb-firstmove-list"></div>'
+      : `<textarea class="onb-firstmove-input" id="onb-firstmove-input"
+                   rows="3"
+                   placeholder="e.g. Launch a landing page and start collecting waitlist signups."
+                   autocomplete="off"
+                   spellcheck="false"></textarea>
+         <p class="onb-firstmove-hint">CEO will classify this and assemble the team. Costs you ~$0.05-0.20 in LLM spend.</p>`}
     <div class="onb-actions">
       <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
-      <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START SELECTED ]</button>
+      <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START ${hasStaged ? "SELECTED" : ""} ]</button>
     </div>
   `;
   stepHost.appendChild(frame);
@@ -1205,59 +1235,88 @@ async function renderFirstMove() {
     goto("provisioning");
   });
 
-  // Resolve draft projects from server. If none came back from the
-  // earlier fetch, hit /projects/all (we don't expose one yet) — fall
-  // back to the manifest's suggested_directives label list with a
-  // disabled state when ids aren't known.
-  let projects = state.draft_project_ids;
-  if (!projects || projects.length === 0) {
-    projects = await fetchDraftProjects();
-    state.draft_project_ids = projects;
-  }
-
-  const listEl = document.getElementById("onb-firstmove-list");
   const startBtn = document.getElementById("onb-firstmove-start");
-  let selectedId = null;
 
-  if (!projects || projects.length === 0) {
-    // Graceful empty state — onboarding still works.
-    listEl.innerHTML = `<div class="onb-empty">No directives staged yet. Skip to the dashboard and they'll appear in inbox.</div>`;
+  if (hasStaged) {
+    const listEl = document.getElementById("onb-firstmove-list");
+    let selectedId = null;
+    for (const p of projects) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "onb-firstmove-card";
+      card.dataset.projectId = p.id;
+      card.innerHTML = `
+        <div class="onb-firstmove-title">▸ ${escapeHtml(p.name)}</div>
+        <div class="onb-firstmove-meta">project: <code>${escapeHtml((p.id || '').slice(0, 12))}</code></div>
+      `;
+      card.addEventListener("click", () => {
+        listEl.querySelectorAll(".onb-firstmove-card").forEach((c) => c.classList.remove("selected"));
+        card.classList.add("selected");
+        selectedId = p.id;
+        startBtn.disabled = false;
+      });
+      listEl.appendChild(card);
+    }
+    startBtn.addEventListener("click", async () => {
+      if (!selectedId) return;
+      const originalLabel = startBtn.textContent;
+      startBtn.disabled = true;
+      startBtn.textContent = "[ ▸ activating… ]";
+      try {
+        const res = await fetch(`/projects/${encodeURIComponent(selectedId)}/activate`, { method: "POST" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        state.data.first_directive_project_id = selectedId;
+        saveDraft();
+        goto("provisioning");
+      } catch (err) {
+        startBtn.disabled = false;
+        startBtn.textContent = originalLabel;
+        showError("activate failed: " + err.message);
+      }
+    });
     return;
   }
 
-  for (const p of projects) {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "onb-firstmove-card";
-    card.dataset.projectId = p.id;
-    card.innerHTML = `
-      <div class="onb-firstmove-title">▸ ${escapeHtml(p.name)}</div>
-      <div class="onb-firstmove-meta">project: <code>${escapeHtml((p.id || '').slice(0, 12))}</code></div>
-    `;
-    card.addEventListener("click", () => {
-      listEl.querySelectorAll(".onb-firstmove-card").forEach((c) => c.classList.remove("selected"));
-      card.classList.add("selected");
-      selectedId = p.id;
-      startBtn.disabled = false;
-    });
-    listEl.appendChild(card);
-  }
-
+  // Empty-staged branch: free-form directive submission.
+  const inputEl = document.getElementById("onb-firstmove-input");
+  inputEl.addEventListener("input", () => {
+    startBtn.disabled = inputEl.value.trim().length === 0;
+  });
   startBtn.addEventListener("click", async () => {
-    if (!selectedId) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+    const originalLabel = startBtn.textContent;
     startBtn.disabled = true;
-    startBtn.textContent = "[ ▸ activating... ]";
+    inputEl.disabled = true;
+    const startedAt = Date.now();
+    const fmtSec = (s) => (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
+    startBtn.textContent = "[ ▸ CEO classifying… 0s ]";
+    const timer = setInterval(() => {
+      startBtn.textContent = `[ ▸ CEO classifying… ${fmtSec(Math.floor((Date.now()-startedAt)/1000))} ]`;
+    }, 1000);
     try {
-      const res = await fetch(`/projects/${encodeURIComponent(selectedId)}/activate`, { method: "POST" });
+      const res = await fetch("/directive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      state.data.first_directive_project_id = selectedId;
+      const result = await res.json();
+      const newProjectId =
+        result.project_id || result.directive_id ||
+        (result.project && result.project.id) || null;
+      if (newProjectId) state.data.first_directive_project_id = newProjectId;
       saveDraft();
       goto("provisioning");
     } catch (err) {
+      clearInterval(timer);
       startBtn.disabled = false;
-      startBtn.textContent = "[ ▸ START SELECTED ]";
-      showError("activate failed: " + err.message);
+      inputEl.disabled = false;
+      startBtn.textContent = originalLabel;
+      showError("directive failed: " + err.message);
+      return;
     }
+    clearInterval(timer);
   });
 }
 

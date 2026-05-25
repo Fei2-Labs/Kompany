@@ -1110,6 +1110,37 @@ body.onboarding-body { padding-bottom: 40px; }
 .onb-firstmove-meta { font-size: 11px; color: rgba(0, 255, 65, 0.55); margin-top: 4px; }
 .onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
 
+/* Free-form directive input shown when the template staged 0 drafts
+ * (e.g. the blank template). The founder types their first directive
+ * and hits START — CEO classifier + project creation happens server-side. */
+.onb-firstmove-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 255, 65, 0.95);
+  border: 1px solid rgba(0, 255, 65, 0.5);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  min-height: 60px;
+  resize: vertical;
+  margin-bottom: 6px;
+}
+.onb-firstmove-input:focus {
+  outline: none;
+  border-color: #00ff41;
+  box-shadow: 0 0 6px rgba(0, 255, 65, 0.25);
+}
+.onb-firstmove-input::placeholder {
+  color: rgba(0, 255, 65, 0.35);
+  font-style: italic;
+}
+.onb-firstmove-hint {
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.55);
+  margin: 0 0 12px 0;
+  letter-spacing: 0.02em;
+}
+
 /* Step 6 — Provisioning */
 .onb-provision-lines { display: flex; flex-direction: column; gap: 2px; font-family: inherit; font-size: 12px; }
 .onb-provision-line { color: #00ff41; }
