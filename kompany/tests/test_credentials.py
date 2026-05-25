@@ -136,7 +136,11 @@ def test_env_credentials_override_vault_credentials(tmp_path, monkeypatch):
     assert engine.settings.mobile_remote_token == "env-mobile-token"
 
 
-def test_resolve_vault_key_prefers_keychain(monkeypatch):
+def test_resolve_vault_key_env_overrides_keychain(monkeypatch):
+    """env_key is a deliberate override — when the caller passes it,
+    it wins even if keychain has a different value. Previous behavior
+    silently ignored the env when keychain was populated, which made
+    KOMPANY_VAULT_KEY=... unreliable for tests + scripted setups."""
     monkeypatch.setattr(
         "kompany.state.vault_keys.get_vault_key_from_keychain",
         lambda service, account: "keychain-key",
@@ -144,8 +148,10 @@ def test_resolve_vault_key_prefers_keychain(monkeypatch):
 
     resolved, source = resolve_vault_key("env-key")
 
-    assert resolved == "keychain-key"
-    assert source == "keychain"
+    assert resolved == "env-key"
+    # "env-key" isn't a valid Fernet key, so source stays plain "env"
+    # with no persistence side effect.
+    assert source == "env"
 
 
 def test_resolve_vault_key_falls_back_to_env_without_keychain(monkeypatch):

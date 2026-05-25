@@ -130,9 +130,10 @@ class KompanyEngine(TargetReviewMixin):
                     keychain_account=getattr(
                         self.settings, "vault_keychain_account", "vault-master-key"
                     ),
+                    data_dir=self.settings.data_dir,
                 )
                 self.settings.vault_key = vault_key
-            except Exception:  # noqa: BLE001 — first-boot keychain miss is fine
+            except Exception:  # noqa: BLE001 — first-boot resolution miss is fine
                 pass
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
@@ -2174,9 +2175,10 @@ class KompanyEngine(TargetReviewMixin):
                     keychain_account=getattr(
                         self.settings, "vault_keychain_account", "vault-master-key"
                     ),
+                    data_dir=self.settings.data_dir,
                 )
                 self.settings.vault_key = vault_key
-            except Exception:  # noqa: BLE001 — first-boot keychain miss is fine
+            except Exception:  # noqa: BLE001 — first-boot resolution miss is fine
                 pass
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()

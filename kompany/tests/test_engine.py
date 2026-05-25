@@ -1051,9 +1051,10 @@ def test_engine_rotate_credential_key_returns_metadata_and_audits_no_secret(engi
     assert "ciphertext" not in str(events)
 
 
-def test_engine_resolves_keychain_vault_key_before_loading_credentials(engine, monkeypatch):
-    from kompany.state.vault_keys import resolve_vault_key
-
+def test_engine_resolves_vault_key_env_wins_over_keychain(engine, monkeypatch):
+    """env vault_key wins over keychain. Previous behavior silently
+    masked the env with whatever keychain returned, which made
+    KOMPANY_VAULT_KEY unreliable for scripted setups."""
     monkeypatch.setattr(
         "kompany.state.vault_keys.get_vault_key_from_keychain",
         lambda service, account: "keychain-key",
@@ -1061,7 +1062,7 @@ def test_engine_resolves_keychain_vault_key_before_loading_credentials(engine, m
     engine.settings.vault_key = "env-key"
     engine._resolve_vault_key()
 
-    assert engine.settings.vault_key == "keychain-key"
+    assert engine.settings.vault_key == "env-key"
 
 
 def test_remote_command_denies_unauthorized_telegram_chat(engine):
