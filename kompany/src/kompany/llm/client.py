@@ -129,23 +129,24 @@ class LLMClient:
 
         Resolution order:
           1. If the operator wired a custom OpenAI-compatible endpoint
-             (both ``custom_base_url`` AND ``custom_api_key`` set), route
-             through it regardless of the model name. Custom endpoints
-             commonly proxy upstream ids (gpt-5.5, claude-sonnet-4,
-             gemini-2-flash, ...); the operator's intent when they
-             provided a base_url is "send everything through THIS
-             endpoint."
+             (``custom_base_url`` set), route through it regardless of
+             the model name AND regardless of whether custom_api_key
+             is currently loaded on the in-memory settings. Custom
+             endpoints commonly proxy upstream ids (gpt-5.5,
+             claude-sonnet-4, gemini-2-flash, ...); the operator's
+             intent when they provided a base_url is "send everything
+             through THIS endpoint." If the api_key is missing the
+             OpenAI SDK will surface a clear 401 against the right
+             endpoint — that's a fixable user-side issue, not a reason
+             to silently misroute to api.openai.com.
           2. Otherwise, infer from the model name prefix.
-          3. Final fallback: custom (if only base_url is set) or
-             Anthropic.
+          3. Final fallback: Anthropic.
         """
-        if self.settings.custom_base_url and self.settings.custom_api_key:
+        if self.settings.custom_base_url:
             return Provider.CUSTOM
         detected = detect_provider(model)
         if detected is not None:
             return detected
-        if self.settings.custom_base_url:
-            return Provider.CUSTOM
         return Provider.ANTHROPIC
 
     def _is_quota_error(self, error: Exception) -> bool:

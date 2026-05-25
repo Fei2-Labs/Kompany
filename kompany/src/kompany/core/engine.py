@@ -121,6 +121,28 @@ class KompanyEngine:
         self.checkpoints = CheckpointStore(self.db)
         self.runtime = RuntimeStateStore(self.db)
         self.remote_replay = RemoteReplayStore(self.db)
+        # Resolve the vault key BEFORE constructing the store so the
+        # credential decrypt path works on first call. Without this,
+        # Tauri sidecar (which doesn't get KOMPANY_VAULT_KEY in env)
+        # boots with vault_key="" → _apply_vault_credentials silently
+        # no-ops → custom_api_key + custom_base_url stay empty on every
+        # subsequent engine instance → LLMClient routes via model-name
+        # prefix (gpt-5.5 → openai.com) and the custom-provider key
+        # 401s. Keychain lookup carries the key across sidecar restarts.
+        if not self.settings.vault_key:
+            try:
+                vault_key, _source = resolve_vault_key(
+                    self.settings.vault_key,
+                    keychain_service=getattr(
+                        self.settings, "vault_keychain_service", "kompany"
+                    ),
+                    keychain_account=getattr(
+                        self.settings, "vault_keychain_account", "vault-master-key"
+                    ),
+                )
+                self.settings.vault_key = vault_key
+            except Exception:  # noqa: BLE001 — first-boot keychain miss is fine
+                pass
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
@@ -2143,6 +2165,28 @@ class KompanyEngine:
         self.checkpoints = CheckpointStore(self.db)
         self.runtime = RuntimeStateStore(self.db)
         self.remote_replay = RemoteReplayStore(self.db)
+        # Resolve the vault key BEFORE constructing the store so the
+        # credential decrypt path works on first call. Without this,
+        # Tauri sidecar (which doesn't get KOMPANY_VAULT_KEY in env)
+        # boots with vault_key="" → _apply_vault_credentials silently
+        # no-ops → custom_api_key + custom_base_url stay empty on every
+        # subsequent engine instance → LLMClient routes via model-name
+        # prefix (gpt-5.5 → openai.com) and the custom-provider key
+        # 401s. Keychain lookup carries the key across sidecar restarts.
+        if not self.settings.vault_key:
+            try:
+                vault_key, _source = resolve_vault_key(
+                    self.settings.vault_key,
+                    keychain_service=getattr(
+                        self.settings, "vault_keychain_service", "kompany"
+                    ),
+                    keychain_account=getattr(
+                        self.settings, "vault_keychain_account", "vault-master-key"
+                    ),
+                )
+                self.settings.vault_key = vault_key
+            except Exception:  # noqa: BLE001 — first-boot keychain miss is fine
+                pass
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
