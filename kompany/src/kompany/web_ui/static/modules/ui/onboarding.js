@@ -820,15 +820,23 @@ async function renderMission() {
     saveDraft();
     // Lock the button + back nav so the founder can't fire duplicate
     // /onboarding/complete requests (the call takes 30-60s: template
-    // apply + LLM feasibility debate). Restore on failure so the
-    // founder can retry; on success goto() re-renders.
+    // apply + LLM feasibility debate). Live timer ticks every second
+    // so the wait reads as "AI working" not "app stuck." Restore on
+    // failure so the founder can retry; on success goto() re-renders.
     const originalLabel = submitBtn.textContent;
     submitBtn.disabled = true;
-    submitBtn.textContent = "[ ▸ submitting team review (30-60s)... ]";
     backBtn.disabled = true;
+    const submitStart = Date.now();
+    const fmtSec = (s) => (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
+    submitBtn.textContent = "[ ▸ team reviewing your targets… 0s ]";
+    const submitTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - submitStart) / 1000);
+      submitBtn.textContent = `[ ▸ team reviewing your targets… ${fmtSec(elapsed)} ]`;
+    }, 1000);
     try {
       await submitOnboarding({ forceReview: wasStale });
     } finally {
+      clearInterval(submitTimer);
       // submitOnboarding navigates to "review" on success and stays
       // on this step on failure (showError already called). Re-enable
       // only when we're still on this step — the goto/render path

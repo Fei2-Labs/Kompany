@@ -44,6 +44,13 @@ function formatUsd(amount) {
   return `$${n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "")}`;
 }
 
+function _formatElapsed(seconds) {
+  if (seconds < 60) return seconds + "s";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
 // ---------------------------------------------------------------------------
 // Diff helper
 // ---------------------------------------------------------------------------
@@ -419,13 +426,22 @@ export function mountFeasibilityReview(host, options) {
     "Treat $50 as a project-only budget for tools/ads.";
   // Status line displayed during the counter LLM debate so the founder
   // sees the wait is intentional (the call runs a full 3-agent debate,
-  // 30-60s). Hidden until SEND TO TEAM fires.
+  // 30-60s). Hidden until SEND TO TEAM fires. The timer span ticks
+  // every second so silence is unmistakable.
   const counterStatus = document.createElement("div");
   counterStatus.className = "fr-counter-status";
   counterStatus.hidden = true;
   counterStatus.innerHTML =
     '<span class="fr-counter-spinner"></span>' +
-    '<span class="fr-counter-status-text">team is rethinking with your counter — 30-60s</span>';
+    '<span class="fr-counter-status-text">team is rethinking with your counter</span> ' +
+    '<span class="fr-counter-timer" id="fr-counter-timer">0s</span>';
+
+  // Where the "completed in Xs" line lands after a successful counter.
+  // Stays visible across renders so the founder remembers what just
+  // happened to their wallet.
+  const counterReceipt = document.createElement("div");
+  counterReceipt.className = "fr-counter-receipt";
+  counterReceipt.hidden = true;
 
   const SEND_LABEL = "[ ▸ SEND TO TEAM ]";
   const counterSend = makeBtn(SEND_LABEL, "fr-btn-send", async () => {
@@ -436,11 +452,24 @@ export function mountFeasibilityReview(host, options) {
     counterText.disabled = true;
     counterBox.classList.add("fr-counter-busy");
     counterStatus.hidden = false;
+    counterReceipt.hidden = true;
     counterSend.textContent = "[ ▸ team rethinking… ]";
+
+    const startedAt = Date.now();
+    const timerEl = counterStatus.querySelector("#fr-counter-timer");
+    if (timerEl) timerEl.textContent = "0s";
+    const timerHandle = setInterval(() => {
+      if (!timerEl) return;
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      timerEl.textContent = elapsed + "s";
+    }, 250);
+
+    let succeeded = false;
     try {
       if (opts.onCounter) {
         const newApproval = await opts.onCounter(text);
         if (newApproval) {
+          succeeded = true;
           // Replace the current view with the new round + diff
           // against the prior payload.
           rerender(newApproval, payload);
@@ -450,17 +479,27 @@ export function mountFeasibilityReview(host, options) {
         }
       }
     } finally {
+      clearInterval(timerHandle);
+      const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
       counterSend.disabled = false;
       counterBtn.disabled = false;
       counterText.disabled = false;
       counterBox.classList.remove("fr-counter-busy");
       counterStatus.hidden = true;
       counterSend.textContent = SEND_LABEL;
+      if (succeeded) {
+        counterReceipt.textContent =
+          "✓ team finished in " + _formatElapsed(elapsed);
+        counterReceipt.hidden = false;
+      }
     }
   });
   counterBox.appendChild(counterText);
   counterBox.appendChild(counterStatus);
   counterBox.appendChild(counterSend);
+  // The completion receipt lives outside counterBox so it stays
+  // visible even after the box closes on success.
+  host.appendChild(counterReceipt);
   host.appendChild(counterBox);
 
   function toggleCounter(open) {
@@ -484,6 +523,18 @@ export function mountFeasibilityReview(host, options) {
     board.meters.forEach((m) => {
       m.input = 0; m.output = 0; m.cost = 0; m.calls = 0; m.lastBalance = null;
     });
+    // Re-seed from the latest round's per_agent_cost snapshot so the
+    // meters show real numbers after a counter-propose run (or any
+    // future rerender). Without this the columns reset to "0 in / 0
+    // out · $0.00" because counter-propose's debate ran server-side
+    // and there are no llm.spend SSE events to catch up the meters.
+    const latestRound =
+      pp && Array.isArray(pp.rounds) && pp.rounds.length
+        ? pp.rounds[pp.rounds.length - 1]
+        : null;
+    if (latestRound && latestRound.per_agent_cost) {
+      board.seedFromRound(latestRound.per_agent_cost);
+    }
     for (const role of ROLES) {
       const { costRow } = renderColumn(
         colsByRole[role.key], role, pp, prevPayloadForDiff || null,
@@ -512,28 +563,6 @@ export function mountFeasibilityReview(host, options) {
     return opts.priorPayload || null;
   }
   rerender(approval, priorFromRounds(payload));
-
-  // Seed cost meters from the per_agent_cost snapshot persisted on the
-  // latest round of the approval payload. The debate ran server-side
-  // before this UI mounted, so no llm.spend SSE events will fire for
-  // it — the meters would otherwise stay at "0 in / 0 out · $0.00"
-  // forever, contradicting the LEDGER chip on the dashboard.
-  const _seedRound =
-    payload && Array.isArray(payload.rounds) && payload.rounds.length
-      ? payload.rounds[payload.rounds.length - 1]
-      : null;
-  if (_seedRound && _seedRound.per_agent_cost) {
-    board.seedFromRound(_seedRound.per_agent_cost);
-    for (const role of ROLES) {
-      const col = colsByRole[role.key];
-      const costRow = col.querySelector(".fr-col-cost");
-      if (costRow) board.meters.get(role.key).renderInto(costRow);
-    }
-    const seedTotal = board.totalCost();
-    if (seedTotal > 0) {
-      total.textContent = `TOTAL THIS REVIEW: ${formatUsd(seedTotal)}`;
-    }
-  }
 
   // SSE wiring for the live cost meters. We only subscribe when the
   // host page has an SSE endpoint mounted (Tauri / browser).

@@ -806,6 +806,23 @@ body.onboarding-body { padding-bottom: 40px; }
  * display:none — re-assert it so counterStatus.hidden=true actually
  * hides the row. Same pattern as .fr-counter[hidden]. */
 .fr-counter-status[hidden] { display: none; }
+.fr-counter-timer {
+  /* Tabular numerics so the "23s" → "24s" tick doesn't shift the
+   * baseline. Amber to match the rest of the busy state. */
+  font-variant-numeric: tabular-nums;
+  color: #ffaa00;
+  font-weight: bold;
+  min-width: 4ch;
+  display: inline-block;
+  text-align: right;
+}
+.fr-counter-receipt {
+  color: rgba(0, 255, 65, 0.85);
+  font-size: 12px;
+  padding: 6px 0;
+  letter-spacing: 0.02em;
+}
+.fr-counter-receipt[hidden] { display: none; }
 .fr-counter-spinner {
   display: inline-block;
   width: 10px;
