@@ -89,10 +89,11 @@ from kompany.state.templates import (
 from kompany.state.tool_authorization import ToolAuthorizationStore
 
 
+from kompany.core.directive_proposal import DirectiveProposalMixin
 from kompany.core.target_review import TargetReviewMixin
 
 
-class KompanyEngine(TargetReviewMixin):
+class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
     """Core engine. All interfaces (CLI, API, MCP, SDK) call this."""
 
     def __init__(self, config_path: str | None = None):

@@ -1183,14 +1183,82 @@ function renderReviewFailureBanner(host, message) {
 async function renderFirstMove() {
   setStatus("first move");
 
-  // Resolve draft projects FIRST so the header reflects the real count.
-  // The mission step's submit handler pre-populated state.draft_project_ids
-  // via fetchDraftProjects(); refresh if missing or on resume.
+  // Step 1: resolve any existing draft projects. These come from either
+  // the template's pre-staged suggested_directives OR a previous team
+  // proposal that was persisted but not yet acted on (idempotent
+  // resume).
   let projects = state.draft_project_ids;
   if (!projects || projects.length === 0) {
     projects = await fetchDraftProjects();
     state.draft_project_ids = projects;
   }
+
+  // Step 2: if zero drafts but the founder has agreed targets, ask the
+  // team to PROPOSE the first three directives. This honors the
+  // contract documented in docs/context/operations.md:60-62 + the
+  // engineering-team-proposes-plan shared memory: solo founders
+  // shouldn't be staring at a blank textarea — the AI C-suite they
+  // hired is meant to design the plan and present it for approval.
+  //
+  // Loading state is the same look as counter-propose (amber spinner,
+  // live timer) so the wait reads as "team thinking" not "stuck."
+  let teamProposalPending = false;
+  let teamProposalElapsed = 0;
+  if ((projects || []).length === 0) {
+    const frame = document.createElement("div");
+    frame.className = "frame onb-firstmove";
+    frame.dataset.label = "FIRST_MOVE // 05.directive";
+    frame.innerHTML = `
+      <div class="onb-firstmove-head">
+        <span>Team is proposing your first-week directives…</span>
+        <button type="button" class="onb-link-escape" id="onb-firstmove-skip">[ ⨯ skip — show me empty dashboard ]</button>
+      </div>
+      <div class="fr-counter-status" id="onb-firstmove-status">
+        <span class="fr-counter-spinner"></span>
+        <span class="fr-counter-status-text">CEO + CRO + CPO are drafting</span>
+        <span class="fr-counter-timer" id="onb-firstmove-timer">0s</span>
+      </div>
+      <div class="onb-actions">
+        <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove" disabled>[ ◂ back to review ]</button>
+      </div>
+    `;
+    stepHost.appendChild(frame);
+    document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
+      state.data.first_directive_project_id = null;
+      saveDraft();
+      goto("provisioning");
+    });
+
+    const startedAt = Date.now();
+    const fmtSec = (s) => (s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`);
+    const timerEl = document.getElementById("onb-firstmove-timer");
+    const timerHandle = setInterval(() => {
+      teamProposalElapsed = Math.floor((Date.now() - startedAt) / 1000);
+      if (timerEl) timerEl.textContent = fmtSec(teamProposalElapsed);
+    }, 1000);
+
+    teamProposalPending = true;
+    try {
+      const res = await fetch("/onboarding/propose_first_directives", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+      });
+      if (res.ok) {
+        const payload = await res.json();
+        projects = (payload && payload.directives) || [];
+        state.draft_project_ids = projects;
+      }
+    } catch (_err) {
+      // Network blip → leave projects empty; the textarea fallback below
+      // catches that path.
+    } finally {
+      clearInterval(timerHandle);
+      teamProposalPending = false;
+      // Tear down the loading frame so the real one re-renders below.
+      stepHost.innerHTML = "";
+    }
+  }
+
   const projectCount = (projects || []).length;
   const hasStaged = projectCount > 0;
 
@@ -1199,22 +1267,26 @@ async function renderFirstMove() {
   frame.dataset.label = "FIRST_MOVE // 05.directive";
 
   const headerCopy = hasStaged
-    ? `${projectCount} directive${projectCount === 1 ? "" : "s"} staged. Pick one to start:`
-    : "No directives pre-staged for this template. Type your first directive:";
+    ? `Your team proposes ${projectCount} first-week directive${projectCount === 1 ? "" : "s"}. Pick one to start:`
+    : "Team didn't return a proposal (provider unavailable). Type your own first directive:";
 
   // Two-mode UI:
-  //   - hasStaged: render the existing cards-list + START SELECTED
-  //   - !hasStaged: render a textarea + START. SUBMIT calls /directive
-  //     which routes through the CEO classifier and creates the project
-  //     server-side; the founder doesn't have to live with "no directives
-  //     yet — go to the dashboard."
+  //   - hasStaged: render the cards-list + START SELECTED. Each card
+  //     shows team's title, proposer role, and rationale so the
+  //     founder picks with full context.
+  //   - !hasStaged: rare fallback — LLM unreachable. Textarea + START.
+  //     Calls /directive (CEO classifier) so the founder still moves
+  //     forward instead of being trapped.
   frame.innerHTML = `
     <div class="onb-firstmove-head">
       <span>${escapeHtml(headerCopy)}</span>
       <button type="button" class="onb-link-escape" id="onb-firstmove-skip">[ ⨯ skip — show me empty dashboard ]</button>
     </div>
     ${hasStaged
-      ? '<div class="onb-firstmove-list" id="onb-firstmove-list"></div>'
+      ? `<div class="onb-firstmove-list" id="onb-firstmove-list"></div>
+         ${teamProposalElapsed > 0
+           ? `<p class="onb-firstmove-hint">✓ team finished in ${teamProposalElapsed < 60 ? teamProposalElapsed + "s" : Math.floor(teamProposalElapsed/60) + "m " + (teamProposalElapsed%60) + "s"}.</p>`
+           : ""}`
       : `<textarea class="onb-firstmove-input" id="onb-firstmove-input"
                    rows="3"
                    placeholder="e.g. Launch a landing page and start collecting waitlist signups."
@@ -1245,9 +1317,12 @@ async function renderFirstMove() {
       card.type = "button";
       card.className = "onb-firstmove-card";
       card.dataset.projectId = p.id;
+      const proposer = (p.proposer_role || "").toUpperCase();
+      const rationale = p.rationale || "";
       card.innerHTML = `
         <div class="onb-firstmove-title">▸ ${escapeHtml(p.name)}</div>
-        <div class="onb-firstmove-meta">project: <code>${escapeHtml((p.id || '').slice(0, 12))}</code></div>
+        ${proposer ? `<div class="onb-firstmove-proposer">proposed by <b>${escapeHtml(proposer)}</b></div>` : ""}
+        ${rationale ? `<div class="onb-firstmove-rationale">${escapeHtml(rationale)}</div>` : ""}
       `;
       card.addEventListener("click", () => {
         listEl.querySelectorAll(".onb-firstmove-card").forEach((c) => c.classList.remove("selected"));
@@ -1277,7 +1352,8 @@ async function renderFirstMove() {
     return;
   }
 
-  // Empty-staged branch: free-form directive submission.
+  // Fallback branch: team didn't return a proposal (LLM unreachable).
+  // Free-form directive submission so the founder isn't trapped.
   const inputEl = document.getElementById("onb-firstmove-input");
   inputEl.addEventListener("input", () => {
     startBtn.disabled = inputEl.value.trim().length === 0;

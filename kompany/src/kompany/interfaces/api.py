@@ -857,6 +857,29 @@ def post_targets_review() -> dict[str, Any]:
     return payload
 
 
+@app.post("/onboarding/propose_first_directives")
+def post_propose_first_directives() -> dict[str, Any]:
+    """Team-proposes-first-directives — implements the contract in
+    ``docs/context/operations.md:60-62`` for the first-move wizard step.
+
+    Reads ``targets.agreed`` + company state, runs a short CEO pass
+    (CRO/CPO context implicit in the prompt), writes up to 3 draft
+    projects to the DB with ``status='draft'`` + a ``source =
+    'team_proposal_first_week'`` plan marker, and returns the rows.
+
+    Idempotent: if drafts already exist (from template ``apply()`` OR
+    a prior call to this endpoint), they're returned without spending
+    another LLM call.
+
+    The frontend's step-5 first-move screen calls this when 0 drafts
+    came back from the template, then renders the returned items
+    exactly like template-staged ones.
+    """
+    engine = get_engine()
+    items = engine.propose_first_directives()
+    return {"directives": items}
+
+
 # ---------------------------------------------------------------------------
 # Company glossary (glossary-and-drift-detection task 05-19)
 # ---------------------------------------------------------------------------

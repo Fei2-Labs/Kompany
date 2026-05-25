@@ -1106,8 +1106,20 @@ body.onboarding-body { padding-bottom: 40px; }
 }
 .onb-firstmove-card:hover { background: rgba(0, 255, 65, 0.04); }
 .onb-firstmove-card.selected { border-color: #00ff41; background: rgba(0, 255, 65, 0.1); }
-.onb-firstmove-title { font-size: 13px; color: #00ff41; }
+.onb-firstmove-title { font-size: 13px; color: #00ff41; font-weight: bold; }
 .onb-firstmove-meta { font-size: 11px; color: rgba(0, 255, 65, 0.55); margin-top: 4px; }
+.onb-firstmove-proposer {
+  font-size: 11px;
+  color: rgba(0, 200, 255, 0.85);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+.onb-firstmove-rationale {
+  font-size: 12px;
+  color: rgba(0, 255, 65, 0.7);
+  margin-top: 6px;
+  line-height: 1.4;
+}
 .onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
 
 /* Free-form directive input shown when the template staged 0 drafts
