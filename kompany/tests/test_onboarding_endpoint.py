@@ -71,10 +71,11 @@ def test_status_reports_false_for_fresh_install(client: TestClient) -> None:
         "onboarded": False,
         "template_id": None,
         "provider": None,
-        # New resume-from-review fields default to "no resume needed"
-        # on a fresh install.
+        # Resume-from-* fields default to "no resume needed" on a
+        # fresh install.
         "pending_target_feasibility_approval_id": None,
         "agreed_targets_set": False,
+        "pending_first_move": False,
     }
 
 

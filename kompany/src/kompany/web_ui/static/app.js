@@ -42,6 +42,18 @@ async function boot() {
         window.location.replace("/ui/onboarding.html");
         return;
       }
+      // Resume-from-first-move: agreed targets set but founder never
+      // activated a directive (drafts exist, no active project). Drop
+      // them back at step 5 so the team's directive proposal isn't
+      // scattered as raw inbox items.
+      if (
+        snap &&
+        snap.onboarded === true &&
+        snap.pending_first_move === true
+      ) {
+        window.location.replace("/ui/onboarding.html");
+        return;
+      }
     }
   } catch (_err) {
     // Network blip — fall through to normal boot.

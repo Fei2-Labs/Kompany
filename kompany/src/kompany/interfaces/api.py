@@ -81,6 +81,11 @@ class OnboardingStatusResponse(BaseModel):
     # they already paid for).
     pending_target_feasibility_approval_id: str | None = None
     agreed_targets_set: bool = False
+    # Resume-to-step-5: agreed_targets are set, drafts exist, but no
+    # active project yet → founder quit mid first-move. The shell drops
+    # them back on the wizard's step 5 instead of the dashboard so the
+    # generated directives aren't buried in inbox.
+    pending_first_move: bool = False
 
 
 class OnboardingCompleteRequest(BaseModel):
@@ -210,6 +215,24 @@ def onboarding_status() -> OnboardingStatusResponse:
                 resp_kwargs["agreed_targets_set"] = bool(row and row["value"])
             except sqlite3.OperationalError:
                 pass
+            # Resume-to-step-5 signal: agreed targets set AND at least
+            # one draft project exists AND no active project yet. This
+            # is the "quit mid first-move" state.
+            if resp_kwargs.get("agreed_targets_set"):
+                try:
+                    drafts = conn.execute(
+                        "SELECT COUNT(*) AS n FROM projects WHERE status = 'draft'"
+                    ).fetchone()
+                    actives = conn.execute(
+                        "SELECT COUNT(*) AS n FROM projects WHERE status = 'active'"
+                    ).fetchone()
+                    n_drafts = int(drafts["n"]) if drafts else 0
+                    n_active = int(actives["n"]) if actives else 0
+                    resp_kwargs["pending_first_move"] = bool(
+                        n_drafts > 0 and n_active == 0
+                    )
+                except sqlite3.OperationalError:
+                    pass
             conn.close()
         except sqlite3.Error:
             pass

@@ -1761,6 +1761,20 @@ async function start() {
           return;
         }
       }
+      // Resume-to-step-5: agreed targets set, drafts exist, no active
+      // project. Founder quit mid first-move. Drop them back on step 5
+      // with the existing drafts pre-loaded so the team's directive
+      // proposal isn't buried in the dashboard inbox.
+      if (status.pending_first_move) {
+        if (draft && draft.data) Object.assign(state.data, draft.data);
+        // Pre-populate the draft list so renderFirstMove() short-
+        // circuits the propose call — the team already proposed; no
+        // extra tokens spent on the resume.
+        state.draft_project_ids = await fetchDraftProjects();
+        setStatus("welcome back — pick a first-week directive");
+        goto("first_move");
+        return;
+      }
     }
   } catch (_) {
     // Status probe is best-effort. Fall through to the local-draft path.
