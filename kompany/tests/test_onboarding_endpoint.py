@@ -362,6 +362,64 @@ def test_stash_rejects_unknown_provider(
     assert "unknown provider" in body["note"]
 
 
+def _seed_targets_and_projects(data_dir: Path, project_rows: list[tuple[str, str]]) -> None:
+    """Seed agreed targets + a projects table with (id, status) rows so
+    pending_first_move can be exercised."""
+    import sqlite3, json as _json
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(data_dir / "kompany.db"))
+    conn.execute("CREATE TABLE IF NOT EXISTS company_config (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS credential_vault (name TEXT PRIMARY KEY, ciphertext TEXT, updated_at TEXT)"
+    )
+    conn.execute("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, status TEXT)")
+    conn.execute("INSERT OR REPLACE INTO company_config VALUES ('template_id', 'blank')")
+    conn.execute(
+        "INSERT OR REPLACE INTO company_config VALUES ('targets.agreed', ?)",
+        (_json.dumps({"initial_budget": 50.0, "revenue_target": 1000.0,
+                      "customer_target": None, "deadline": "2026-12-31",
+                      "source": "agreed"}),),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO credential_vault VALUES ('anthropic_api_key', 'x', '2026-05-27')"
+    )
+    for pid, status in project_rows:
+        conn.execute("INSERT OR REPLACE INTO projects VALUES (?, ?)", (pid, status))
+    conn.commit()
+    conn.close()
+
+
+def test_pending_first_move_false_when_a_project_completed(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Once a first directive has run (even to completion), leftover
+    unpicked drafts must NOT drag the founder back to step 5 — they're
+    live on the dashboard now. Regression for 2026-05-27."""
+    data_dir = Path(tmp_path / "data")
+    _seed_targets_and_projects(data_dir, [
+        ("done1", "completed"),
+        ("draftA", "draft"),
+        ("draftB", "draft"),
+    ])
+    res = client.get("/onboarding/status")
+    assert res.status_code == 200
+    assert res.json()["pending_first_move"] is False
+
+
+def test_pending_first_move_true_when_only_drafts(
+    client: TestClient, tmp_path: Path
+) -> None:
+    data_dir = Path(tmp_path / "data")
+    _seed_targets_and_projects(data_dir, [
+        ("draftA", "draft"),
+        ("draftB", "draft"),
+        ("draftC", "draft"),
+    ])
+    res = client.get("/onboarding/status")
+    assert res.json()["pending_first_move"] is True
+
+
 def test_audit_recent_returns_chronological(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

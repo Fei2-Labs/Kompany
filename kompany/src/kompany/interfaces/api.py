@@ -417,21 +417,27 @@ def onboarding_status() -> OnboardingStatusResponse:
                 resp_kwargs["agreed_targets_set"] = bool(row and row["value"])
             except sqlite3.OperationalError:
                 pass
-            # Resume-to-step-5 signal: agreed targets set AND at least
-            # one draft project exists AND no active project yet. This
-            # is the "quit mid first-move" state.
+            # Resume-to-step-5 signal: the founder agreed targets and has
+            # NOT yet made a first move. True only when drafts exist AND
+            # no project has progressed past draft — i.e. nothing active
+            # AND nothing completed. Once a first directive has run (even
+            # to completion), the founder is "live": leftover unpicked
+            # drafts must NOT drag them back to step 5; they belong on the
+            # dashboard. (Bug 2026-05-27: a completed first directive +
+            # leftover drafts re-triggered step 5.)
             if resp_kwargs.get("agreed_targets_set"):
                 try:
                     drafts = conn.execute(
                         "SELECT COUNT(*) AS n FROM projects WHERE status = 'draft'"
                     ).fetchone()
-                    actives = conn.execute(
-                        "SELECT COUNT(*) AS n FROM projects WHERE status = 'active'"
+                    progressed = conn.execute(
+                        "SELECT COUNT(*) AS n FROM projects "
+                        "WHERE status IN ('active', 'completed', 'paused', 'failed')"
                     ).fetchone()
                     n_drafts = int(drafts["n"]) if drafts else 0
-                    n_active = int(actives["n"]) if actives else 0
+                    n_progressed = int(progressed["n"]) if progressed else 0
                     resp_kwargs["pending_first_move"] = bool(
-                        n_drafts > 0 and n_active == 0
+                        n_drafts > 0 and n_progressed == 0
                     )
                 except sqlite3.OperationalError:
                     pass
