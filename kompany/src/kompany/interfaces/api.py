@@ -1224,6 +1224,32 @@ def delete_glossary_term(term: str) -> dict[str, Any]:
     return {"removed": True, "term": term}
 
 
+@app.get("/audit/recent")
+def audit_recent(limit: int = 40) -> list[dict[str, Any]]:
+    """Return the most recent audit events, oldest-first, for the live
+    timeline to BACKFILL on dashboard load.
+
+    SSE has no replay, so events fired before the browser's EventSource
+    connects (e.g. a kickoff that ran while the founder was still on the
+    onboarding screen) are otherwise invisible. This lets the timeline
+    show what already happened, then continue live from SSE.
+    """
+    engine = get_engine()
+    rows = engine.audit.recent(limit=max(1, min(int(limit), 200)))
+    # ``recent`` returns newest-first; reverse so the timeline appends in
+    # chronological order.
+    out: list[dict[str, Any]] = []
+    for row in reversed(rows):
+        out.append({
+            "event_type": row.get("event_type"),
+            "action": row.get("action"),
+            "agent_role": row.get("agent_role"),
+            "project_id": row.get("project_id"),
+            "created_at": row.get("created_at") or row.get("timestamp"),
+        })
+    return out
+
+
 @app.get("/episodes")
 def list_episodes(retention: str | None = None) -> list[dict[str, Any]]:
     """List materialized project episodes."""

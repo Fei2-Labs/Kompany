@@ -10,20 +10,146 @@ function escapeHTML(s) {
 
 let _activeId = null;
 
+const ROLE_NAMES = {
+  ceo: "CEO", cfo: "CFO", cto: "CTO", cpo: "CPO", cmo: "CMO",
+  cro: "CRO", coo: "COO", csa: "CSA", ciso: "CISO", cos: "CoS", cv: "CV",
+  analyst: "Analyst", builder: "Builder", procurement: "Procurement",
+  researcher: "Researcher", writer: "Writer",
+};
+const SUBAGENTS = new Set(["analyst", "builder", "procurement", "researcher", "writer"]);
+
+function roleLabel(r) {
+  const key = String(r || "").toLowerCase();
+  return ROLE_NAMES[key] || (r ? String(r).toUpperCase() : "?");
+}
+
+// The task ``result`` is a JSON string like {"output": "...markdown..."}.
+// Pull out the human text; fall back to the raw string.
+function taskOutput(result) {
+  if (!result) return "";
+  let r = result;
+  if (typeof r === "string") {
+    try { r = JSON.parse(r); } catch (_) { return r; }
+  }
+  if (r && typeof r === "object") return r.output || r.text || JSON.stringify(r);
+  return String(r);
+}
+
+function fmtUsd(n) {
+  const v = Number(n || 0);
+  return "$" + v.toFixed(v >= 10 ? 2 : 4);
+}
+
+// Render a markdown-ish output block as readable HTML: keep line breaks,
+// bold **x**, and headings. Deliberately tiny — not a full md parser.
+function renderText(s) {
+  let t = escapeHTML(String(s || ""));
+  t = t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  t = t.replace(/^### (.+)$/gm, '<span class="ep-h">$1</span>');
+  t = t.replace(/^## (.+)$/gm, '<span class="ep-h">$1</span>');
+  t = t.replace(/^# (.+)$/gm, '<span class="ep-h">$1</span>');
+  return t.replace(/\n/g, "<br>");
+}
+
 async function loadPayload(projectId) {
-  const pre = document.getElementById("episodes-payload");
-  if (!pre) return;
-  pre.innerHTML = `<pre>loading ${escapeHTML(projectId)}...</pre>`;
+  const host = document.getElementById("episodes-payload");
+  if (!host) return;
+  host.innerHTML = `<div class="empty">loading ${escapeHTML(projectId)}…</div>`;
   try {
     const row = await api.episode(projectId);
     let payload = row.payload_json || row.payload || row;
     if (typeof payload === "string") {
       try { payload = JSON.parse(payload); } catch (_) {}
     }
-    pre.innerHTML = `<pre>${escapeHTML(JSON.stringify(payload, null, 2))}</pre>`;
+    host.innerHTML = renderEpisodeDetail(payload);
+    // Wire per-task expand toggles.
+    for (const head of host.querySelectorAll(".ep-task-head")) {
+      head.addEventListener("click", () => {
+        const card = head.closest(".ep-task");
+        if (card) card.classList.toggle("open");
+      });
+    }
+    // Raw JSON escape hatch for power users.
+    const rawToggle = host.querySelector(".ep-raw-toggle");
+    if (rawToggle) {
+      rawToggle.addEventListener("click", () => {
+        const pre = host.querySelector(".ep-raw");
+        if (pre) {
+          pre.hidden = !pre.hidden;
+          if (!pre.textContent) pre.textContent = JSON.stringify(payload, null, 2);
+        }
+      });
+    }
   } catch (e) {
-    pre.innerHTML = `<pre class="empty">load failed: ${escapeHTML(e.message)}</pre>`;
+    host.innerHTML = `<div class="empty">load failed: ${escapeHTML(e.message)}</div>`;
   }
+}
+
+function renderEpisodeDetail(p) {
+  if (!p || typeof p !== "object") {
+    return `<div class="empty">no payload.</div>`;
+  }
+  const meta = p.project_meta || {};
+  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+  const done = tasks.filter((t) => t.status === "completed").length;
+  const ledger = p.ledger_summary || {};
+  const aiCost = Number(ledger.ai_cost || 0);
+  const decisions = (p.decisions || []).length;
+  const debates = (p.debate_ids || []).length;
+
+  // Which agents took part + how many tasks each — so the founder can
+  // see who did the work (and whether any subagents were used).
+  const byAgent = {};
+  for (const t of tasks) {
+    const a = String(t.assigned_agent || "?").toLowerCase();
+    byAgent[a] = (byAgent[a] || 0) + 1;
+  }
+  const agentChips = Object.entries(byAgent)
+    .map(([a, n]) => {
+      const sub = SUBAGENTS.has(a) ? " ep-chip-sub" : "";
+      return `<span class="ep-chip${sub}">${escapeHTML(roleLabel(a))} ×${n}${SUBAGENTS.has(a) ? " ⚙" : ""}</span>`;
+    })
+    .join("");
+
+  const taskCards = tasks.map((t, i) => {
+    const agent = roleLabel(t.assigned_agent);
+    const sub = SUBAGENTS.has(String(t.assigned_agent || "").toLowerCase());
+    const out = taskOutput(t.result);
+    const statusCls = t.status === "completed" ? "ok" : (t.status === "failed" ? "err" : "warn");
+    return `
+      <div class="ep-task">
+        <div class="ep-task-head">
+          <span class="ep-task-ix">${i + 1}</span>
+          <span class="ep-task-agent${sub ? " ep-chip-sub" : ""}">${escapeHTML(agent)}${sub ? " ⚙" : ""}</span>
+          <span class="ep-task-title">${escapeHTML(t.title || "(untitled)")}</span>
+          <span class="ep-task-status ${statusCls}">${escapeHTML(t.status || "?")}</span>
+          <span class="ep-task-caret">▸</span>
+        </div>
+        <div class="ep-task-body">
+          ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output recorded.</div>`}
+        </div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="ep-detail">
+      <div class="ep-detail-head">
+        <div class="ep-detail-name">${escapeHTML(meta.name || p.project_id || "(unnamed)")}</div>
+        <div class="ep-detail-stats">
+          <span class="ep-stat ${meta.status === "completed" ? "ok" : "warn"}">${escapeHTML(meta.status || "?")}</span>
+          <span class="ep-stat">${done}/${tasks.length} tasks done</span>
+          <span class="ep-stat">AI cost ${fmtUsd(aiCost)}</span>
+          ${decisions ? `<span class="ep-stat">${decisions} decision${decisions === 1 ? "" : "s"}</span>` : ""}
+          ${debates ? `<span class="ep-stat">${debates} debate${debates === 1 ? "" : "s"}</span>` : ""}
+        </div>
+        ${agentChips ? `<div class="ep-agents">who worked: ${agentChips}</div>` : ""}
+      </div>
+      <div class="ep-tasks">${taskCards || `<div class="empty">no tasks.</div>`}</div>
+      <div class="ep-raw-wrap">
+        <button type="button" class="ep-raw-toggle">[ ⋯ raw json ]</button>
+        <pre class="ep-raw" hidden></pre>
+      </div>
+    </div>`;
 }
 
 async function renderEmptyState(list) {
@@ -55,6 +181,59 @@ async function renderEmptyState(list) {
     `;
   } catch (_) {
     list.innerHTML = `<div class="empty">no episodes yet.</div>`;
+  }
+}
+
+// Show one agent's tasks from the most recent episode, in the payload
+// panel. Wired to staff-panel clicks so the founder can drill into
+// "what did the CRO actually do?".
+export async function showAgentTasks(role) {
+  const host = document.getElementById("episodes-payload");
+  if (!host || !role) return;
+  const key = String(role).toLowerCase();
+  host.innerHTML = `<div class="empty">loading ${escapeHTML(roleLabel(key))}'s work…</div>`;
+  try {
+    const eps = await api.episodes();
+    if (!eps || !eps.length) {
+      host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} has no recorded work yet — no completed episodes.</div>`;
+      return;
+    }
+    // Newest episode first.
+    const latest = eps[0];
+    const row = await api.episode(latest.project_id);
+    let payload = row.payload_json || row.payload || row;
+    if (typeof payload === "string") { try { payload = JSON.parse(payload); } catch (_) {} }
+    const tasks = (payload.tasks || []).filter(
+      (t) => String(t.assigned_agent || "").toLowerCase() === key,
+    );
+    if (!tasks.length) {
+      host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} didn't own a task in the latest episode.</div>`;
+      return;
+    }
+    const cards = tasks.map((t, i) => {
+      const out = taskOutput(t.result);
+      const statusCls = t.status === "completed" ? "ok" : (t.status === "failed" ? "err" : "warn");
+      return `
+        <div class="ep-task open">
+          <div class="ep-task-head">
+            <span class="ep-task-ix">${i + 1}</span>
+            <span class="ep-task-title">${escapeHTML(t.title || "(untitled)")}</span>
+            <span class="ep-task-status ${statusCls}">${escapeHTML(t.status || "?")}</span>
+          </div>
+          <div class="ep-task-body">
+            ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output.</div>`}
+          </div>
+        </div>`;
+    }).join("");
+    host.innerHTML = `
+      <div class="ep-detail">
+        <div class="ep-detail-head">
+          <div class="ep-detail-name">${escapeHTML(roleLabel(key))} — work in "${escapeHTML(latest.summary || latest.project_id)}"</div>
+        </div>
+        <div class="ep-tasks">${cards}</div>
+      </div>`;
+  } catch (e) {
+    host.innerHTML = `<div class="empty">load failed: ${escapeHTML(e.message)}</div>`;
   }
 }
 

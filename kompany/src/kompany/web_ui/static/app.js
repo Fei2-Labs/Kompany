@@ -8,7 +8,7 @@ import { renderOffice } from "/ui/static/modules/ui/office.js";
 import { renderInbox } from "/ui/static/modules/ui/inbox.js";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
-import { renderEpisodes } from "/ui/static/modules/ui/episodes.js?v=2";
+import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=3";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 
@@ -119,8 +119,30 @@ async function boot() {
     } catch (_) {}
   }, 7000);
 
+  // Staff-panel click → show that agent's tasks in the episode panel.
+  document.addEventListener("agent-click", (e) => {
+    const role = e.detail && e.detail.role;
+    if (role) showAgentTasks(role);
+  });
+
   initCostChip();
   initTimeline();
+  // Backfill the timeline with recent audit history so a run that
+  // happened before this EventSource connected (e.g. the kickoff that
+  // fired during onboarding) is visible instead of an empty "ready."
+  fetch("/audit/recent?limit=40", { headers: { Accept: "application/json" } })
+    .then((r) => (r.ok ? r.json() : []))
+    .then((events) => {
+      for (const ev of events || []) {
+        const type = ev.event_type || "";
+        let level = "ok";
+        if (type.includes("fail") || type.includes("err")) level = "err";
+        else if (type.startsWith("health") || type.includes("strand")) level = "warn";
+        const who = ev.agent_role ? ` [${ev.agent_role}]` : "";
+        pushTimeline({ level, text: `${type}${ev.action ? " " + ev.action : ""}${who}` });
+      }
+    })
+    .catch(() => { /* non-fatal */ });
   initDirective(async (text) => {
     pushTimeline({ level: "warn", text: `directive submitted: ${text}` });
     try {

@@ -362,6 +362,27 @@ def test_stash_rejects_unknown_provider(
     assert "unknown provider" in body["note"]
 
 
+def test_audit_recent_returns_chronological(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """/audit/recent backfills the live timeline; it must return events
+    oldest-first with the timeline-relevant fields."""
+    monkeypatch.setenv("KOMPANY_VAULT_KEY", "C8WJOwHdhwcWnW2siGKVyEggFwVHe41ERKC1SFRgfJ8=")
+    api_module.reset_engine()
+    engine = api_module.get_engine()
+    engine.audit.record("task.started", "first", agent_role="cro")
+    engine.audit.record("task.completed", "second", agent_role="cro")
+
+    res = client.get("/audit/recent?limit=10")
+    assert res.status_code == 200
+    body = res.json()
+    assert isinstance(body, list)
+    actions = [e["action"] for e in body]
+    # oldest-first: "first" precedes "second"
+    assert actions.index("first") < actions.index("second")
+    assert {"event_type", "action", "agent_role", "project_id"} <= set(body[0])
+
+
 def test_health_returns_200_without_engine(client: TestClient) -> None:
     res = client.get("/health")
     assert res.status_code == 200
