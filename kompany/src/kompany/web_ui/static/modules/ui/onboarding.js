@@ -512,6 +512,20 @@ async function renderConnection() {
     }
     state.ping = payload;
     if (payload && payload.ok) {
+      // Stash the verified credentials to the encrypted vault NOW so a
+      // mid-onboarding quit doesn't lose them. Fire-and-forget — a
+      // failure here doesn't block advancing (the final complete still
+      // writes the vault). Same encryption as the final write; no
+      // plaintext / localStorage exposure.
+      fetch("/onboarding/stash_credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          provider: state.data.provider,
+          api_key: state.api_key,
+          base_url: state.data.base_url || undefined,
+        }),
+      }).catch(() => { /* non-fatal */ });
       // Skip the brief success render — advancing IS the success signal.
       goto("faction");
       return;
@@ -1869,6 +1883,25 @@ async function start() {
   const firstBootDone = (() => {
     try { return !!localStorage.getItem(FIRST_BOOT_KEY); } catch (_) { return false; }
   })();
+
+  // Restore credentials stashed during a prior (incomplete) onboarding.
+  // The api_key is deliberately NOT in the localStorage draft (no
+  // plaintext on disk), so after a mid-flow quit it only lives in the
+  // encrypted vault. Pull it back so the founder doesn't re-enter it
+  // and the final complete call has a key to submit.
+  try {
+    const sres = await fetch("/onboarding/stashed_credentials", {
+      headers: { Accept: "application/json" },
+    });
+    if (sres.ok) {
+      const stashed = await sres.json();
+      if (stashed && stashed.has_key) {
+        if (!state.api_key) state.api_key = stashed.api_key;
+        if (!state.data.provider && stashed.provider) state.data.provider = stashed.provider;
+        if (!state.data.base_url && stashed.base_url) state.data.base_url = stashed.base_url;
+      }
+    }
+  } catch (_) { /* non-fatal — wizard falls back to re-entry */ }
 
   // SERVER-SIDE resume signal beats the localStorage draft. If the
   // founder already paid for the team feasibility debate (LLM tokens

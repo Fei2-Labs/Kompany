@@ -236,6 +236,132 @@ def onboarding_env_defaults() -> EnvDefaultsResponse:
     )
 
 
+# ---------------------------------------------------------------------------
+# Mid-onboarding credential stash — persist the founder's API key to the
+# encrypted vault as soon as step 1 pings OK, so closing the wizard
+# mid-flow doesn't lose it. Same encryption + file as the final
+# onboarding-complete write; this just happens a few steps earlier.
+# ---------------------------------------------------------------------------
+
+_PENDING_PROVIDER_KEY = "onboarding.pending_provider"
+
+
+class StashCredentialsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = Field(..., min_length=1)
+    api_key: str = Field(..., min_length=1)
+    base_url: str | None = None
+
+
+class StashCredentialsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stored: bool = False
+    storage: str = ""  # "vault" | "none"
+    note: str = ""
+
+
+class StashedCredentialsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    has_key: bool = False
+
+
+@app.post(
+    "/onboarding/stash_credentials",
+    response_model=StashCredentialsResponse,
+)
+def onboarding_stash_credentials(
+    req: StashCredentialsRequest,
+) -> StashCredentialsResponse:
+    """Persist the founder's provider + API key to the encrypted vault
+    mid-onboarding (after a successful step-1 ping).
+
+    Security note: this writes the SAME encrypted credential_vault row
+    that onboarding-complete would write, using the same file-based
+    Fernet master key. There is no new exposure — the key just lands
+    on disk (encrypted) a few wizard steps earlier so a mid-flow quit
+    doesn't force the founder to re-enter it. We never write the key
+    to localStorage / plaintext.
+    """
+    from kompany.installer.onboard import PROVIDER_VAULT_KEYS
+
+    engine = get_engine()
+    vault_field = PROVIDER_VAULT_KEYS.get(req.provider)
+    if not vault_field:
+        return StashCredentialsResponse(
+            stored=False, storage="none", note="unknown provider"
+        )
+    if not getattr(engine.settings, "vault_key", ""):
+        return StashCredentialsResponse(
+            stored=False, storage="none", note="vault key not configured"
+        )
+    try:
+        engine.credentials.set(vault_field, req.api_key)
+        if req.provider == "custom" and req.base_url:
+            engine.credentials.set("custom_base_url", req.base_url.strip())
+        # Remember which provider the founder picked so resume can
+        # restore the right slot.
+        engine.db.execute(
+            """INSERT INTO company_config (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                 value = excluded.value, updated_at = excluded.updated_at""",
+            (_PENDING_PROVIDER_KEY, req.provider),
+        )
+        engine.db.commit()
+    except Exception as exc:  # noqa: BLE001
+        return StashCredentialsResponse(
+            stored=False, storage="none", note=f"vault write failed: {exc}"
+        )
+    return StashCredentialsResponse(stored=True, storage="vault")
+
+
+@app.get(
+    "/onboarding/stashed_credentials",
+    response_model=StashedCredentialsResponse,
+)
+def onboarding_stashed_credentials() -> StashedCredentialsResponse:
+    """Return credentials stashed during a prior (incomplete) onboarding
+    so the wizard can restore them after a mid-flow quit + relaunch.
+
+    Returns the decrypted key (same machine, the founder owns it) so
+    the wizard can repopulate the password field and complete without
+    re-entry. Empty when nothing was stashed.
+    """
+    engine = get_engine()
+    row = engine.db.execute(
+        "SELECT value FROM company_config WHERE key = ?",
+        (_PENDING_PROVIDER_KEY,),
+    ).fetchone()
+    provider = (row["value"] if row else "") or ""
+    if not provider:
+        return StashedCredentialsResponse()
+
+    from kompany.installer.onboard import PROVIDER_VAULT_KEYS
+
+    vault_field = PROVIDER_VAULT_KEYS.get(provider)
+    api_key = ""
+    base_url = ""
+    if vault_field:
+        try:
+            api_key = engine.credentials.get(vault_field) or ""
+        except Exception:  # noqa: BLE001
+            api_key = ""
+    if provider == "custom":
+        try:
+            base_url = engine.credentials.get("custom_base_url") or ""
+        except Exception:  # noqa: BLE001
+            base_url = ""
+    return StashedCredentialsResponse(
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        has_key=bool(api_key),
+    )
+
+
 def _resolved_data_dir() -> Path:
     """Resolve the data dir the sidecar should use, consistent with engine."""
     env = os.environ.get("KOMPANY_DATA_DIR", "").strip()

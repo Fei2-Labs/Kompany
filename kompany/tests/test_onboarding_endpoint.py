@@ -310,6 +310,58 @@ def test_env_defaults_reads_data_dir_dotenv(
     assert body["suggested_model"] == "gpt-5.5"
 
 
+def test_stash_then_restore_credentials_roundtrip(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Mid-onboarding stash writes the encrypted vault; the restore
+    endpoint reads it back so a wizard relaunch repopulates the key.
+    A vault key must exist for the write to land."""
+    monkeypatch.setenv("KOMPANY_VAULT_KEY", "C8WJOwHdhwcWnW2siGKVyEggFwVHe41ERKC1SFRgfJ8=")
+    api_module.reset_engine()
+
+    # Nothing stashed yet.
+    res = client.get("/onboarding/stashed_credentials")
+    assert res.status_code == 200
+    assert res.json()["has_key"] is False
+
+    # Stash a custom-provider credential.
+    res = client.post(
+        "/onboarding/stash_credentials",
+        json={
+            "provider": "custom",
+            "api_key": "sk-stash-test",
+            "base_url": "https://swedeapi.example/v1/",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["stored"] is True
+    assert body["storage"] == "vault"
+
+    # Restore reads it back decrypted.
+    res = client.get("/onboarding/stashed_credentials")
+    body = res.json()
+    assert body["provider"] == "custom"
+    assert body["api_key"] == "sk-stash-test"
+    assert body["base_url"] == "https://swedeapi.example/v1/"
+    assert body["has_key"] is True
+
+
+def test_stash_rejects_unknown_provider(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KOMPANY_VAULT_KEY", "C8WJOwHdhwcWnW2siGKVyEggFwVHe41ERKC1SFRgfJ8=")
+    api_module.reset_engine()
+    res = client.post(
+        "/onboarding/stash_credentials",
+        json={"provider": "bogus", "api_key": "x"},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["stored"] is False
+    assert "unknown provider" in body["note"]
+
+
 def test_health_returns_200_without_engine(client: TestClient) -> None:
     res = client.get("/health")
     assert res.status_code == 200
