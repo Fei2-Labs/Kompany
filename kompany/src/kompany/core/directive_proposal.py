@@ -176,6 +176,7 @@ class DirectiveProposalMixin:
         *,
         skip_llm: bool | None = None,
         force_heuristic: bool = False,
+        force: bool = False,
     ) -> dict[str, Any]:
         """Read agreed_targets + company state, run a short CEO pass,
         write 3 draft projects, return a structured result. Idempotent.
@@ -206,6 +207,16 @@ class DirectiveProposalMixin:
         tests don't need a live API key.
         """
         import os
+
+        if force:
+            # Founder explicitly asked for a fresh proposal — wipe
+            # existing drafts so the LLM regenerates instead of
+            # short-circuiting on idempotency.
+            try:
+                self.db.execute("DELETE FROM projects WHERE status = 'draft'")
+                self.db.commit()
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
 
         existing = self._existing_draft_projects()
         if existing:

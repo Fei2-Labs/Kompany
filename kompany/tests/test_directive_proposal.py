@@ -208,6 +208,65 @@ def test_discuss_no_targets(engine):
     assert result["status"] == "no_targets"
 
 
+def test_force_regen_replaces_existing_drafts(engine):
+    """Founder-triggered regeneration deletes the old drafts and
+    produces a fresh set even when drafts already exist. Without
+    force=True the idempotency guard would short-circuit and return
+    the stale drafts."""
+    _set_agreed_targets(engine)
+    first = engine.propose_first_directives()
+    second = engine.propose_first_directives(force=True)
+    first_ids = {r["id"] for r in first["directives"]}
+    second_ids = {r["id"] for r in second["directives"]}
+    # New rows must have been created (heuristic deterministic content
+    # but the project ids are fresh uuids per insert).
+    assert first_ids.isdisjoint(second_ids)
+    assert len(second["directives"]) == 3
+
+
+def test_target_review_finalize_wipes_drafts(engine):
+    """When the founder finalizes the target review (approve / reject),
+    any existing first-move drafts get wiped so the next
+    propose_first_directives runs against the (possibly counter-
+    proposed) new agreed_targets instead of returning stale rows."""
+    _set_agreed_targets(engine)
+    engine.propose_first_directives()
+    pre = engine.db.execute(
+        "SELECT COUNT(*) AS n FROM projects WHERE status = 'draft'"
+    ).fetchone()
+    assert pre["n"] > 0
+
+    # Simulate the finalize hook firing with a synthetic approval row.
+    from kompany.state.approvals import ApprovalRequest
+
+    fake_request = ApprovalRequest(
+        id="fake-approval",
+        action_type="target_feasibility",
+        severity="high",
+        status="pending",
+        summary="x",
+        payload={
+            "recommended_targets": {
+                "initial_budget": 100.0,
+                "revenue_target": 1500.0,
+                "customer_target": None,
+                "deadline": "2026-12-31T00:00:00+00:00",
+            },
+            "original_targets": {
+                "initial_budget": 100.0,
+                "revenue_target": 1000.0,
+                "customer_target": None,
+                "deadline": "2026-12-31T00:00:00+00:00",
+            },
+        },
+    )
+    engine._finalize_target_feasibility(fake_request, outcome="approved")
+    post = engine.db.execute(
+        "SELECT COUNT(*) AS n FROM projects WHERE status = 'draft'"
+    ).fetchone()
+    assert post["n"] == 0
+
+
 def test_discuss_team_failed_classifies_error(engine, monkeypatch):
     _set_agreed_targets(engine)
     engine.propose_first_directives()  # seed drafts

@@ -915,6 +915,18 @@ class TargetReviewMixin:
         except Exception:
             return
         self.set_targets(agreed)
+        # Wipe stale first-move drafts: their week_plan / success_metric
+        # / cost were proposed against the PREVIOUS agreed_targets. If
+        # the founder counter-proposed and the numbers changed, the
+        # team's directives must regenerate against the new targets;
+        # otherwise step 5 shows directives that don't match the agreed
+        # plan. The next call to propose_first_directives produces
+        # fresh ones.
+        try:
+            self.db.execute("DELETE FROM projects WHERE status = 'draft'")
+            self.db.commit()
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
         self.audit.record(
             event_type="company.targets_agreed",
             action="Founder finalized target feasibility review",

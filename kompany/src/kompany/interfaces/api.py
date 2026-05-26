@@ -883,6 +883,10 @@ def post_targets_review() -> dict[str, Any]:
 class _ProposeFirstDirectivesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     force_heuristic: bool = False
+    # When true, wipe any existing drafts before proposing so the LLM
+    # regenerates a fresh set. Triggered by the step-5 "regenerate
+    # proposals" button.
+    force: bool = False
 
 
 @app.post("/onboarding/propose_first_directives")
@@ -917,8 +921,11 @@ def post_propose_first_directives(
     spending another LLM call.
     """
     engine = get_engine()
-    force = bool(req and req.force_heuristic)
-    return engine.propose_first_directives(force_heuristic=force)
+    force_h = bool(req and req.force_heuristic)
+    force_regen = bool(req and req.force)
+    return engine.propose_first_directives(
+        force_heuristic=force_h, force=force_regen
+    )
 
 
 class _DiscussFirstDirectivesRequest(BaseModel):

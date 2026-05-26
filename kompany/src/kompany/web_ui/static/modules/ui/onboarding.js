@@ -1233,7 +1233,9 @@ async function renderFirstMove(opts) {
 
     teamProposalPending = true;
     try {
-      const body = opts.forceHeuristic ? { force_heuristic: true } : {};
+      const body = {};
+      if (opts.forceHeuristic) body.force_heuristic = true;
+      if (opts.forceRegen) body.force = true;
       const res = await fetch("/onboarding/propose_first_directives", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -1316,13 +1318,24 @@ async function renderFirstMove(opts) {
     <div class="onb-actions">
       <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
       ${hasStaged
-        ? `<button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START SELECTED ]</button>`
+        ? `<button type="button" class="onb-btn onb-btn-discuss" id="onb-firstmove-regen">[ ↻ none fit — regenerate ]</button>
+           <button type="button" class="onb-btn onb-btn-submit" id="onb-firstmove-start" disabled>[ ▸ START SELECTED ]</button>`
         : ""}
     </div>
   `;
   stepHost.appendChild(frame);
 
   document.getElementById("onb-back-firstmove").addEventListener("click", () => goto("review"));
+  const regenBtn = document.getElementById("onb-firstmove-regen");
+  if (regenBtn) {
+    regenBtn.addEventListener("click", async () => {
+      if (!confirm("Regenerate? The team will run a fresh debate (~$0.30 in LLM spend) and produce 3 new directives. The current ones will be discarded.")) {
+        return;
+      }
+      state.draft_project_ids = [];
+      renderFirstMove({ forceRegen: true });
+    });
+  }
   document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
     state.data.first_directive_project_id = null;
     saveDraft();

@@ -173,13 +173,20 @@ def test_full_chain_onboard_review_then_materialize(
     out = engine.run_target_feasibility_review(skip_llm=True)
     assert out is not None
     engine.approve_request(out["id"], approved_by="master")
+    # NOTE: approve_request now wipes draft projects as part of
+    # finalize-target-feasibility (so step-5 directives regenerate
+    # against agreed_targets, not stale template defaults). Re-create
+    # one project row here to anchor the materialize call.
+    from kompany.state.models import Project, ProjectType
 
-    # Find one of the draft projects the template created so we can
-    # materialize it.
-    proj_row = engine.db.execute(
-        "SELECT id FROM projects ORDER BY rowid LIMIT 1"
-    ).fetchone()
-    project_id = proj_row["id"]
+    seed_project = Project(
+        name="Test episode source",
+        type=ProjectType.OPERATIONAL,
+        plan={"source": "test-bypass"},
+        assigned_agents=[],
+    )
+    engine.projects.create(seed_project)
+    project_id = seed_project.id
     # Flip status to ``completed`` so ``materialize`` produces a normal
     # payload — the contract works on any row, but we want it
     # representative.
