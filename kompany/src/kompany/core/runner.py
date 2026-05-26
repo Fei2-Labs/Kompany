@@ -136,7 +136,53 @@ class ProjectRunner:
         return result
 
     def _decompose(self, project: Project) -> list[TaskSpec]:
-        """Use CEO to decompose a project's revenue paths into tasks."""
+        """Use CEO to decompose a project's revenue paths into tasks.
+
+        Two project shapes flow through here:
+
+        1. **Revenue projects** (template ``apply_template`` revenue
+           drafts): plan blob has ``paths`` → CEO LLM-decomposes into
+           3-5 TaskSpecs.
+        2. **First-move directives** (team-proposed at step 5 of
+           onboarding): plan blob has ``week_plan`` (a 5-entry list,
+           one per weekday) + ``proposer_role`` + ``other_agents_involved``.
+           The team already decomposed the work; we just turn each day
+           into a TaskSpec and rotate ownership through the proposer +
+           collaborators. No extra LLM call — week_plan IS the plan.
+        """
+        # Branch 2: first-move directive — week_plan already exists.
+        week_plan = project.plan.get("week_plan") or []
+        if week_plan:
+            proposer = (project.plan.get("proposer_role") or "ceo").lower()
+            collabs = [
+                str(r).lower()
+                for r in (project.plan.get("other_agents_involved") or [])
+            ]
+            owners = [proposer, *collabs] or ["ceo"]
+            tasks: list[TaskSpec] = []
+            for i, line in enumerate(week_plan):
+                title = str(line).strip()
+                if not title:
+                    continue
+                # Round-robin across owners so different agents take
+                # different days — keeps the office visibly busy
+                # instead of one CEO doing everything.
+                owner = owners[i % len(owners)]
+                tasks.append(
+                    TaskSpec(
+                        title=title[:140],
+                        assigned_agent=owner,
+                        prompt=(
+                            f"Project: {project.name}\n"
+                            f"Day {i + 1} of week-1 plan: {title}\n\n"
+                            "Execute this concretely. Return what you "
+                            "did, what you found, and the next step."
+                        ),
+                    )
+                )
+            return tasks
+
+        # Branch 1: classic revenue path decomposition.
         paths = project.plan.get("paths", [])
         if not paths:
             return []

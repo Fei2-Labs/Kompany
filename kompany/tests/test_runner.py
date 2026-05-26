@@ -109,3 +109,44 @@ def test_runner_resume_skips_completed_and_retries_failed(tmp_path):
     event_types = [event["event_type"] for event in engine.audit.recent(limit=20)]
     assert "project.resume_started" in event_types
     assert "project.resume_completed" in event_types
+
+
+def test_decompose_handles_first_move_week_plan(tmp_path):
+    """First-move directives (proposed by the team during onboarding
+    step 5) have plan blobs with ``week_plan``/``proposer_role`` rather
+    than the ``paths`` revenue-project structure. The runner must
+    decompose them into one task per weekday and round-robin ownership
+    across proposer + collaborators — otherwise CEO would do every
+    task while the other 10 agents sit idle on the dashboard, which
+    is the user-visible bug surfaced 2026-05-26."""
+    engine = FakeEngine(tmp_path)
+    project = Project(
+        name="Pre-sell $300 audit",
+        type=ProjectType.OPERATIONAL,
+        plan={
+            "suggested_directive": "Pre-sell $300 audit to 10 prospects",
+            "rationale": "fastest path to revenue",
+            "proposer_role": "cro",
+            "other_agents_involved": ["cmo", "cfo"],
+            "week_plan": [
+                "Mon: package offer",
+                "Tue: build prospect list",
+                "Wed: send 50 outbound messages",
+                "Thu: run 3-5 sales calls",
+                "Fri: close first paid audit",
+            ],
+            "success_metric": "≥1 paying customer",
+            "source": "team_proposal_first_week",
+        },
+        assigned_agents=[],
+    )
+    engine.projects.create(project)
+
+    tasks = ProjectRunner(engine)._decompose(project)
+    assert len(tasks) == 5
+    titles = [t.title for t in tasks]
+    assert titles[0] == "Mon: package offer"
+    assert titles[4] == "Fri: close first paid audit"
+    # Round-robin across [cro, cmo, cfo]
+    assigned = [t.assigned_agent for t in tasks]
+    assert assigned == ["cro", "cmo", "cfo", "cro", "cmo"]
