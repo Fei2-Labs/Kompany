@@ -1214,6 +1214,11 @@ body.onboarding-body { padding-bottom: 40px; }
 .onb-btn-discuss:hover:not(:disabled) {
   background: rgba(0, 200, 255, 0.08);
 }
+.onb-btn-danger {
+  border-color: rgba(255, 140, 0, 0.95) !important;
+  color: rgba(255, 200, 80, 0.98) !important;
+  background: rgba(255, 140, 0, 0.08);
+}
 .onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
 
 /* Free-form directive input shown when the template staged 0 drafts

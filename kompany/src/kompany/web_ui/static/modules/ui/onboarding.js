@@ -1340,14 +1340,26 @@ async function renderFirstMove(opts) {
   document.getElementById("onb-back-firstmove").addEventListener("click", () => goto("review"));
   const regenBtn = document.getElementById("onb-firstmove-regen");
   if (regenBtn) {
+    // Two-stage confirm: first click arms the button ("click again to
+    // confirm"), second click fires. Tauri's WebView ships with
+    // window.confirm() returning false silently, which is why an
+    // earlier version of this handler felt dead — never use native
+    // dialogs from inside the desktop shell.
+    let regenArmed = false;
+    let regenArmTimeout = null;
     regenBtn.addEventListener("click", async () => {
-      if (!confirm("Regenerate? The team will run a fresh debate (~$0.30 in LLM spend) and produce 3 new directives. The current ones will be discarded.")) {
+      if (!regenArmed) {
+        regenArmed = true;
+        regenBtn.textContent = "[ ! click again — spend ~$0.30 to regenerate ]";
+        regenBtn.classList.add("onb-btn-danger");
+        regenArmTimeout = setTimeout(() => {
+          regenArmed = false;
+          regenBtn.textContent = "[ ↻ none fit — regenerate ]";
+          regenBtn.classList.remove("onb-btn-danger");
+        }, 5000);
         return;
       }
-      // Lock the button so a double-click can't fire two regens before
-      // the next paint clears the host. The renderFirstMove call below
-      // wipes stepHost immediately on the forceRegen path, but the
-      // first frame can still land a second click on this same button.
+      clearTimeout(regenArmTimeout);
       regenBtn.disabled = true;
       regenBtn.textContent = "[ ↻ regenerating… ]";
       setStatus("team regenerating directives…");
