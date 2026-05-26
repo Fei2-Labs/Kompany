@@ -174,22 +174,58 @@ class EnvDefaultsResponse(BaseModel):
     suggested_model: str = ""
 
 
+def _parse_env_file(path: Path) -> dict[str, str]:
+    """Minimal KEY=VALUE .env parser (no python-dotenv dependency so it
+    survives PyInstaller bundling). Ignores blank lines, ``#`` comments,
+    and strips surrounding quotes. Last value wins on duplicate keys."""
+    out: dict[str, str] = {}
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key:
+                out[key] = val
+    except (OSError, UnicodeDecodeError):
+        pass
+    return out
+
+
+def _env_lookup() -> dict[str, str]:
+    """Merge the process environment with a ``.env`` file in the data
+    dir.
+
+    A GUI app launched from Finder on macOS does NOT inherit the shell
+    environment, so a ``.env`` sitting in the dev project root is
+    invisible to the installed app. To make the auto-fill work for
+    desktop founders, we also read ``<data_dir>/.env``. Process env
+    wins over the file (explicit override).
+    """
+    merged = dict(_parse_env_file(_resolved_data_dir() / ".env"))
+    merged.update({k: v for k, v in os.environ.items()})
+    return merged
+
+
 @app.get("/onboarding/env_defaults", response_model=EnvDefaultsResponse)
 def onboarding_env_defaults() -> EnvDefaultsResponse:
     """Return any pre-filled values the wizard should display in step 1.
 
-    Reads directly from the process environment (and the ``.env`` file
-    pydantic-settings already loaded) so the founder doesn't have to
-    re-type a custom-LLM base URL + key they already configured in
-    their shell. Returns empty strings when nothing is set — the
-    wizard then falls back to its blank state.
+    Reads from the process environment AND ``<data_dir>/.env`` so the
+    founder doesn't have to re-type a custom-LLM base URL + key they
+    already configured. The data-dir file is necessary because a
+    Finder-launched desktop app doesn't inherit the shell environment.
+    Returns empty strings when nothing is set.
     """
-    base = os.environ.get("CUSTOM_LLM_BASE_URL", "").strip()
-    key = os.environ.get("CUSTOM_LLM_API_KEY", "").strip()
+    env = _env_lookup()
+    base = env.get("CUSTOM_LLM_BASE_URL", "").strip()
+    key = env.get("CUSTOM_LLM_API_KEY", "").strip()
     # Model hint: prefer KOMPANY_MODEL_PRIMARY, fall back to APEX.
     model = (
-        os.environ.get("KOMPANY_MODEL_PRIMARY", "").strip()
-        or os.environ.get("KOMPANY_MODEL_APEX", "").strip()
+        env.get("KOMPANY_MODEL_PRIMARY", "").strip()
+        or env.get("KOMPANY_MODEL_APEX", "").strip()
     )
     suggested = "custom" if (base and key) else ""
     return EnvDefaultsResponse(

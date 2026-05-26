@@ -286,6 +286,30 @@ def test_env_defaults_partial_does_not_suggest_provider(
     assert body["suggested_provider"] == ""
 
 
+def test_env_defaults_reads_data_dir_dotenv(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A GUI app launched from Finder doesn't inherit the shell env, so
+    env_defaults must also read <data_dir>/.env. Process env stays
+    clean here; the values come purely from the file."""
+    monkeypatch.delenv("CUSTOM_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("CUSTOM_LLM_API_KEY", raising=False)
+    data_dir = Path(tmp_path / "data")
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / ".env").write_text(
+        'CUSTOM_LLM_BASE_URL="https://swedeapi.example/v1/"\n'
+        "CUSTOM_LLM_API_KEY=sk-from-file\n"
+        "KOMPANY_MODEL_PRIMARY=gpt-5.5\n",
+        encoding="utf-8",
+    )
+    res = client.get("/onboarding/env_defaults")
+    body = res.json()
+    assert body["custom_base_url"] == "https://swedeapi.example/v1/"
+    assert body["custom_api_key"] == "sk-from-file"
+    assert body["suggested_provider"] == "custom"
+    assert body["suggested_model"] == "gpt-5.5"
+
+
 def test_health_returns_200_without_engine(client: TestClient) -> None:
     res = client.get("/health")
     assert res.status_code == 200
