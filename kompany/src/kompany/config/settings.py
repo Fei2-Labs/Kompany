@@ -51,7 +51,17 @@ class KompanySettings(BaseSettings):
     model_primary: str = "claude-sonnet-4-20250514"
     model_economy: str = "claude-haiku-4-20250414"
 
-    model_config = {"env_prefix": "KOMPANY_", "env_file": ".env"}
+    # ``extra="ignore"`` is critical: a founder's machine may have any
+    # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
+    # custom-provider keys from earlier testing). Without this, engine
+    # boot crashes with ``Extra inputs are not permitted`` and the UI
+    # gets a 500 on /status + /targets, which then silently hides the
+    # team-review proposal card. Diagnosed 2026-05-26.
+    model_config = {
+        "env_prefix": "KOMPANY_",
+        "env_file": ".env",
+        "extra": "ignore",
+    }
 
     def get_model_for_tier(self, tier: str) -> str:
         return {

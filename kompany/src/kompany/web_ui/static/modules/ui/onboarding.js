@@ -673,11 +673,26 @@ async function renderMission() {
         </div>
       `
     : "";
-  const stalePill = state.approval_stale
+  // Compute stale based on snapshot diff — only show the warning when
+  // the founder has actually edited a value since the last successful
+  // review. Bare back-nav from review → mission shows nothing.
+  const snap = state.data._submitted_snapshot;
+  const hasReviewed = !!state.approval && !!snap;
+  const valuesDiffer = hasReviewed && (
+    Number(snap.initial_budget) !== Number(state.data.initial_budget) ||
+    Number(snap.revenue_target) !== Number(state.data.revenue_target) ||
+    (snap.customer_target ?? null) !== (state.data.customer_target ?? null) ||
+    (snap.deadline || null) !== (state.data.deadline || null)
+  );
+  const stalePill = valuesDiffer
     ? `<div class="onb-stale-pill" id="onb-stale-pill">
-         ⚠ Team review is stale. Submitting will discard the previous review and re-run with fresh numbers (one LLM debate, ~$0.50).
+         ⚠ You changed your numbers since the last review. Submitting will discard the previous review and re-run with the new numbers (one LLM debate, ~$0.50).
        </div>`
-    : "";
+    : (hasReviewed
+        ? `<div class="onb-stale-pill onb-stale-pill-ok" id="onb-stale-pill">
+             ✓ These numbers were already reviewed by the team — submitting goes straight back to the review screen without another LLM call.
+           </div>`
+        : "");
   frame.innerHTML = `
     ${stalePill}
     <div class="onb-mission-grid">
@@ -809,10 +824,30 @@ async function renderMission() {
     if (!state.data.revenue_target && tplRev) state.data.revenue_target = tplRev;
     if (state.data.customer_target == null && tplCust != null) state.data.customer_target = tplCust;
     if (!state.data.deadline) state.data.deadline = defaultDeadline();
-    // Re-submit invalidates any prior review. submitOnboarding() will
-    // re-fetch a fresh approval (explicitly POSTing /targets/review on
-    // the backend reuse path, which currently skips the auto re-run).
-    const wasStale = state.approval_stale;
+
+    // Did the founder actually change anything since the last
+    // submission? If not, skip the LLM re-review entirely — they're
+    // just back-navigating to look at the form, not revising it.
+    // User feedback 2026-05-26: "只有用户改了数值才应该重新 review"
+    const snap = state.data._submitted_snapshot;
+    const noChange = (
+      state.approval &&
+      snap &&
+      Number(snap.initial_budget) === Number(state.data.initial_budget) &&
+      Number(snap.revenue_target) === Number(state.data.revenue_target) &&
+      (snap.customer_target ?? null) === (state.data.customer_target ?? null) &&
+      (snap.deadline || null) === (state.data.deadline || null)
+    );
+    if (noChange) {
+      // Existing approval is still authoritative — jump straight to
+      // review without spending more tokens.
+      state.approval_stale = false;
+      saveDraft();
+      goto("review");
+      return;
+    }
+
+    // Real change → invalidate prior review and re-run.
     state.approval = null;
     state.approval_stale = false;
     state.approval_failure_reason = null;
@@ -834,7 +869,9 @@ async function renderMission() {
       submitBtn.textContent = `[ ▸ team reviewing your targets… ${fmtSec(elapsed)} ]`;
     }, 1000);
     try {
-      await submitOnboarding({ forceReview: wasStale });
+      // True change → always force a fresh review so the LLM debate
+      // actually re-runs on the new numbers.
+      await submitOnboarding({ forceReview: true });
     } finally {
       clearInterval(submitTimer);
       // submitOnboarding navigates to "review" on success and stays
@@ -974,6 +1011,14 @@ async function submitOnboarding(opts = {}) {
     state.approval_failure_reason = reviewId ? "fetch_failed" : "no_review_id";
     state.approval_failure_id = reviewId;
   } else {
+    // Snapshot the values the LLM reviewed against so a later back-to-
+    // mission visit with NO edits can skip the re-review.
+    state.data._submitted_snapshot = {
+      initial_budget: Number(state.data.initial_budget),
+      revenue_target: Number(state.data.revenue_target),
+      customer_target: state.data.customer_target ?? null,
+      deadline: state.data.deadline || null,
+    };
     state.approval_failure_reason = null;
     state.approval_failure_id = null;
   }
@@ -1028,7 +1073,10 @@ function renderReview() {
   `;
   host.appendChild(navBar);
   navBar.querySelector("#onb-back-review").addEventListener("click", () => {
-    state.approval_stale = !!state.approval;
+    // Don't flag stale on bare back-nav — staleness is now computed on
+    // submit by comparing form values to the snapshot from the last
+    // successful review. Going back just to LOOK at the mission step
+    // shouldn't force the founder to re-burn LLM tokens.
     goto("mission");
   });
 

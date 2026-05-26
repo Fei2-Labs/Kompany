@@ -1357,6 +1357,11 @@ body.onboarding-body { padding-bottom: 40px; }
   letter-spacing: 0.02em;
   margin-bottom: 12px;
 }
+.onb-stale-pill-ok {
+  background: rgba(0, 255, 65, 0.06);
+  border-color: rgba(0, 255, 65, 0.45);
+  color: rgba(0, 255, 65, 0.85);
+}
 
 /* Mission grid stacks on small screens */
 @media (max-width: 720px) {
