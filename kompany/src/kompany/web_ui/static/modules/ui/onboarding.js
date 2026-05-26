@@ -391,7 +391,12 @@ async function renderConnection() {
     if (res.ok) envDefaults = await res.json();
   } catch (_) { /* swallow — wizard renders empty */ }
   if (envDefaults) {
-    if (!state.data.provider && envDefaults.suggested_provider) {
+    // provider defaults to "anthropic", so we can't gate on
+    // "!provider". Apply the env suggestion unless the founder has
+    // explicitly picked a provider this flow (tracked via
+    // _provider_touched, set in the combobox change handler + survives
+    // in the draft/stash).
+    if (!state.data._provider_touched && envDefaults.suggested_provider) {
       state.data.provider = envDefaults.suggested_provider;
       envApplied = true;
     }
@@ -460,6 +465,9 @@ async function renderConnection() {
 
   providerInput.addEventListener("change", () => {
     state.data.provider = providerInput.value;
+    // Mark the provider as founder-chosen so a later re-render doesn't
+    // clobber it with the env-suggested default.
+    state.data._provider_touched = true;
     if (providerInput.value === "custom") baseField.hidden = false;
     else baseField.hidden = true;
     state.ping = null;

@@ -138,10 +138,31 @@ install, no terminal, no browser.
 > See [`docs/context/distribution.md`](docs/context/distribution.md) for
 > the toolchain prerequisites.
 
-On first launch the window shows a cyberpunk onboarding form: pick a
-model provider, drop in an API key, choose a starter company, and
-optionally type a first directive. The dashboard pivots in the same
-window once provisioning completes.
+On first launch a cyberpunk onboarding wizard walks you through six
+steps in the same window:
+
+1. **Connection** — pick a provider, paste your API key (custom
+   OpenAI-compatible endpoints supported; auto-filled from env / a
+   data-dir `.env` when present). The key is verified by a live ping
+   and stashed to the encrypted vault immediately, so quitting
+   mid-flow never loses it.
+2. **Faction** — choose a starter company template.
+3. **Mission** — set your starting budget, revenue target, optional
+   customer-count goal, and a deadline.
+4. **Team review** — your AI C-suite debates whether the targets are
+   feasible and proposes adjusted numbers. You can keep yours, adopt
+   theirs, or counter-propose (re-runs only when you actually change a
+   number).
+5. **First move** — the team proposes three concrete first-week
+   directives with day-by-day plans; pick one or ask the team
+   questions. Don't like them? Regenerate.
+6. **Provisioning** — the dashboard pivots in once the picked
+   directive is activated and the team starts executing it.
+
+Time in Kompany is **virtual**: one completed task = one virtual day,
+so a paused app doesn't burn runway and a fast-working team isn't
+penalised by the wall clock. The header's `days: N/M vd` tracks
+virtual days against your deadline budget.
 
 ## Installation
 
@@ -206,7 +227,7 @@ ANTHROPIC_API_KEY=your-key-here
 
 To use other providers, set their API keys too (see [Multi-Provider LLM Support](#multi-provider-llm-support)).
 
-For the encrypted credential vault, Kompany will first look for a vault master key in the OS keychain when available, then fall back to `KOMPANY_VAULT_KEY`. You can override the keychain location with `KOMPANY_VAULT_KEYCHAIN_SERVICE` and `KOMPANY_VAULT_KEYCHAIN_ACCOUNT`.
+For the encrypted credential vault, Kompany resolves a master key in this order: `KOMPANY_VAULT_KEY` env var → a file at `<data_dir>/.vault-master.key` (auto-generated, `chmod 0600`) → OS keychain (legacy) → freshly generated. The file-based default avoids repeated keychain prompts on unsigned desktop builds. Your provider API keys are then stored encrypted (Fernet) in the `credential_vault` table under that master key — never in plaintext on disk.
 
 ### Verify Installation
 
@@ -648,7 +669,7 @@ Kompany supports multiple LLM providers. Any model tier (apex/primary/economy) c
 | **Kimi (Moonshot)** | Moonshot v1, Kimi | `openai` SDK (compatible endpoint) |
 | **Custom** | Any OpenAI-compatible model | `openai` SDK (your base URL) |
 
-Provider detection is automatic based on model name prefix (`claude-` → Anthropic, `gpt-`/`o3`/`o4` → OpenAI, `gemini-` → Gemini, etc.). Unknown model names route to the custom endpoint if `CUSTOM_LLM_BASE_URL` is set, otherwise fall back to Anthropic.
+Provider routing: if `CUSTOM_LLM_BASE_URL` is set, **all** model tiers route to that custom OpenAI-compatible endpoint (it wins regardless of model-name prefix — so `gpt-5.5` or any model name your endpoint exposes works). Otherwise detection falls back to the model-name prefix (`claude-` → Anthropic, `gpt-`/`o3`/`o4` → OpenAI, `gemini-` → Gemini, etc.).
 
 ### Example: Use GPT-4o as primary
 
@@ -663,6 +684,19 @@ models:
   primary: "gpt-4o"
   economy: "gemini-2.0-flash"
 ```
+
+### Example: Use a custom OpenAI-compatible endpoint (e.g. a gateway)
+
+```bash
+export CUSTOM_LLM_BASE_URL="https://your-gateway.example.com/v1/"
+export CUSTOM_LLM_API_KEY="sk-..."
+# Point all three tiers at a model your endpoint serves:
+export KOMPANY_MODEL_APEX="gpt-5.5"
+export KOMPANY_MODEL_PRIMARY="gpt-5.5"
+export KOMPANY_MODEL_ECONOMY="gpt-5.5"
+```
+
+In the desktop app you don't need env vars: pick **custom (OpenAI-compatible)** on the connection step, paste the base URL + key, and the wizard discovers available models from the endpoint's `/models` index. If those env vars (or a `.env` in the data dir) are present, the connection step auto-fills them.
 
 Cost tracking works across all providers — each model has pricing data for accurate ledger entries.
 
@@ -704,10 +738,10 @@ kompany/
 │   │   └── models.py             # Pydantic state models
 │   └── interfaces/
 │       ├── cli.py                # Typer CLI (8 commands)
-│       ├── api.py                # FastAPI REST API (7 endpoints)
+│       ├── api.py                # FastAPI REST API (onboarding, status, debate, projects, targets, ...)
 │       ├── mcp_server.py         # MCP Server (8 tools)
 │       └── sdk.py                # Python SDK
-├── tests/                        # 81 tests across 11 modules
+├── tests/                        # 850+ tests
 ├── pyproject.toml                # Package definition
 └── README.md
 ```
@@ -726,9 +760,18 @@ kompany/
 | `GLM_API_KEY` | Zhipu AI (GLM) API key | No |
 | `KIMI_API_KEY` | Moonshot (Kimi) API key | No |
 | `CUSTOM_LLM_API_KEY` | Custom endpoint API key | No |
-| `CUSTOM_LLM_BASE_URL` | Custom OpenAI-compatible base URL | No |
+| `CUSTOM_LLM_BASE_URL` | Custom OpenAI-compatible base URL (when set, all tiers route here) | No |
+| `KOMPANY_MODEL_APEX` / `_PRIMARY` / `_ECONOMY` | Override the three model tiers (use the same value for all three with a custom endpoint) | No |
+| `KOMPANY_VAULT_KEY` | Fernet master key for the credential vault (else a `.vault-master.key` file is auto-generated in the data dir) | No |
+| `KOMPANY_DATA_DIR` | Data directory (DB, vault, `.env`) | No (defaults to `~/.kompany`; the desktop app uses its platform app-support dir) |
 | `KOMPANY_DB_PATH` | SQLite database path | No (defaults to `./kompany.db`) |
 | `KOMPANY_CONFIG_PATH` | YAML config file path | No |
+
+Unknown env vars are ignored (not an error), so your shell or `.env`
+can carry unrelated keys without breaking engine startup. The desktop
+app — launched from Finder/Explorer — doesn't inherit your shell
+environment, so for it, place a `.env` in the data directory
+(`<data_dir>/.env`).
 
 ### Company Config (YAML)
 
@@ -761,7 +804,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-All 81 tests should pass.
+All 850+ tests should pass.
 
 ---
 
