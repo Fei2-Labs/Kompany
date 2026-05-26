@@ -1463,10 +1463,21 @@ def rotate_credential_key(req: CredentialKeyRotationRequest) -> dict[str, Any]:
 @app.get("/status")
 def get_status() -> dict[str, Any]:
     """Get company status."""
+    from kompany.state import virtual_clock
+
     engine = get_engine()
     cfo = engine.registry.get("cfo")
     summary = cfo.get_summary()
     active = engine.projects.list_active()
+    # Virtual clock fields default to 0 if the engine fake (in unit
+    # tests) doesn't expose a db handle.
+    try:
+        vd_elapsed = virtual_clock.get_elapsed(engine.db)
+        vd_budget = virtual_clock.get_budget(engine.db)
+    except AttributeError:
+        vd_elapsed = 0
+        vd_budget = 0
+    vd_remaining = max(0, vd_budget - vd_elapsed) if vd_budget > 0 else 0
     return {
         "company": engine.settings.company_name,
         "goal": engine.settings.company_goal,
@@ -1478,6 +1489,13 @@ def get_status() -> dict[str, Any]:
         "total_expenses": summary["total_expenses"],
         "total_ai_costs": abs(summary["total_ai_costs"]),
         "active_projects": len(active),
+        # Virtual time (model D — 1 completed task = 1 virtual day).
+        # The dashboard's days/burn surface this, not wall time, so a
+        # paused Kompany doesn't lose runway and a productive team
+        # doesn't get penalised by clock drift.
+        "virtual_days_elapsed": vd_elapsed,
+        "virtual_days_budget": vd_budget,
+        "virtual_days_remaining": vd_remaining,
     }
 
 

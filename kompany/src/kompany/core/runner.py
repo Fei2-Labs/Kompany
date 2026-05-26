@@ -257,6 +257,25 @@ class ProjectRunner:
                 task.id, TaskStatus.COMPLETED, result=task_result
             )
 
+            # Virtual clock model D: 1 completed task = 1 virtual day.
+            # The dashboard's runway counter advances here, not on the
+            # wall clock, so a founder who pauses Kompany doesn't lose
+            # days and a team that burns through 5 tasks quickly still
+            # consumes 5 days of budget.
+            from kompany.state import virtual_clock
+
+            virtual_clock.tick(
+                self._engine.db,
+                "task.completed",
+                detail={
+                    "task_id": task.id,
+                    "project_id": project.id,
+                    "agent": task.assigned_agent,
+                },
+                audit=self._engine.audit,
+                project_id=project.id,
+            )
+
             # Record a memory for the agent
             self._engine.memory.remember(
                 agent_role=task.assigned_agent,

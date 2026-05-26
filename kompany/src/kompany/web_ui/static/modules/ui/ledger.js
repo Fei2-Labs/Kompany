@@ -52,35 +52,18 @@ function renderTargets(targetsPayload, status) {
   }
 
   if (daysEl) {
-    const deadline = auth.deadline;
-    if (!deadline) {
+    // Virtual time (model D): the founder's deadline gets translated
+    // into a virtual-day budget at template-apply, and the team burns
+    // 1 virtual day per completed task. Display the remaining /
+    // budget so a paused Kompany doesn't lie about runway and a
+    // productive team doesn't get penalised by clock drift.
+    const budget = Number((status && status.virtual_days_budget) || 0);
+    const remaining = Number((status && status.virtual_days_remaining) || 0);
+    if (budget > 0) {
+      daysEl.textContent = `${remaining}/${budget} vd`;
+    } else {
       daysEl.textContent = "--";
-      return;
     }
-    const dl = new Date(deadline);
-    if (Number.isNaN(dl.getTime())) {
-      daysEl.textContent = "--";
-      return;
-    }
-    const now = new Date();
-    const totalMs = dl - now;
-    const totalDays = Math.max(0, Math.ceil(totalMs / (1000 * 60 * 60 * 24)));
-    // We don't have "duration from start" persisted; show N remaining
-    // out of N + days elapsed since the founder set the deadline. The
-    // founder's company-creation timestamp comes from status.created_at
-    // when available.
-    let denom = totalDays;
-    if (status && status.created_at) {
-      const start = new Date(status.created_at);
-      if (!Number.isNaN(start.getTime())) {
-        const elapsed = Math.max(
-          0,
-          Math.floor((now - start) / (1000 * 60 * 60 * 24)),
-        );
-        denom = totalDays + elapsed;
-      }
-    }
-    daysEl.textContent = denom > 0 ? `${totalDays}/${denom}` : `${totalDays}`;
   }
 }
 

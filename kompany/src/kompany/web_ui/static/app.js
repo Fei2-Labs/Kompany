@@ -7,8 +7,8 @@ import { connectSSE } from "/ui/static/modules/sse.js";
 import { renderOffice } from "/ui/static/modules/ui/office.js";
 import { renderInbox } from "/ui/static/modules/ui/inbox.js";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
-import { renderLedger } from "/ui/static/modules/ui/ledger.js";
-import { renderEpisodes } from "/ui/static/modules/ui/episodes.js";
+import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
+import { renderEpisodes } from "/ui/static/modules/ui/episodes.js?v=2";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 
