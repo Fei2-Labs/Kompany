@@ -1184,11 +1184,23 @@ async function renderFirstMove(opts) {
   setStatus("first move");
   opts = opts || {};
 
+  // Force regen: clear stepHost immediately so the old cards visually
+  // disappear, and skip the draft-resolve path so the loading-screen
+  // branch always fires (which is what actually POSTs with force:true).
+  if (opts.forceRegen) {
+    stepHost.innerHTML = "";
+    state.draft_project_ids = [];
+  }
+
   // Step 1: resolve any existing draft projects.
   let projects = state.draft_project_ids;
   if (!projects || projects.length === 0) {
-    projects = await fetchDraftProjects();
-    state.draft_project_ids = projects;
+    if (!opts.forceRegen) {
+      projects = await fetchDraftProjects();
+      state.draft_project_ids = projects;
+    } else {
+      projects = [];
+    }
   }
 
   // Step 2: if zero drafts, ask the team to PROPOSE the first three
@@ -1332,8 +1344,14 @@ async function renderFirstMove(opts) {
       if (!confirm("Regenerate? The team will run a fresh debate (~$0.30 in LLM spend) and produce 3 new directives. The current ones will be discarded.")) {
         return;
       }
-      state.draft_project_ids = [];
-      renderFirstMove({ forceRegen: true });
+      // Lock the button so a double-click can't fire two regens before
+      // the next paint clears the host. The renderFirstMove call below
+      // wipes stepHost immediately on the forceRegen path, but the
+      // first frame can still land a second click on this same button.
+      regenBtn.disabled = true;
+      regenBtn.textContent = "[ ↻ regenerating… ]";
+      setStatus("team regenerating directives…");
+      await renderFirstMove({ forceRegen: true });
     });
   }
   document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
