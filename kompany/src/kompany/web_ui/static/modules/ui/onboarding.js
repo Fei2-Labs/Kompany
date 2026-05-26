@@ -758,9 +758,13 @@ async function renderMission() {
         </div>
         ${customerTargetField}
         <div class="onb-field onb-mission-row">
-          <label for="onb-deadline">DEADLINE (ISO date)</label>
+          <label for="onb-date-display">DEADLINE (ISO date)</label>
           <div class="onb-date-row">
-            <input id="onb-deadline" type="date" class="onb-date" autocomplete="off">
+            <div class="onb-datepicker" id="onb-datepicker">
+              <button type="button" class="onb-date-display" id="onb-date-display" aria-haspopup="dialog" aria-expanded="false">----‑--‑--</button>
+              <input type="hidden" id="onb-deadline">
+              <div class="onb-date-pop" id="onb-date-pop" hidden role="dialog" aria-label="Pick deadline"></div>
+            </div>
             <button type="button" class="onb-btn onb-date-today" id="onb-deadline-today" aria-label="Set deadline to today" title="Jump to today">[ • today ]</button>
           </div>
         </div>
@@ -806,18 +810,115 @@ async function renderMission() {
     custEl.placeholder = tplCust != null ? `${tplCust} (template default)` : "e.g. 50";
   }
 
-  // Re-populate from saved draft (if exists) or fall back to template default.
+  // Populate with the EFFECTIVE value: the founder's entry if present,
+  // otherwise the template default written as a real value (not just a
+  // placeholder). This way back-nav from review shows actual numbers
+  // in the fields instead of empty inputs — and persists them to
+  // state.data so the next submit/back round-trips correctly.
+  if (state.data.initial_budget == null && tplBudget) state.data.initial_budget = tplBudget;
+  if (state.data.revenue_target == null && tplRev) state.data.revenue_target = tplRev;
+  if (custEl && state.data.customer_target == null && tplCust != null) state.data.customer_target = tplCust;
+  if (!state.data.deadline) state.data.deadline = defaultDeadline();
   budgetEl.value = state.data.initial_budget != null ? String(state.data.initial_budget) : "";
   revEl.value = state.data.revenue_target != null ? String(state.data.revenue_target) : "";
   if (custEl) {
     custEl.value = state.data.customer_target != null ? String(state.data.customer_target) : "";
   }
   dlEl.value = state.data.deadline || defaultDeadline();
-  todayBtn.addEventListener("click", () => {
-    dlEl.value = formatLocalISODate(new Date());
-    state.data.deadline = dlEl.value;
+
+  // Custom themed date picker — the native <input type=date> popup is
+  // OS-rendered (white) and can't be CSS-themed inside the WebView, so
+  // we render our own green/black month grid. dlEl (hidden) stays the
+  // source of truth; setDeadline keeps state + display + preview in sync.
+  const dateDisplay = document.getElementById("onb-date-display");
+  const datePop = document.getElementById("onb-date-pop");
+  const datePicker = document.getElementById("onb-datepicker");
+
+  function setDeadline(iso) {
+    state.data.deadline = iso || null;
+    dlEl.value = iso || "";
+    dateDisplay.textContent = iso || "----‑--‑--";
     saveDraft();
     refreshPreview(manifest);
+  }
+  setDeadline(state.data.deadline || defaultDeadline());
+
+  // ``viewMonth`` is the first day of the month currently shown in the
+  // grid. Defaults to the selected deadline's month.
+  let viewMonth = (() => {
+    const d = state.data.deadline ? new Date(state.data.deadline + "T00:00:00") : new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1);
+  })();
+
+  const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const WD = ["Mo","Tu","We","Th","Fr","Sa","Su"];
+
+  function renderCalendar() {
+    const year = viewMonth.getFullYear();
+    const month = viewMonth.getMonth();
+    // JS getDay(): 0=Sun..6=Sat. We want Monday-first, so shift.
+    const firstDow = (new Date(year, month, 1).getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const selected = state.data.deadline || "";
+    const todayIso = formatLocalISODate(new Date());
+
+    let cells = "";
+    for (let i = 0; i < firstDow; i++) cells += `<span class="onb-cal-empty"></span>`;
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const cls = [
+        "onb-cal-day",
+        iso === selected ? "selected" : "",
+        iso === todayIso ? "today" : "",
+      ].filter(Boolean).join(" ");
+      cells += `<button type="button" class="${cls}" data-iso="${iso}">${day}</button>`;
+    }
+    datePop.innerHTML = `
+      <div class="onb-cal-head">
+        <button type="button" class="onb-cal-nav" data-nav="-1" aria-label="Previous month">◂</button>
+        <span class="onb-cal-title">${MONTHS[month]} ${year}</span>
+        <button type="button" class="onb-cal-nav" data-nav="1" aria-label="Next month">▸</button>
+      </div>
+      <div class="onb-cal-grid onb-cal-wd">${WD.map((w) => `<span class="onb-cal-wdh">${w}</span>`).join("")}</div>
+      <div class="onb-cal-grid onb-cal-days">${cells}</div>
+    `;
+    datePop.querySelectorAll(".onb-cal-nav").forEach((b) => {
+      b.addEventListener("click", () => {
+        viewMonth = new Date(year, month + Number(b.dataset.nav), 1);
+        renderCalendar();
+      });
+    });
+    datePop.querySelectorAll(".onb-cal-day").forEach((b) => {
+      b.addEventListener("click", () => {
+        setDeadline(b.dataset.iso);
+        closeCal();
+      });
+    });
+  }
+
+  function openCal() {
+    viewMonth = (() => {
+      const d = state.data.deadline ? new Date(state.data.deadline + "T00:00:00") : new Date();
+      return new Date(d.getFullYear(), d.getMonth(), 1);
+    })();
+    renderCalendar();
+    datePop.hidden = false;
+    dateDisplay.setAttribute("aria-expanded", "true");
+  }
+  function closeCal() {
+    datePop.hidden = true;
+    dateDisplay.setAttribute("aria-expanded", "false");
+  }
+  dateDisplay.addEventListener("click", () => {
+    if (datePop.hidden) openCal(); else closeCal();
+  });
+  // Close on outside click.
+  document.addEventListener("click", (e) => {
+    if (!datePicker.contains(e.target)) closeCal();
+  });
+
+  todayBtn.addEventListener("click", () => {
+    setDeadline(formatLocalISODate(new Date()));
   });
 
   function onChange() {
@@ -826,14 +927,12 @@ async function renderMission() {
     if (custEl) {
       state.data.customer_target = custEl.value ? Number(custEl.value) : null;
     }
-    state.data.deadline = dlEl.value || null;
     saveDraft();
     refreshPreview(manifest);
   }
   budgetEl.addEventListener("input", onChange);
   revEl.addEventListener("input", onChange);
   if (custEl) custEl.addEventListener("input", onChange);
-  dlEl.addEventListener("input", onChange);
 
   // Glossary editor
   const glossaryList = document.getElementById("onb-glossary-list");

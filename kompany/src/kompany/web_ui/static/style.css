@@ -1055,6 +1055,92 @@ body.onboarding-body { padding-bottom: 40px; }
   min-width: 92px;
   white-space: nowrap;
 }
+
+/* Custom themed date picker (replaces the OS-native calendar popup,
+ * which renders white and can't be CSS-themed inside the WebView). */
+.onb-datepicker {
+  position: relative;
+  flex: 1 1 220px;
+}
+.onb-date-display {
+  width: 100%;
+  text-align: left;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.onb-date-display:hover { border-color: rgba(0, 255, 65, 0.6); }
+.onb-date-display:focus { outline: none; border-color: #00ff41; }
+.onb-date-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 40;
+  width: 252px;
+  background: #020a04;
+  border: 1px solid rgba(0, 255, 65, 0.55);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+  padding: 10px;
+}
+.onb-date-pop[hidden] { display: none; }
+.onb-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.onb-cal-title {
+  color: #00ff41;
+  letter-spacing: 0.08em;
+  font-size: 13px;
+}
+.onb-cal-nav {
+  background: transparent;
+  border: 1px solid rgba(0, 255, 65, 0.35);
+  color: #00ff41;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 9px;
+}
+.onb-cal-nav:hover { background: rgba(0, 255, 65, 0.1); }
+.onb-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.onb-cal-wd { margin-bottom: 4px; }
+.onb-cal-wdh {
+  text-align: center;
+  font-size: 10px;
+  color: rgba(0, 255, 65, 0.45);
+  padding: 2px 0;
+}
+.onb-cal-empty { aspect-ratio: 1; }
+.onb-cal-day {
+  aspect-ratio: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(0, 255, 65, 0.8);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.onb-cal-day:hover { border-color: rgba(0, 255, 65, 0.5); background: rgba(0, 255, 65, 0.06); }
+.onb-cal-day.today { color: rgba(255, 200, 80, 0.95); border-color: rgba(255, 200, 80, 0.4); }
+.onb-cal-day.selected {
+  background: rgba(0, 255, 65, 0.18);
+  border-color: #00ff41;
+  color: #00ff41;
+  font-weight: 600;
+}
 .onb-mission-right {
   border-left: 1px dashed rgba(0, 255, 65, 0.25);
   padding-left: 18px;
