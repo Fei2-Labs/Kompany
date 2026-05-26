@@ -188,3 +188,24 @@ def test_first_move_project_completes_and_materializes(tmp_path):
     # Re-run must not duplicate the task set (idempotent decomposition).
     runner.run(project.id)
     assert len(engine.projects.list_tasks(project.id)) == 3
+
+
+def test_projects_get_tolerates_draft_status(tmp_path):
+    """A 'draft' row must construct a Project without a pydantic enum
+    error. Templates stage directives as draft; before ProjectStatus
+    had a DRAFT member, projects.get() on a draft row crashed — which
+    killed the post-onboarding kickoff mid-run (project.kickoff_failed:
+    'Input should be active/paused/completed/failed input_value=draft')."""
+    from kompany.state.models import ProjectStatus
+
+    engine = FakeEngine(tmp_path)
+    engine.db.execute(
+        "INSERT INTO projects (id, name, type, status, plan, assigned_agents, "
+        "created_at, updated_at) VALUES "
+        "('drafted', 'Staged directive', 'operational', 'draft', '{}', '[]', "
+        "datetime('now'), datetime('now'))"
+    )
+    engine.db.commit()
+    proj = engine.projects.get("drafted")
+    assert proj is not None
+    assert proj.status == ProjectStatus.DRAFT

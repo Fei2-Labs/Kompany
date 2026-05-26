@@ -35,6 +35,15 @@ class LedgerEntry(BaseModel):
 
 
 class ProjectStatus(str, Enum):
+    # DRAFT is a real state: Templates.apply stages suggested directives
+    # as 'draft' rows and the onboarding first-move step keeps the
+    # unpicked directives as drafts. It was historically written as a
+    # literal string that bypassed this enum, so any code path that
+    # constructed a Project model from a draft row (projects.get,
+    # _row_to_project, episode materialization) raised a pydantic enum
+    # validation error — which silently killed the post-onboarding
+    # kickoff mid-run. Modelling it here fixes that class of crash.
+    DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETED = "completed"
