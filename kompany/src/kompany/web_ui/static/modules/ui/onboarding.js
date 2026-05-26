@@ -1325,7 +1325,17 @@ async function renderFirstMove(opts) {
            ? `<p class="onb-firstmove-hint">✓ team finished in ${teamProposalElapsed < 60 ? teamProposalElapsed + "s" : Math.floor(teamProposalElapsed/60) + "m " + (teamProposalElapsed%60) + "s"}.</p>`
            : (proposalStatus === "heuristic"
               ? `<p class="onb-firstmove-hint onb-firstmove-hint-warn">⚠ heuristic seeds — your AI team didn't actually propose these. To get real team-designed directives, fix your LLM provider in settings and retry.</p>`
-              : "")}`
+              : "")}
+         <div class="onb-firstmove-confirm" id="onb-firstmove-confirm" hidden>
+           <span class="onb-firstmove-confirm-msg">
+             ⚠ Spend ~$0.30 to have the team produce 3 NEW directives?
+             The current 3 will be discarded.
+           </span>
+           <span class="onb-firstmove-confirm-actions">
+             <button type="button" class="onb-btn onb-btn-back" id="onb-firstmove-regen-cancel">[ ◂ cancel ]</button>
+             <button type="button" class="onb-btn onb-btn-danger-solid" id="onb-firstmove-regen-confirm">[ ▸ CONFIRM — spend $0.30 ]</button>
+           </span>
+         </div>`
       : `<p class="onb-empty">Go back to the team-review step and pick keep / adopt / counter first.</p>`}
     <div class="onb-actions">
       <button type="button" class="onb-btn onb-btn-back" id="onb-back-firstmove">[ ◂ back to review ]</button>
@@ -1340,31 +1350,34 @@ async function renderFirstMove(opts) {
   document.getElementById("onb-back-firstmove").addEventListener("click", () => goto("review"));
   const regenBtn = document.getElementById("onb-firstmove-regen");
   if (regenBtn) {
-    // Two-stage confirm: first click arms the button ("click again to
-    // confirm"), second click fires. Tauri's WebView ships with
-    // window.confirm() returning false silently, which is why an
-    // earlier version of this handler felt dead — never use native
-    // dialogs from inside the desktop shell.
-    let regenArmed = false;
-    let regenArmTimeout = null;
-    regenBtn.addEventListener("click", async () => {
-      if (!regenArmed) {
-        regenArmed = true;
-        regenBtn.textContent = "[ ! click again — spend ~$0.30 to regenerate ]";
-        regenBtn.classList.add("onb-btn-danger");
-        regenArmTimeout = setTimeout(() => {
-          regenArmed = false;
-          regenBtn.textContent = "[ ↻ none fit — regenerate ]";
-          regenBtn.classList.remove("onb-btn-danger");
-        }, 5000);
-        return;
-      }
-      clearTimeout(regenArmTimeout);
+    // Inline confirm panel (no native dialogs — Tauri WebView blocks
+    // window.confirm). Click regen → reveal the panel under the cards
+    // with explicit "spend $0.30" warning + CONFIRM / cancel buttons.
+    const confirmPanel = document.getElementById("onb-firstmove-confirm");
+    const confirmBtn = document.getElementById("onb-firstmove-regen-confirm");
+    const cancelBtn = document.getElementById("onb-firstmove-regen-cancel");
+    regenBtn.addEventListener("click", () => {
       regenBtn.disabled = true;
-      regenBtn.textContent = "[ ↻ regenerating… ]";
-      setStatus("team regenerating directives…");
-      await renderFirstMove({ forceRegen: true });
+      if (confirmPanel) {
+        confirmPanel.hidden = false;
+        confirmPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
     });
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        if (confirmPanel) confirmPanel.hidden = true;
+        regenBtn.disabled = false;
+      });
+    }
+    if (confirmBtn) {
+      confirmBtn.addEventListener("click", async () => {
+        confirmBtn.disabled = true;
+        if (cancelBtn) cancelBtn.disabled = true;
+        confirmBtn.textContent = "[ ↻ regenerating… ]";
+        setStatus("team regenerating directives…");
+        await renderFirstMove({ forceRegen: true });
+      });
+    }
   }
   document.getElementById("onb-firstmove-skip").addEventListener("click", () => {
     state.data.first_directive_project_id = null;

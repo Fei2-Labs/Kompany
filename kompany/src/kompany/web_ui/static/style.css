@@ -1219,6 +1219,36 @@ body.onboarding-body { padding-bottom: 40px; }
   color: rgba(255, 200, 80, 0.98) !important;
   background: rgba(255, 140, 0, 0.08);
 }
+.onb-btn-danger-solid {
+  border-color: rgba(255, 140, 0, 0.95);
+  background: rgba(255, 140, 0, 0.18);
+  color: rgba(255, 220, 120, 1);
+  font-weight: 600;
+}
+.onb-btn-danger-solid:hover:not(:disabled) {
+  background: rgba(255, 140, 0, 0.30);
+}
+.onb-firstmove-confirm {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(255, 140, 0, 0.75);
+  background: rgba(255, 140, 0, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.onb-firstmove-confirm[hidden] { display: none; }
+.onb-firstmove-confirm-msg {
+  color: rgba(255, 200, 80, 0.95);
+  font-size: 13px;
+  flex: 1 1 280px;
+}
+.onb-firstmove-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
 .onb-empty { font-style: italic; color: rgba(0, 255, 65, 0.55); padding: 8px 0; }
 
 /* Free-form directive input shown when the template staged 0 drafts
