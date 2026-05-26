@@ -150,3 +150,41 @@ def test_decompose_handles_first_move_week_plan(tmp_path):
     # Round-robin across [cro, cmo, cfo]
     assigned = [t.assigned_agent for t in tasks]
     assert assigned == ["cro", "cmo", "cfo", "cro", "cmo"]
+
+
+def test_first_move_project_completes_and_materializes(tmp_path):
+    """A first-move directive (week_plan) must be marked COMPLETED once
+    all its tasks finish — and materialize an episode — so the dashboard
+    shows a finished run instead of "team working" forever. Re-running
+    must NOT duplicate the task set."""
+    from kompany.state.models import ProjectStatus
+
+    engine = FakeEngine(tmp_path)
+    materialized: list[str] = []
+    engine.episodes = SimpleNamespace(
+        record_or_update=lambda pid: materialized.append(pid) or {"retention_tier": "full"}
+    )
+
+    project = Project(
+        name="Pre-sell audit",
+        type=ProjectType.OPERATIONAL,
+        plan={
+            "week_plan": ["Mon: a", "Tue: b", "Wed: c"],
+            "proposer_role": "cro",
+            "other_agents_involved": [],
+            "source": "team_proposal_first_week",
+        },
+        assigned_agents=[],
+    )
+    engine.projects.create(project)
+
+    runner = ProjectRunner(engine)
+    runner.run(project.id)
+    # All 3 tasks done → completed + episode materialized.
+    assert engine.projects.get(project.id).status == ProjectStatus.COMPLETED
+    assert materialized == [project.id]
+    assert len(engine.projects.list_tasks(project.id)) == 3
+
+    # Re-run must not duplicate the task set (idempotent decomposition).
+    runner.run(project.id)
+    assert len(engine.projects.list_tasks(project.id)) == 3

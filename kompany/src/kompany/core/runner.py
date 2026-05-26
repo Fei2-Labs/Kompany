@@ -56,17 +56,20 @@ class ProjectRunner:
             project_id=project_id,
         )
 
-        # Decompose the project plan into tasks
-        tasks = self._decompose(project)
-
-        # Create tasks in DB
-        for spec in tasks:
-            task = Task(
-                project_id=project_id,
-                title=spec.title,
-                assigned_agent=spec.assigned_agent,
-            )
-            self._engine.projects.create_task(task)
+        # Decompose only if the project has no tasks yet. Re-running an
+        # already-decomposed project (e.g. the founder re-picked it from
+        # step 5, or a second kickoff fired) must NOT create a duplicate
+        # task set — it should just run whatever pending tasks remain.
+        existing_tasks = self._engine.projects.list_tasks(project_id)
+        if not existing_tasks:
+            tasks = self._decompose(project)
+            for spec in tasks:
+                task = Task(
+                    project_id=project_id,
+                    title=spec.title,
+                    assigned_agent=spec.assigned_agent,
+                )
+                self._engine.projects.create_task(task)
 
         result = self._run_existing_tasks(project, result)
 
@@ -131,8 +134,40 @@ class ProjectRunner:
             self._execute_task(task, project, result)
 
         result.fully_funded = self._engine.projects.is_fully_funded(project.id)
-        if result.fully_funded:
+        # Mark the project completed when EITHER it's fully funded (revenue
+        # projects) OR — for a first-move directive specifically — every
+        # task is done. First-move directives have no funding target, so
+        # without the all-tasks-done branch they ran all their tasks but
+        # stayed 'active' forever (no episode, dashboard stuck on "team
+        # working" + 0 episodes). The branch is scoped to first-move plans
+        # so it does NOT bypass the delivery-approval gate that governs
+        # decision-packet / revenue projects (a rejected delivery must
+        # keep the project incomplete).
+        plan = project.plan or {}
+        is_first_move = (
+            bool(plan.get("week_plan"))
+            or str(plan.get("source", "")).startswith("team_proposal_first_week")
+        )
+        all_tasks = self._engine.projects.list_tasks(project.id)
+        unfinished = [
+            t for t in all_tasks
+            if (t.status.value if isinstance(t.status, TaskStatus) else t.status)
+            not in {TaskStatus.COMPLETED.value}
+        ]
+        if result.fully_funded or (is_first_move and all_tasks and not unfinished):
             self._engine.projects.update_status(project.id, ProjectStatus.COMPLETED)
+            # Materialize the episode now so the dashboard's EPISODES
+            # panel shows the finished run. Best-effort — a
+            # materialization failure must not break the run result.
+            try:
+                self._engine.episodes.record_or_update(project.id)
+            except Exception as exc:  # noqa: BLE001
+                self._engine.audit.record(
+                    "learning.episode_record_failed",
+                    "Episode materialization failed after completion",
+                    detail={"project_id": project.id, "error": str(exc)},
+                    project_id=project.id,
+                )
         return result
 
     def _decompose(self, project: Project) -> list[TaskSpec]:
