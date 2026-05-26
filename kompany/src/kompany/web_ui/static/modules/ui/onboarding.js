@@ -375,13 +375,42 @@ function sleep(ms) {
 // Step 1 — Connection (provider + API key + TEST UPLINK)
 // ---------------------------------------------------------------------------
 
-function renderConnection() {
+async function renderConnection() {
   setStatus("connection");
+
+  // Pre-fill from .env / shell env so a founder who already configured
+  // CUSTOM_LLM_BASE_URL + CUSTOM_LLM_API_KEY doesn't have to retype.
+  // Only applies when the corresponding state slot is empty — never
+  // overrides values the founder typed by hand.
+  let envDefaults = null;
+  let envApplied = false;
+  try {
+    const res = await fetch("/onboarding/env_defaults", {
+      headers: { Accept: "application/json" },
+    });
+    if (res.ok) envDefaults = await res.json();
+  } catch (_) { /* swallow — wizard renders empty */ }
+  if (envDefaults) {
+    if (!state.data.provider && envDefaults.suggested_provider) {
+      state.data.provider = envDefaults.suggested_provider;
+      envApplied = true;
+    }
+    if (!state.data.base_url && envDefaults.custom_base_url) {
+      state.data.base_url = envDefaults.custom_base_url;
+      envApplied = true;
+    }
+    if (!state.api_key && envDefaults.custom_api_key) {
+      state.api_key = envDefaults.custom_api_key;
+      envApplied = true;
+    }
+  }
+
   const frame = document.createElement("div");
   frame.className = "frame onb-conn";
   frame.dataset.label = "CONNECTION // 01.uplink";
 
   frame.innerHTML = `
+    ${envApplied ? `<div class="onb-env-banner">✓ pre-filled from .env — edit any field to override.</div>` : ""}
     <div class="onb-field">
       <label for="onb-provider-button">// COGNITION_PROVIDER</label>
       <input type="hidden" id="onb-provider" value="${escapeHtml(state.data.provider)}">
@@ -406,7 +435,7 @@ function renderConnection() {
 
     <div class="onb-field">
       <label for="onb-api-key">// PROVIDER_LICENSE_KEY</label>
-      <input id="onb-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." required>
+      <input id="onb-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." value="${escapeHtml(state.api_key || '')}" required>
       <p class="onb-hint">Stored encrypted in the local vault. Never sent anywhere else.</p>
     </div>
 

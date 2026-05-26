@@ -160,6 +160,46 @@ class PingResponse(BaseModel):
     error_message: str | None = None
 
 
+class EnvDefaultsResponse(BaseModel):
+    """Environment-supplied defaults the onboarding wizard pre-fills."""
+
+    model_config = ConfigDict(extra="forbid")
+    custom_base_url: str = ""
+    # Full key returned — same machine, user controls .env. The wizard
+    # masks all-but-last-4 in the input rendering; the raw value is
+    # POSTed back on submit so the founder doesn't need to retype.
+    custom_api_key: str = ""
+    # Provider hint: "custom" if base_url + api_key both set, else "".
+    suggested_provider: str = ""
+    suggested_model: str = ""
+
+
+@app.get("/onboarding/env_defaults", response_model=EnvDefaultsResponse)
+def onboarding_env_defaults() -> EnvDefaultsResponse:
+    """Return any pre-filled values the wizard should display in step 1.
+
+    Reads directly from the process environment (and the ``.env`` file
+    pydantic-settings already loaded) so the founder doesn't have to
+    re-type a custom-LLM base URL + key they already configured in
+    their shell. Returns empty strings when nothing is set — the
+    wizard then falls back to its blank state.
+    """
+    base = os.environ.get("CUSTOM_LLM_BASE_URL", "").strip()
+    key = os.environ.get("CUSTOM_LLM_API_KEY", "").strip()
+    # Model hint: prefer KOMPANY_MODEL_PRIMARY, fall back to APEX.
+    model = (
+        os.environ.get("KOMPANY_MODEL_PRIMARY", "").strip()
+        or os.environ.get("KOMPANY_MODEL_APEX", "").strip()
+    )
+    suggested = "custom" if (base and key) else ""
+    return EnvDefaultsResponse(
+        custom_base_url=base,
+        custom_api_key=key,
+        suggested_provider=suggested,
+        suggested_model=model,
+    )
+
+
 def _resolved_data_dir() -> Path:
     """Resolve the data dir the sidecar should use, consistent with engine."""
     env = os.environ.get("KOMPANY_DATA_DIR", "").strip()

@@ -1362,6 +1362,15 @@ body.onboarding-body { padding-bottom: 40px; }
   border-color: rgba(0, 255, 65, 0.45);
   color: rgba(0, 255, 65, 0.85);
 }
+.onb-env-banner {
+  background: rgba(0, 200, 255, 0.06);
+  border: 1px solid rgba(0, 200, 255, 0.45);
+  color: rgba(0, 200, 255, 0.9);
+  padding: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+}
 
 /* Mission grid stacks on small screens */
 @media (max-width: 720px) {

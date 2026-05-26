@@ -235,6 +235,57 @@ def test_complete_with_unknown_provider_surfaces_error_inline(
 # ---------------------------------------------------------------------------
 
 
+def test_env_defaults_empty_when_unset(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh process with no CUSTOM_LLM_* env vars returns empty
+    strings — wizard falls back to its blank state."""
+    monkeypatch.delenv("CUSTOM_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("CUSTOM_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("KOMPANY_MODEL_PRIMARY", raising=False)
+    monkeypatch.delenv("KOMPANY_MODEL_APEX", raising=False)
+    res = client.get("/onboarding/env_defaults")
+    assert res.status_code == 200
+    body = res.json()
+    assert body == {
+        "custom_base_url": "",
+        "custom_api_key": "",
+        "suggested_provider": "",
+        "suggested_model": "",
+    }
+
+
+def test_env_defaults_returns_custom_when_both_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both CUSTOM_LLM_BASE_URL + CUSTOM_LLM_API_KEY set →
+    suggested_provider='custom' so the wizard auto-picks the right
+    slot. Model hint flows through from KOMPANY_MODEL_PRIMARY."""
+    monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://swedeapi.example/v1/")
+    monkeypatch.setenv("CUSTOM_LLM_API_KEY", "sk-test-1234")
+    monkeypatch.setenv("KOMPANY_MODEL_PRIMARY", "gpt-5.5")
+    res = client.get("/onboarding/env_defaults")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["custom_base_url"] == "https://swedeapi.example/v1/"
+    assert body["custom_api_key"] == "sk-test-1234"
+    assert body["suggested_provider"] == "custom"
+    assert body["suggested_model"] == "gpt-5.5"
+
+
+def test_env_defaults_partial_does_not_suggest_provider(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only base_url set (no key) → suggested_provider stays empty so
+    the wizard doesn't auto-pick custom with a half-configured pair."""
+    monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://example/v1/")
+    monkeypatch.delenv("CUSTOM_LLM_API_KEY", raising=False)
+    res = client.get("/onboarding/env_defaults")
+    body = res.json()
+    assert body["custom_base_url"] == "https://example/v1/"
+    assert body["suggested_provider"] == ""
+
+
 def test_health_returns_200_without_engine(client: TestClient) -> None:
     res = client.get("/health")
     assert res.status_code == 200
