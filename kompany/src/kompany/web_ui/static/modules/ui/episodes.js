@@ -23,6 +23,16 @@ function roleLabel(r) {
   return ROLE_NAMES[key] || (r ? String(r).toUpperCase() : "?");
 }
 
+// Parse a task ``result`` (JSON string or object) into a plain object
+// so we can read output + outcome + founder_action.
+function parseResult(result) {
+  let r = result;
+  if (typeof r === "string") {
+    try { r = JSON.parse(r); } catch (_) { return { output: r }; }
+  }
+  return r && typeof r === "object" ? r : { output: String(r || "") };
+}
+
 // The task ``result`` is a JSON string like {"output": "...markdown..."}.
 // Pull out the human text; fall back to the raw string.
 function taskOutput(result) {
@@ -111,25 +121,44 @@ function renderEpisodeDetail(p) {
     })
     .join("");
 
+  const STATUS_CLS = { completed: "ok", delivered: "deliv", blocked: "err", failed: "err" };
+  const STATUS_LABEL = {
+    completed: "DONE (executed)",
+    delivered: "DELIVERED — your move",
+    blocked: "BLOCKED — needs integration",
+    failed: "failed",
+  };
+  let actionCount = 0;
+
   const taskCards = tasks.map((t, i) => {
     const agent = roleLabel(t.assigned_agent);
     const sub = SUBAGENTS.has(String(t.assigned_agent || "").toLowerCase());
-    const out = taskOutput(t.result);
-    const statusCls = t.status === "completed" ? "ok" : (t.status === "failed" ? "err" : "warn");
+    const result = parseResult(t.result);
+    const out = result.output || taskOutput(t.result);
+    const st = String(t.status || "").toLowerCase();
+    const statusCls = STATUS_CLS[st] || "warn";
+    const statusLabel = STATUS_LABEL[st] || (t.status || "?");
+    const founderAction = result.founder_action || "";
+    if (st === "delivered" || st === "blocked") actionCount += 1;
     return `
       <div class="ep-task">
         <div class="ep-task-head">
           <span class="ep-task-ix">${i + 1}</span>
           <span class="ep-task-agent${sub ? " ep-chip-sub" : ""}">${escapeHTML(agent)}${sub ? " ⚙" : ""}</span>
           <span class="ep-task-title">${escapeHTML(t.title || "(untitled)")}</span>
-          <span class="ep-task-status ${statusCls}">${escapeHTML(t.status || "?")}</span>
+          <span class="ep-task-status ${statusCls}">${escapeHTML(statusLabel)}</span>
           <span class="ep-task-caret">▸</span>
         </div>
         <div class="ep-task-body">
+          ${founderAction ? `<div class="ep-task-action">▸ YOUR MOVE: ${escapeHTML(founderAction)}</div>` : ""}
           ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output recorded.</div>`}
         </div>
       </div>`;
   }).join("");
+
+  const actionBanner = actionCount > 0
+    ? `<div class="ep-action-banner">⚠ ${actionCount} task${actionCount === 1 ? "" : "s"} need YOU to act — the team produced the assets but can't send/publish without integrations. Open each task for the handoff.</div>`
+    : "";
 
   return `
     <div class="ep-detail">
@@ -144,6 +173,7 @@ function renderEpisodeDetail(p) {
         </div>
         ${agentChips ? `<div class="ep-agents">who worked: ${agentChips}</div>` : ""}
       </div>
+      ${actionBanner}
       <div class="ep-tasks">${taskCards || `<div class="empty">no tasks.</div>`}</div>
       <div class="ep-raw-wrap">
         <button type="button" class="ep-raw-toggle">[ ⋯ raw json ]</button>

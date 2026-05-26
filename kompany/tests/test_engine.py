@@ -991,7 +991,10 @@ def test_resume_project_returns_checkpoint_and_result(engine):
     assert result["tasks_completed"] == 1
     statuses = {task.id: task.status for task in engine.projects.list_tasks(project.id)}
     assert statuses[completed.id] == TaskStatus.COMPLETED
-    assert statuses[pending.id] == TaskStatus.COMPLETED
+    # Honest-status (step A): a freshly executed task with no real
+    # integration resolves to DELIVERED (asset for the founder), not
+    # COMPLETED.
+    assert statuses[pending.id] == TaskStatus.DELIVERED
 
 
 def test_execute_project_short_circuits_when_suspended(engine):

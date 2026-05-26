@@ -73,8 +73,15 @@ class Project(BaseModel):
 class TaskStatus(str, Enum):
     PENDING = "pending"
     ACTIVE = "active"
-    COMPLETED = "completed"
+    COMPLETED = "completed"   # truly executed — a real tool/integration acted
+    DELIVERED = "delivered"   # asset produced; founder must act to finish it
+    BLOCKED = "blocked"       # needs an integration/credential the agent lacks
     FAILED = "failed"
+
+    @classmethod
+    def terminal(cls) -> set["TaskStatus"]:
+        """States a task does not leave on its own."""
+        return {cls.COMPLETED, cls.DELIVERED, cls.BLOCKED, cls.FAILED}
 
 
 class ApprovalStatus(str, Enum):

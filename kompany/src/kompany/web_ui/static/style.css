@@ -290,7 +290,20 @@ body::after {
 .ep-task-status { font-size: 10px; }
 .ep-task-status.ok { color: #00ff41; }
 .ep-task-status.warn { color: rgba(255, 200, 80, 0.95); }
+.ep-task-status.deliv { color: rgba(255, 200, 80, 0.98); font-weight: 700; }
 .ep-task-status.err { color: #ff4444; }
+.ep-task-action {
+  margin-bottom: 8px; padding: 6px 9px;
+  border-left: 3px solid rgba(255, 200, 80, 0.8);
+  background: rgba(255, 200, 80, 0.06);
+  color: rgba(255, 220, 120, 0.98); font-size: 11px; font-weight: 600;
+}
+.ep-action-banner {
+  padding: 8px 11px; margin-bottom: 4px;
+  border: 1px dashed rgba(255, 200, 80, 0.6);
+  background: rgba(255, 200, 80, 0.06);
+  color: rgba(255, 220, 120, 0.98); font-size: 11px; line-height: 1.4;
+}
 .ep-task-caret { color: rgba(0, 255, 65, 0.5); transition: transform 0.15s; }
 .ep-task.open .ep-task-caret { transform: rotate(90deg); }
 .ep-task-body { display: none; padding: 0 11px 10px 11px; }

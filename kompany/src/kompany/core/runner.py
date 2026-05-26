@@ -13,6 +13,55 @@ from kompany.state.models import (
     TaskStatus,
 )
 
+# Phrases an agent uses when it produced a plan/asset but could not
+# actually perform an external action (no integration/credentials).
+_BLOCKED_SIGNALS = (
+    "cannot truthfully confirm",
+    "do not have access",
+    "don't have access",
+    "no access to your",
+    "unable to send",
+    "i cannot send",
+    "i can't send",
+    "do not have the ability",
+    "cannot actually",
+    "i am unable to",
+    "without access to your",
+    "requires access to your",
+    "need access to your",
+    "i have not sent",
+    "i did not send",
+    "have not actually",
+)
+
+
+def _classify_outcome(title: str, output: str) -> tuple[str, str]:
+    """Classify what really happened in a task (hybrid mode, step A).
+
+    Returns ``(outcome, founder_action)`` where outcome is one of
+    ``"completed" | "delivered" | "blocked"``.
+
+    No real integrations are wired yet, so an agent never truly
+    *executes* an external action — it produces an asset, and sometimes
+    says outright it can't act. We therefore never return ``completed``
+    here; that state is reserved for a future real-tool path. We
+    distinguish ``blocked`` (the agent flagged missing access) from
+    ``delivered`` (a usable asset the founder must act on).
+    """
+    low = (output or "").lower()
+    blocked = any(sig in low for sig in _BLOCKED_SIGNALS)
+
+    t = (title or "").lower()
+    if any(k in t for k in ("send", "outreach", "dm", "email", "message", "follow up", "follow-up")):
+        action = "Send the drafted messages yourself (your email / LinkedIn / DMs) — the team can't send without an integration."
+    elif any(k in t for k in ("checkout", "landing page", "stripe", "gumroad", "publish", "page")):
+        action = "Publish the asset: paste the copy/links into Stripe/Gumroad or your site."
+    elif any(k in t for k in ("call", "book", "schedule", "onboard")):
+        action = "Run the calls / scheduling yourself using the script above."
+    else:
+        action = "Review the asset above and execute it."
+
+    return ("blocked" if blocked else "delivered"), action
 
 class TaskSpec(BaseModel):
     """A single task specification."""
@@ -148,11 +197,12 @@ class ProjectRunner:
             bool(plan.get("week_plan"))
             or str(plan.get("source", "")).startswith("team_proposal_first_week")
         )
+        terminal_vals = {s.value for s in TaskStatus.terminal()}
         all_tasks = self._engine.projects.list_tasks(project.id)
         unfinished = [
             t for t in all_tasks
             if (t.status.value if isinstance(t.status, TaskStatus) else t.status)
-            not in {TaskStatus.COMPLETED.value}
+            not in terminal_vals
         ]
         if result.fully_funded or (is_first_move and all_tasks and not unfinished):
             self._engine.projects.update_status(project.id, ProjectStatus.COMPLETED)
@@ -286,10 +336,30 @@ class ProjectRunner:
 
             resp = agent.call(prompt=prompt, action_type="agent_task_execute")
 
-            # Store result
-            task_result = {"output": resp.text, "cost": resp.cost_usd}
+            # Honest-outcome classification (hybrid mode, step A). Agents
+            # currently have no real integrations, so they produce ASSETS
+            # (copy, lists, plans) and sometimes explicitly say they can't
+            # perform an external action. Marking all of that "completed"
+            # lied to the founder. Classify the output into:
+            #   completed → a real tool/integration actually acted (none
+            #               wired yet, so unreachable until integrations land)
+            #   blocked   → the agent says it lacks access/credentials to act
+            #   delivered → an asset was produced; the founder must act on it
+            outcome, founder_action = _classify_outcome(task.title, resp.text)
+            status = {
+                "blocked": TaskStatus.BLOCKED,
+                "delivered": TaskStatus.DELIVERED,
+                "completed": TaskStatus.COMPLETED,
+            }.get(outcome, TaskStatus.DELIVERED)
+
+            task_result = {
+                "output": resp.text,
+                "cost": resp.cost_usd,
+                "outcome": outcome,
+                "founder_action": founder_action,
+            }
             self._engine.projects.update_task_status(
-                task.id, TaskStatus.COMPLETED, result=task_result
+                task.id, status, result=task_result
             )
 
             # Virtual clock model D: 1 completed task = 1 virtual day.

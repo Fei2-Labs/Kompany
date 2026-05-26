@@ -105,7 +105,10 @@ def test_runner_resume_skips_completed_and_retries_failed(tmp_path):
     assert FakeAgent.calls == 1
     statuses = {task.id: task.status for task in engine.projects.list_tasks(project.id)}
     assert statuses[completed.id] == TaskStatus.COMPLETED
-    assert statuses[failed.id] == TaskStatus.COMPLETED
+    # Re-run of the failed task now resolves to DELIVERED (honest outcome:
+    # the agent produced an asset, no real integration executed). Was
+    # COMPLETED before step-A honest-status landed.
+    assert statuses[failed.id] == TaskStatus.DELIVERED
     event_types = [event["event_type"] for event in engine.audit.recent(limit=20)]
     assert "project.resume_started" in event_types
     assert "project.resume_completed" in event_types
@@ -188,6 +191,51 @@ def test_first_move_project_completes_and_materializes(tmp_path):
     # Re-run must not duplicate the task set (idempotent decomposition).
     runner.run(project.id)
     assert len(engine.projects.list_tasks(project.id)) == 3
+
+
+def test_classify_outcome_blocked_vs_delivered():
+    """Honest-status classifier: an agent that says it can't act is
+    BLOCKED; one that produced an asset is DELIVERED. Never 'completed'
+    until a real integration executes (mode-3 hybrid, step A)."""
+    from kompany.core.runner import _classify_outcome
+
+    out_blocked, action_b = _classify_outcome(
+        "Wed: Send outreach to 40 contacts",
+        "## Execution status\n\nI cannot truthfully confirm that messages "
+        "were sent because I do not have access to your email or LinkedIn.",
+    )
+    assert out_blocked == "blocked"
+    assert "send" in action_b.lower()
+
+    out_delivered, action_d = _classify_outcome(
+        "Mon: Define a $99 paid offer",
+        "## Paid Offer Defined\n\nHere is the full offer copy and pricing...",
+    )
+    assert out_delivered == "delivered"
+    assert action_d  # non-empty founder action
+
+
+def test_first_move_tasks_end_delivered_not_completed(tmp_path):
+    """End-to-end: a first-move run with a plain (non-integration) agent
+    leaves tasks DELIVERED — not COMPLETED — and the project still
+    completes + materializes (all tasks terminal)."""
+    from types import SimpleNamespace
+    from kompany.state.models import Project, ProjectType, ProjectStatus, TaskStatus
+
+    engine = FakeEngine(tmp_path)
+    engine.episodes = SimpleNamespace(record_or_update=lambda pid: {"retention_tier": "full"})
+    project = Project(
+        name="Pre-sell",
+        type=ProjectType.OPERATIONAL,
+        plan={"week_plan": ["Mon: a", "Tue: b"], "proposer_role": "cro",
+              "other_agents_involved": [], "source": "team_proposal_first_week"},
+        assigned_agents=[],
+    )
+    engine.projects.create(project)
+    ProjectRunner(engine).run(project.id)
+    statuses = {t.status for t in engine.projects.list_tasks(project.id)}
+    assert statuses == {TaskStatus.DELIVERED}
+    assert engine.projects.get(project.id).status == ProjectStatus.COMPLETED
 
 
 def test_projects_get_tolerates_draft_status(tmp_path):
