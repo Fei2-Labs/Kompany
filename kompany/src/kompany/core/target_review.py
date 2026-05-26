@@ -534,22 +534,30 @@ class TargetReviewMixin:
         # subscription that will miss the events (the debate happens
         # server-side before any client subscribes). Defaults to zeros
         # when a response doesn't carry the field (e.g. CEO-only path).
+        from kompany.llm.models import estimate_cost
+
+        def _agent_cost(resp) -> dict[str, float]:
+            in_tok = int(getattr(resp, "input_tokens", 0) or 0)
+            out_tok = int(getattr(resp, "output_tokens", 0) or 0)
+            cost = float(getattr(resp, "cost_usd", 0.0) or 0.0)
+            # Fall back to estimating from tokens when the response didn't
+            # carry a cost (e.g. custom-provider responses populate tokens
+            # but leave cost_usd at 0 because the client sets cost in a
+            # later step that some paths skip). Without this the team-
+            # review meters showed $0.00 despite real token usage.
+            if cost <= 0.0 and (in_tok or out_tok):
+                model = getattr(resp, "model", "") or ""
+                cost = estimate_cost(model, in_tok, out_tok)
+            return {
+                "input_tokens": in_tok,
+                "output_tokens": out_tok,
+                "cost_usd": cost,
+            }
+
         per_agent_cost = {
-            "cfo": {
-                "input_tokens": int(getattr(cfo_resp, "input_tokens", 0) or 0),
-                "output_tokens": int(getattr(cfo_resp, "output_tokens", 0) or 0),
-                "cost_usd": float(getattr(cfo_resp, "cost_usd", 0.0) or 0.0),
-            },
-            "cos": {
-                "input_tokens": int(getattr(cos_resp, "input_tokens", 0) or 0),
-                "output_tokens": int(getattr(cos_resp, "output_tokens", 0) or 0),
-                "cost_usd": float(getattr(cos_resp, "cost_usd", 0.0) or 0.0),
-            },
-            "ceo": {
-                "input_tokens": int(getattr(ceo_resp, "input_tokens", 0) or 0),
-                "output_tokens": int(getattr(ceo_resp, "output_tokens", 0) or 0),
-                "cost_usd": float(getattr(ceo_resp, "cost_usd", 0.0) or 0.0),
-            },
+            "cfo": _agent_cost(cfo_resp),
+            "cos": _agent_cost(cos_resp),
+            "ceo": _agent_cost(ceo_resp),
         }
         return (cfo_claims, cos_claims, ceo_claims, rationale, per_agent_cost)
 
