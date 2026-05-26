@@ -11,7 +11,7 @@ from pathlib import Path
 from secrets import compare_digest
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, Form, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -1708,8 +1708,40 @@ def execute_project(project_id: str) -> dict[str, Any]:
     return engine.execute_project(project_id)
 
 
+def _kickoff_project_safely(project_id: str) -> None:
+    """Background-task wrapper around ``engine.execute_project`` used by
+    the First-Move activation handler.
+
+    A founder finishing onboarding picked a directive and expected the
+    team to actually START WORKING. Just flipping ``status='active'``
+    leaves the dashboard idle until something else triggers a run —
+    historically the founder had to call ``/projects/{id}/execute``
+    manually, which they have no way to discover. Bug surfaced
+    2026-05-26 when a freshly-onboarded user landed on the dashboard
+    with cash $50, 1 active project, and 11 idle agents — staring at
+    an empty office wondering "what now?".
+
+    Any exception inside this background task is swallowed + audited
+    so a runner blow-up never poisons the HTTP response the founder
+    is waiting on. The next dashboard refresh will surface the audit
+    entry in the live timeline.
+    """
+    engine = get_engine()
+    try:
+        engine.execute_project(project_id)
+    except Exception as exc:  # noqa: BLE001 — background swallow
+        engine.audit.record(
+            event_type="project.kickoff_failed",
+            action=f"Background kickoff for project {project_id} failed",
+            detail={"project_id": project_id, "error": str(exc)},
+            project_id=project_id,
+        )
+
+
 @app.post("/projects/{project_id}/activate")
-def activate_project(project_id: str) -> dict[str, Any]:
+def activate_project(
+    project_id: str, background_tasks: BackgroundTasks = None  # type: ignore[assignment]
+) -> dict[str, Any]:
     """Promote a ``status='draft'`` project to ``active``.
 
     Used by the onboard-v2 "First Move" step (PRD 05-19-onboard-v2-flow):
@@ -1758,12 +1790,29 @@ def activate_project(project_id: str) -> dict[str, Any]:
         },
         project_id=project_id,
     )
+    # Auto-kickoff: schedule the actual run in the background so the
+    # founder doesn't land on an idle dashboard. The HTTP response
+    # returns fast (sub-50ms) and the team starts working in parallel.
+    # ``background_tasks`` is ``None`` for direct in-process calls
+    # (tests, CLI) — skip the kickoff in that case so test fixtures
+    # don't unexpectedly burn LLM tokens.
+    kickoff_scheduled = False
+    if background_tasks is not None:
+        background_tasks.add_task(_kickoff_project_safely, project_id)
+        engine.audit.record(
+            event_type="project.kickoff_scheduled",
+            action=f"Scheduled background kickoff for project {project_id}",
+            detail={"project_id": project_id},
+            project_id=project_id,
+        )
+        kickoff_scheduled = True
     proj = engine.projects.get(project_id)
     return {
         "id": project_id,
         "status": "active",
         "previous_status": current_status,
         "name": proj.name if proj else None,
+        "kickoff_scheduled": kickoff_scheduled,
     }
 
 

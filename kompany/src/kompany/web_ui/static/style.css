@@ -231,6 +231,15 @@ body::after {
 .episode-item:hover { border-color: rgba(0, 255, 65, 0.27); background: rgba(0, 255, 65, 0.04); }
 .episode-item.active { border-color: #00ff41; background: rgba(0, 255, 65, 0.10); }
 .episode-item .pid { color: rgba(0, 255, 65, 0.55); font-size: 10px; }
+.episode-item.active-project { border-color: rgba(255, 200, 80, 0.55); }
+.active-pulse {
+  color: rgba(255, 200, 80, 0.95);
+  animation: pulse-flicker 1.6s ease-in-out infinite;
+}
+@keyframes pulse-flicker {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
 .episodes-payload {
   background: rgba(0, 255, 65, 0.03);
   padding: 12px;

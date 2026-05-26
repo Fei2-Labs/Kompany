@@ -93,6 +93,32 @@ async function boot() {
   renderInbox(store.state.inbox || []);
   renderEpisodes(store.state.episodes || []);
   renderLedger(store.state.status || {});
+
+  // Defensive 10s poll: SSE pushes status updates but the boot fetch
+  // sometimes races (engine still warming up, sidecar not ready to
+  // serve /status). If that boot fetch failed, the header stuck on
+  // cash $0 even though the ledger had $50. Poll keeps the header
+  // honest while the team auto-kickoff runs in the background and
+  // burns LLM tokens.
+  setInterval(async () => {
+    try {
+      const fresh = await api.status();
+      store.update("status", fresh);
+    } catch (_) { /* swallow — next tick retries */ }
+  }, 10000);
+  // Also re-fetch agents + inbox + episodes on the same cadence so a
+  // background project execution surfaces in the UI without SSE.
+  setInterval(async () => {
+    try {
+      const [a, i, e] = await Promise.allSettled([
+        api.agentsStatus(), api.inbox(), api.episodes(),
+      ]);
+      if (a.status === "fulfilled") store.update("agents", a.value);
+      if (i.status === "fulfilled") store.update("inbox", i.value);
+      if (e.status === "fulfilled") store.update("episodes", e.value);
+    } catch (_) {}
+  }, 7000);
+
   initCostChip();
   initTimeline();
   initDirective(async (text) => {

@@ -26,11 +26,43 @@ async function loadPayload(projectId) {
   }
 }
 
+async function renderEmptyState(list) {
+  // First-time founder lands on the dashboard right after First Move
+  // and sees "no episodes yet" — meaningless if they just activated a
+  // directive. Surface the active project + the fact that the team is
+  // working on it so they know SOMETHING is happening, not that the
+  // app forgot what they picked.
+  list.innerHTML = `<div class="empty">no episodes yet — loading active project…</div>`;
+  try {
+    const projects = await fetch("/projects", {
+      headers: { Accept: "application/json" },
+    }).then((r) => (r.ok ? r.json() : []));
+    if (!projects || !projects.length) {
+      list.innerHTML = `<div class="empty">no episodes yet. Type a directive below to give the team something to run.</div>`;
+      return;
+    }
+    const activeRows = projects
+      .filter((p) => p.status === "active")
+      .map((p) => `
+        <div class="episode-item active-project" data-pid="${escapeHTML(p.id)}">
+          <div>▸ ${escapeHTML(p.name || "(unnamed)")}</div>
+          <div class="pid">${escapeHTML(p.id)} :: <span class="active-pulse">team working</span></div>
+        </div>`)
+      .join("");
+    list.innerHTML = `
+      <div class="empty">team is running your first-week directive. No completed episodes yet — first one will appear below when the team checkpoints.</div>
+      ${activeRows}
+    `;
+  } catch (_) {
+    list.innerHTML = `<div class="empty">no episodes yet.</div>`;
+  }
+}
+
 export function renderEpisodes(rows) {
   const list = document.getElementById("episodes-list");
   if (!list) return;
   if (!rows || !rows.length) {
-    list.innerHTML = `<div class="empty">no episodes yet.</div>`;
+    renderEmptyState(list);
     return;
   }
   list.innerHTML = rows.map((r) => {
