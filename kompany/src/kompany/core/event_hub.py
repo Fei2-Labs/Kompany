@@ -40,6 +40,21 @@ class EventHub:
         self._capacity = max(1, int(capacity))
         self._subscribers: set[asyncio.Queue[dict]] = set()
         self._next_id = 0
+        # The asyncio loop the SSE endpoint runs on. Captured when a
+        # subscriber connects (on the loop thread) so that publishes
+        # coming from OTHER threads — e.g. the post-onboarding kickoff
+        # which runs execute_project in a FastAPI BackgroundTask / anyio
+        # worker thread — can hop back onto the loop via
+        # call_soon_threadsafe instead of being dropped.
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def register_loop(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
+        """Record the event loop SSE subscribers run on. Called from the
+        SSE endpoint (which executes on that loop)."""
+        try:
+            self._loop = loop or asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
 
     # ------------------------------------------------------------------
     # Publisher side
@@ -53,11 +68,6 @@ class EventHub:
         """
         if not self._subscribers:
             return
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            # No loop -> nothing is listening. Drop silently.
-            return
 
         self._next_id += 1
         envelope = {
@@ -65,6 +75,32 @@ class EventHub:
             "type": str(event_type),
             "data": dict(payload or {}),
         }
+
+        try:
+            asyncio.get_running_loop()
+            on_loop = True
+        except RuntimeError:
+            on_loop = False
+
+        if on_loop:
+            # Publisher is on the event loop thread — enqueue directly.
+            for queue in list(self._subscribers):
+                self._enqueue(queue, envelope)
+            return
+
+        # Publisher is on a background/worker thread (e.g. the kickoff
+        # task). asyncio.Queue is NOT thread-safe, so we must hop back
+        # onto the SSE loop. Without this, every event a background task
+        # emits (task.started / task.completed / virtual_day.advanced)
+        # was dropped and the live timeline stayed empty.
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return
+        loop.call_soon_threadsafe(self._fanout, envelope)
+
+    def _fanout(self, envelope: dict) -> None:
+        """Enqueue an envelope to every subscriber. Runs on the loop
+        thread (called directly, or via call_soon_threadsafe)."""
         for queue in list(self._subscribers):
             self._enqueue(queue, envelope)
 

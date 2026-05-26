@@ -101,3 +101,34 @@ def test_publish_with_no_loop_is_noop():
     # No subscribers + no loop -> silent drop, no exception.
     hub.publish("audit.x", {"y": 2})
     assert hub.subscriber_count == 0
+
+
+@pytest.mark.asyncio
+async def test_publish_from_background_thread_reaches_subscriber():
+    """Regression: a publish from a non-loop thread (the kickoff task
+    runs execute_project in a worker thread) must still reach SSE
+    subscribers via call_soon_threadsafe. Before the fix these events
+    were dropped because publish() bailed on get_running_loop()
+    RuntimeError, so the live timeline stayed empty during background
+    project execution."""
+    import threading
+
+    hub = EventHub()
+    hub.register_loop()  # capture this test's running loop
+
+    gen = hub.subscribe()
+    sub_task = asyncio.ensure_future(gen.__anext__())
+    await asyncio.sleep(0)  # let the subscriber enter queue.get()
+
+    # Publish from a separate OS thread (no asyncio loop there).
+    def worker():
+        hub.publish("audit.task.completed", {"action": "from thread"})
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    received = await asyncio.wait_for(sub_task, timeout=1.0)
+    await gen.aclose()
+    assert received["type"] == "audit.task.completed"
+    assert received["data"]["action"] == "from thread"

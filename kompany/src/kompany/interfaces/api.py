@@ -2095,6 +2095,10 @@ async def _sse_event_stream() -> AsyncIterator[bytes]:
       * a periodic ``:keepalive`` comment so reverse proxies don't time out
     """
     hub = get_event_hub()
+    # Capture the loop this SSE stream runs on so publishes from
+    # background threads (the kickoff task) can hop back onto it via
+    # call_soon_threadsafe instead of being dropped.
+    hub.register_loop()
     queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=256)
     hub._subscribers.add(queue)  # type: ignore[attr-defined]
     try:
