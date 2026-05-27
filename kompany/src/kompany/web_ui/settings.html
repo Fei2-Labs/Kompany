@@ -47,8 +47,24 @@
       <div class="set-result" id="set-result" hidden></div>
     </div>
 
+    <div class="frame" data-label="SETTINGS // integrations">
+      <h2 class="set-h">// EMAIL (SMTP)</h2>
+      <p class="set-note">Connect an email account so the team can actually SEND outreach — not just draft it. Works with Gmail app-passwords or any SMTP provider. Stored encrypted in the vault.</p>
+      <div class="set-meta" id="email-status">checking…</div>
+      <div class="set-row"><label>SMTP host</label><input id="em-host" placeholder="smtp.gmail.com"></div>
+      <div class="set-row"><label>Port</label><input id="em-port" value="587"></div>
+      <div class="set-row"><label>User (email)</label><input id="em-user" placeholder="you@gmail.com" autocomplete="off"></div>
+      <div class="set-row"><label>Password / app-password</label><input id="em-pass" type="password" autocomplete="off"></div>
+      <div class="set-row"><label>From (optional)</label><input id="em-from" placeholder="defaults to user"></div>
+      <div class="set-control">
+        <button type="button" id="em-connect" class="onb-btn onb-btn-submit">[ ▸ CONNECT + VERIFY ]</button>
+        <button type="button" id="em-test" class="onb-btn onb-btn-discuss">[ ✉ send test ]</button>
+      </div>
+      <div class="set-result" id="email-result" hidden></div>
+    </div>
+
     <div class="frame set-soon" data-label="SETTINGS // more">
-      <p class="set-note">Integrations, credentials, founder profile + rules are coming here (backlog #5–#8). For now this page switches the model — useful when your provider drops one.</p>
+      <p class="set-note">Credentials, founder profile + rules are coming here (backlog #6–#8).</p>
     </div>
   </div>
 
@@ -112,6 +128,55 @@
     });
 
     load();
+
+    // ---- Email integration ----
+    const emStatus = document.getElementById("email-status");
+    const emResult = document.getElementById("email-result");
+    function emShow(msg, ok) {
+      emResult.hidden = false; emResult.textContent = msg;
+      emResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    async function emLoad() {
+      try {
+        const r = await fetch("/integrations", { headers: { Accept: "application/json" } });
+        const list = await r.json();
+        const email = (list || []).find((i) => i.integration_id === "email_smtp");
+        emStatus.textContent = email && email.connected
+          ? "✓ connected — the team can send email"
+          : "not connected";
+      } catch (_) { emStatus.textContent = "status unavailable"; }
+    }
+    document.getElementById("em-connect").addEventListener("click", async () => {
+      const body = {
+        smtp_host: document.getElementById("em-host").value.trim(),
+        smtp_port: document.getElementById("em-port").value.trim() || "587",
+        smtp_user: document.getElementById("em-user").value.trim(),
+        smtp_password: document.getElementById("em-pass").value,
+        smtp_from: document.getElementById("em-from").value.trim(),
+      };
+      if (!body.smtp_host || !body.smtp_user || !body.smtp_password) {
+        emShow("host + user + password required", false); return;
+      }
+      emShow("verifying…", true);
+      try {
+        const r = await fetch("/integrations/email/connect", {
+          method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        emShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
+        if (d.ok) emLoad();
+      } catch (e) { emShow("connect failed: " + e.message, false); }
+    });
+    document.getElementById("em-test").addEventListener("click", async () => {
+      emShow("sending test…", true);
+      try {
+        const r = await fetch("/integrations/email/test", { method: "POST", headers: { Accept: "application/json" } });
+        const d = await r.json();
+        emShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
+      } catch (e) { emShow("test failed: " + e.message, false); }
+    });
+    emLoad();
   </script>
 </body>
 </html>

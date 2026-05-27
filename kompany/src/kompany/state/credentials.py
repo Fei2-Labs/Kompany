@@ -23,6 +23,14 @@ ALLOWED_CREDENTIALS = {
     "telegram_allowed_chat_ids",
     "mobile_remote_token",
     "web_dashboard_token",
+    # Email integration (#5) — generic SMTP so it works with Gmail
+    # app-passwords or any SMTP provider. Lets agents actually SEND
+    # outreach instead of only drafting it.
+    "smtp_host",
+    "smtp_port",
+    "smtp_user",
+    "smtp_password",
+    "smtp_from",
 }
 
 

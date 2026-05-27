@@ -944,6 +944,108 @@ def set_model_setting(req: SetModelRequest) -> ModelSettingResponse:
     return get_model_setting()
 
 
+class IntegrationInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    integration_id: str
+    display_name: str
+    required_credentials: list[str]
+    connected: bool
+
+
+class ConnectEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    smtp_host: str = Field(..., min_length=1)
+    smtp_port: str = "587"
+    smtp_user: str = Field(..., min_length=1)
+    smtp_password: str = Field(..., min_length=1)
+    smtp_from: str = ""
+
+
+class IntegrationActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ok: bool
+    detail: str = ""
+
+
+@app.get("/integrations", response_model=list[IntegrationInfo])
+def list_integrations() -> list[IntegrationInfo]:
+    """List built-in integrations + whether the founder has connected
+    each (all required credentials present in the vault)."""
+    from kompany.integrations.email_smtp import EmailIntegration
+
+    engine = get_engine()
+    out: list[IntegrationInfo] = []
+    for integ in (EmailIntegration(),):
+        creds = integ.required_credentials
+        connected = bool(creds) and all(
+            (engine.credentials.get(c) or "") for c in creds
+        )
+        out.append(IntegrationInfo(
+            integration_id=integ.integration_id,
+            display_name=integ.display_name,
+            required_credentials=list(creds),
+            connected=connected,
+        ))
+    return out
+
+
+@app.post("/integrations/email/connect", response_model=IntegrationActionResponse)
+def connect_email(req: ConnectEmailRequest) -> IntegrationActionResponse:
+    """Store SMTP credentials in the vault + verify them with a login.
+
+    This is the founder's job #1 (connect accounts) — once stored, the
+    team can actually send email. Verifies before saving so a bad
+    password is caught now, not at send time."""
+    import smtplib
+    import ssl
+
+    engine = get_engine()
+    if not getattr(engine.settings, "vault_key", ""):
+        return IntegrationActionResponse(ok=False, detail="vault key not configured")
+    host, port = req.smtp_host.strip(), int(req.smtp_port or "587")
+    try:
+        ctx = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(host, port, context=ctx, timeout=30) as s:
+                s.login(req.smtp_user, req.smtp_password)
+        else:
+            with smtplib.SMTP(host, port, timeout=30) as s:
+                s.starttls(context=ctx)
+                s.login(req.smtp_user, req.smtp_password)
+    except Exception as exc:  # noqa: BLE001
+        return IntegrationActionResponse(ok=False, detail=f"login failed: {type(exc).__name__}: {exc}")
+    engine.credentials.set("smtp_host", host)
+    engine.credentials.set("smtp_port", str(port))
+    engine.credentials.set("smtp_user", req.smtp_user.strip())
+    engine.credentials.set("smtp_password", req.smtp_password)
+    engine.credentials.set("smtp_from", (req.smtp_from or req.smtp_user).strip())
+    engine.audit.record("integration.connected", "Connected email (SMTP)",
+                        detail={"integration": "email_smtp", "host": host})
+    return IntegrationActionResponse(ok=True, detail=f"connected {req.smtp_user} @ {host}:{port}")
+
+
+@app.post("/integrations/email/test", response_model=IntegrationActionResponse)
+def test_email() -> IntegrationActionResponse:
+    """Send a test email to the connected address (proves real sending)."""
+    from kompany.integrations.email_smtp import SendEmailTool, SendEmailInput
+    from kompany.plugins.contract import ToolContext
+
+    engine = get_engine()
+    to = engine.credentials.get("smtp_from") or engine.credentials.get("smtp_user")
+    if not to:
+        return IntegrationActionResponse(ok=False, detail="email not connected")
+    ctx = ToolContext(
+        run_id="", ledger=engine.ledger, audit=engine.audit,
+        credentials=engine.credentials, settings=engine.settings,
+    )
+    out = SendEmailTool().execute(
+        SendEmailInput(to=to, subject="Kompany test email",
+                       body="Your Kompany team can now send email. ✅"),
+        ctx,
+    )
+    return IntegrationActionResponse(ok=out.sent, detail=out.detail)
+
+
 @app.post("/directive")
 def send_directive(req: DirectiveRequest) -> dict[str, Any]:
     """Send a directive to Kompany.
