@@ -21,6 +21,7 @@
 //   BARD     → content-creator
 
 import { mountFeasibilityReview } from "./feasibility_review.js";
+import { initTheme } from "../theme.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -2107,4 +2108,5 @@ function showResumeBanner(draft, expired) {
   });
 }
 
+initTheme();
 start();

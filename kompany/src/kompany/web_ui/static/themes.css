@@ -1,0 +1,179 @@
+/* Kompany theme tokens — feature A (theme system).
+ *
+ * A "theme" is a full design-token bundle: colour (incl. texture), typography,
+ * density/radius, and motion. style.css consumes ONLY these vars — no hard-coded
+ * colours live there anymore. Switch themes by setting `data-theme` on <html>;
+ * switch motion by setting `data-motion="on|off"`.
+ *
+ * Colour model: every palette colour is defined as a bare `R,G,B` triple
+ * (`--*-rgb`). Solids are derived via `rgb(var(--*-rgb))`, and every translucent
+ * use in style.css is `rgba(var(--*-rgb), <alpha>)`. Re-skinning = swap the
+ * triples; the hundreds of alpha variants follow for free.
+ *
+ * See .trellis/tasks/05-27-theme-system/prd.md + glossary "Visual style & theming".
+ */
+
+/* ---- defaults shared by every theme (overridable per theme) ---- */
+:root {
+  /* derived solids — do NOT redefine per theme; redefine the triples instead */
+  --bg: rgb(var(--bg-rgb));
+  --fg: rgb(var(--fg-rgb));
+  --busy: rgb(var(--busy-rgb));
+  --info: rgb(var(--info-rgb));
+  --alert: rgb(var(--alert-rgb));
+  --warn: rgb(var(--warn-rgb));
+  --gold: rgb(var(--gold-rgb));
+
+  /* typography */
+  --font-stack: "JetBrainsMono", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --font-size-base: 14px;
+
+  /* density / shape */
+  --radius: 0px;
+  --frame-border-width: 2px;
+
+  /* texture (CRT flavour) — gated by opacity so light themes can switch it off */
+  --scanline-opacity: 1;
+  --vignette-opacity: 1;
+  --text-glow: 0 0 8px var(--fg);
+}
+
+/* ============================ CYBERPUNK (default) ============================ */
+:root,
+[data-theme="cyberpunk"] {
+  --bg-rgb: 0, 0, 0;
+  --fg-rgb: 0, 255, 65;
+  --busy-rgb: 102, 255, 255;
+  --info-rgb: 0, 200, 255;
+  --alert-rgb: 255, 68, 68;
+  --warn-rgb: 255, 170, 0;
+  --gold-rgb: 255, 200, 80;
+  --gold-hi-rgb: 255, 220, 120;
+  --ember-rgb: 255, 140, 0;
+  --shadow-rgb: 0, 0, 0;
+  --autofill-rgb: 0, 16, 0;
+  --surface-pop: #020a04;
+}
+
+/* ============================ WARM (amber focus) ============================ */
+[data-theme="warm"] {
+  --bg-rgb: 26, 20, 14;
+  --fg-rgb: 240, 214, 170;
+  --busy-rgb: 120, 200, 180;
+  --info-rgb: 150, 180, 220;
+  --alert-rgb: 240, 110, 90;
+  --warn-rgb: 240, 170, 70;
+  --gold-rgb: 245, 200, 120;
+  --gold-hi-rgb: 250, 225, 170;
+  --ember-rgb: 235, 140, 70;
+  --shadow-rgb: 0, 0, 0;
+  --autofill-rgb: 34, 26, 18;
+  --surface-pop: #221a12;
+
+  --font-stack: "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius: 7px;
+  --frame-border-width: 1px;
+  --scanline-opacity: 0;
+  --vignette-opacity: 0.35;
+  --text-glow: none;
+}
+
+/* ============================ MINIMAL (bright / light) ============================ */
+[data-theme="minimal"] {
+  --bg-rgb: 250, 250, 248;
+  --fg-rgb: 28, 30, 34;
+  --busy-rgb: 0, 150, 160;
+  --info-rgb: 30, 110, 220;
+  --alert-rgb: 210, 50, 50;
+  --warn-rgb: 180, 120, 0;
+  --gold-rgb: 168, 120, 20;
+  --gold-hi-rgb: 150, 100, 10;
+  --ember-rgb: 200, 90, 20;
+  --shadow-rgb: 0, 0, 0;
+  --autofill-rgb: 255, 255, 255;
+  --surface-pop: #ffffff;
+
+  --font-stack: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-size-base: 14px;
+  --radius: 8px;
+  --frame-border-width: 1px;
+  --scanline-opacity: 0;
+  --vignette-opacity: 0;
+  --text-glow: none;
+}
+
+/* ============================ MIDNIGHT (calm navy) ============================ */
+[data-theme="midnight"] {
+  --bg-rgb: 10, 14, 26;
+  --fg-rgb: 150, 190, 235;
+  --busy-rgb: 90, 220, 235;
+  --info-rgb: 120, 160, 255;
+  --alert-rgb: 255, 95, 110;
+  --warn-rgb: 245, 190, 90;
+  --gold-rgb: 240, 205, 130;
+  --gold-hi-rgb: 250, 225, 170;
+  --ember-rgb: 245, 150, 90;
+  --shadow-rgb: 0, 0, 0;
+  --autofill-rgb: 12, 18, 34;
+  --surface-pop: #0c1222;
+
+  --radius: 4px;
+  --frame-border-width: 1px;
+  --scanline-opacity: 0.4;
+  --vignette-opacity: 0.5;
+  --text-glow: 0 0 10px rgba(var(--fg-rgb), 0.5);
+}
+
+/* ============================ MOTION ============================
+ * Attribute-driven so an explicit founder choice always wins. The first-paint
+ * inline script seeds data-motion from `prefers-reduced-motion` UNLESS a stored
+ * preference exists (decision #10: default follows system + manual override).
+ * Alerts stay legible via COLOUR, never flash, when motion is off. */
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation: none !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ============================ SHAPE (density/radius) ============================
+ * Apply --radius (default 0 → cyberpunk unchanged) to the common surfaces that
+ * have no explicit radius of their own. Inputs/comboboxes already pick it up via
+ * style.css (their `border-radius: 0` was tokenised to var(--radius)). */
+.frame, .key, .onb-btn, .fr-btn, .fr-col, .episode-item, .inbox-entry,
+.onb-faction-card, .onb-firstmove-card, .ep-task, .cost-modal, .agent-row,
+.cost-modal-prompt, .onb-firstmove-input, .fr-counter-text, .onb-date-display,
+.onb-date-pop, .onb-stale-pill, .onb-env-banner, .onb-resume, .cost-modal-result,
+.onb-conn-result, .ep-stat, .ep-chip, .claim-evidence-chip, .fr-proposal-card {
+  border-radius: var(--radius);
+}
+
+/* ============================ AMBIENT LAYER (feature #5) ============================
+ * A thin edge-tint reflecting business state, layered OVER the base theme and
+ * UNDER the CRT texture (scanlines z=100). Only paints when AUTO is on
+ * (data-ambient="on"); otherwise stays fully transparent. Driven by
+ * data-ambient-state set from store status/inbox in modules/ui/ambient.js. */
+.ambient-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+  opacity: 0;
+  background: transparent;
+  transition: opacity 0.6s ease, background 0.6s ease;
+}
+[data-ambient="on"][data-ambient-state="alert"] .ambient-overlay {
+  opacity: 1;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(var(--alert-rgb), 0.20) 100%);
+  animation: ambient-alert 2.2s ease-in-out infinite;
+}
+[data-ambient="on"][data-ambient-state="thriving"] .ambient-overlay {
+  opacity: 1;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(var(--gold-rgb), 0.12) 100%);
+}
+/* calm (and AUTO off) → transparent via the base rule. */
+@keyframes ambient-alert {
+  0%, 100% { opacity: 0.65; }
+  50%      { opacity: 1; }
+}

@@ -81,6 +81,11 @@ from kompany.state.targets import (
     set_review_thread_id as set_targets_review_thread_id,
     set_targets as set_company_targets,
 )
+from kompany.state.ui_preferences import (
+    UIPreferences,
+    get_preferences as get_ui_preferences,
+    set_preferences as set_ui_preferences,
+)
 from kompany.state.templates import (
     Templates,
     TemplateAlreadyApplied,
@@ -2923,6 +2928,35 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
     def set_targets(self, targets: CompanyTargets) -> CompanyTargets:
         """Persist a target snapshot keyed by ``targets.source``."""
         return set_company_targets(self.db, targets)
+
+    # ------------------------------------------------------------------
+    # UI preferences (theme system, feature A — 05-27)
+    # ------------------------------------------------------------------
+
+    def get_ui_preferences(self) -> UIPreferences:
+        """Return the founder's dashboard appearance preferences (or defaults)."""
+        return get_ui_preferences(self.db)
+
+    def set_ui_preferences(
+        self,
+        *,
+        theme_id: str | None = None,
+        auto_enabled: bool | None = None,
+        reduce_motion: str | None = None,
+    ) -> UIPreferences:
+        """Patch UI preferences; ``ValueError`` on a bad ``reduce_motion``."""
+        prefs = set_ui_preferences(
+            self.db,
+            theme_id=theme_id,
+            auto_enabled=auto_enabled,
+            reduce_motion=reduce_motion,
+        )
+        self.audit.record(
+            event_type="preferences.updated",
+            action="Updated UI preferences",
+            detail=prefs.model_dump(mode="json"),
+        )
+        return prefs
 
     def _compose_targets_summary(self) -> str:
         """One-paragraph string injected into CEO/CFO/CoS system prompts.

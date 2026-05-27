@@ -5,7 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kompany // First Boot</title>
   <link rel="icon" type="image/png" href="/ui/static/favicon.png">
-  <link rel="stylesheet" href="/ui/static/style.css?v=13">
+  <!-- First-paint theme bootstrap (see index.html). -->
+  <script>
+    (function () {
+      try {
+        var V = { cyberpunk: 1, warm: 1, minimal: 1, midnight: 1 };
+        var p = new URLSearchParams(location.search);
+        var t = p.get("theme") || localStorage.getItem("kompany.theme");
+        document.documentElement.setAttribute("data-theme", V[t] ? t : "cyberpunk");
+        var m = p.get("motion") || localStorage.getItem("kompany.motion");
+        if (m !== "on" && m !== "off") {
+          m = (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? "off" : "on";
+        }
+        document.documentElement.setAttribute("data-motion", m);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/ui/static/themes.css?v=2">
+  <link rel="stylesheet" href="/ui/static/style.css?v=15">
 </head>
 <body class="onboarding-body">
   <!-- Step-aware header. The label after the slash is rewritten by JS
@@ -40,6 +57,6 @@
     <div id="onb-error" class="onb-error" hidden></div>
   </div>
 
-  <script type="module" src="/ui/static/modules/ui/onboarding.js?v=13"></script>
+  <script type="module" src="/ui/static/modules/ui/onboarding.js?v=14"></script>
 </body>
 </html>

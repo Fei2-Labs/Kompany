@@ -11,8 +11,15 @@ import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
 import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=4";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
+import { initTheme } from "/ui/static/modules/theme.js";
+import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js";
+import { initAmbient } from "/ui/static/modules/ui/ambient.js";
 
 async function boot() {
+  // Re-assert theme/motion (the inline <head> script set them for first paint)
+  // and bind the OS reduced-motion listener for un-pinned founders.
+  initTheme();
+
   // 0. Onboarding gate — Tauri shell points the WebView at /ui/ on every
   // launch, so we must redirect first-time users into the in-window
   // wizard before any /inbox or /agents/status request races against
@@ -126,6 +133,8 @@ async function boot() {
   });
 
   initCostChip();
+  initThemePanel();
+  initAmbient();
   initTimeline();
   // Backfill the timeline with recent audit history so a run that
   // happened before this EventSource connected (e.g. the kickoff that

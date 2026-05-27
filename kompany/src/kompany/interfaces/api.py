@@ -1043,6 +1043,47 @@ def apply_template(
 # ---------------------------------------------------------------------------
 
 
+class UIPreferencesResponse(BaseModel):
+    """Founder's dashboard appearance preferences."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_id: str
+    auto_enabled: bool
+    reduce_motion: str  # "auto" | "on" | "off"
+
+
+class UIPreferencesUpdateRequest(BaseModel):
+    """Partial update for ``PATCH /preferences`` — omitted fields are untouched."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    theme_id: str | None = None
+    auto_enabled: bool | None = None
+    reduce_motion: str | None = None
+
+
+@app.get("/preferences", response_model=UIPreferencesResponse)
+def get_preferences() -> UIPreferencesResponse:
+    """Return the founder's stored UI preferences (DB is source of truth)."""
+    prefs = get_engine().get_ui_preferences()
+    return UIPreferencesResponse(**prefs.model_dump(mode="json"))
+
+
+@app.patch("/preferences", response_model=UIPreferencesResponse)
+def patch_preferences(req: UIPreferencesUpdateRequest) -> UIPreferencesResponse:
+    """Patch one or more UI preferences. 422 on an invalid ``reduce_motion``."""
+    try:
+        prefs = get_engine().set_ui_preferences(
+            theme_id=req.theme_id,
+            auto_enabled=req.auto_enabled,
+            reduce_motion=req.reduce_motion,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return UIPreferencesResponse(**prefs.model_dump(mode="json"))
+
+
 @app.get("/targets")
 def get_targets() -> dict[str, Any]:
     """Return the founder / team_proposal / agreed targets trio.
