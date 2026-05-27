@@ -197,20 +197,67 @@ async function renderEmptyState(list) {
       list.innerHTML = `<div class="empty">no episodes yet. Type a directive below to give the team something to run.</div>`;
       return;
     }
-    const activeRows = projects
-      .filter((p) => p.status === "active")
-      .map((p) => `
-        <div class="episode-item active-project" data-pid="${escapeHTML(p.id)}">
-          <div>▸ ${escapeHTML(p.name || "(unnamed)")}</div>
-          <div class="pid">${escapeHTML(p.id)} :: <span class="active-pulse">team working</span></div>
-        </div>`)
-      .join("");
+    const actives = projects.filter((p) => p.status === "active");
+    const activeRows = actives.map(activeProjectRowHTML).join("");
     list.innerHTML = `
       <div class="empty">team is running your first-week directive. No completed episodes yet — first one will appear below when the team checkpoints.</div>
       ${activeRows}
     `;
+    wireActiveProjectActions(list);
   } catch (_) {
     list.innerHTML = `<div class="empty">no episodes yet.</div>`;
+  }
+}
+
+// One active-project row with an abandon (cancel) action. Used both in
+// the empty-state and prepended to the episode list so the founder can
+// always see + stop a running plan (#10).
+function activeProjectRowHTML(p) {
+  return `
+    <div class="episode-item active-project" data-pid="${escapeHTML(p.id)}">
+      <div class="ap-line">
+        <span>▸ ${escapeHTML(p.name || "(unnamed)")}</span>
+        <button type="button" class="ap-cancel" data-cancel-pid="${escapeHTML(p.id)}">[ ✕ abandon ]</button>
+      </div>
+      <div class="pid">${escapeHTML(p.id)} :: <span class="active-pulse">team working</span></div>
+    </div>`;
+}
+
+function wireActiveProjectActions(container) {
+  for (const btn of container.querySelectorAll(".ap-cancel[data-cancel-pid]")) {
+    let armed = false;
+    let t = null;
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const pid = btn.getAttribute("data-cancel-pid");
+      if (!armed) {
+        // Two-stage confirm (no native dialog — Tauri WebView blocks it).
+        armed = true;
+        btn.textContent = "[ ✕ click again to abandon ]";
+        btn.classList.add("ap-cancel-armed");
+        t = setTimeout(() => {
+          armed = false;
+          btn.textContent = "[ ✕ abandon ]";
+          btn.classList.remove("ap-cancel-armed");
+        }, 5000);
+        return;
+      }
+      clearTimeout(t);
+      btn.disabled = true;
+      btn.textContent = "[ ✕ abandoning… ]";
+      try {
+        await fetch(`/projects/${encodeURIComponent(pid)}/cancel`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ reason: "abandoned from dashboard" }),
+        });
+        const eps = await api.episodes();
+        renderEpisodes(eps || []);
+      } catch (_) {
+        btn.disabled = false;
+        btn.textContent = "[ ✕ abandon ]";
+      }
+    });
   }
 }
 
@@ -282,7 +329,7 @@ export function renderEpisodes(rows) {
     </div>`;
   }).join("");
 
-  for (const item of list.querySelectorAll(".episode-item")) {
+  for (const item of list.querySelectorAll(".episode-item:not(.active-project)")) {
     item.addEventListener("click", () => {
       const pid = item.getAttribute("data-pid");
       _activeId = pid;
@@ -291,4 +338,21 @@ export function renderEpisodes(rows) {
       loadPayload(pid);
     });
   }
+
+  // Also surface any RUNNING project at the top with an abandon action,
+  // so the founder can stop a plan even once completed episodes exist
+  // (#10). Best-effort fetch; failure just omits the rows.
+  fetch("/projects", { headers: { Accept: "application/json" } })
+    .then((r) => (r.ok ? r.json() : []))
+    .then((projects) => {
+      const actives = (projects || []).filter((p) => p.status === "active");
+      if (!actives.length) return;
+      const wrap = document.createElement("div");
+      wrap.className = "ep-active-wrap";
+      wrap.innerHTML = `<div class="ep-active-head">// RUNNING NOW</div>` +
+        actives.map(activeProjectRowHTML).join("");
+      list.prepend(wrap);
+      wireActiveProjectActions(wrap);
+    })
+    .catch(() => {});
 }

@@ -95,6 +95,48 @@ def test_activate_flips_draft_to_active(applied_engine: tuple[object, list[str]]
         assert by_id[other]["status"] == "draft"
 
 
+def test_cancel_abandons_plan_and_stops_tasks(applied_engine: tuple[object, list[str]]) -> None:
+    """Founder abandons a plan (#10): project → cancelled, its pending/
+    active tasks stopped, audited. AI cost stays (no refund)."""
+    from kompany.interfaces.api import activate_project, cancel_project, CancelProjectRequest
+    from kompany.state.models import Task, TaskStatus
+
+    engine, project_ids = applied_engine
+    target = project_ids[0]
+    activate_project(target)
+    # Seed a couple of unfinished tasks.
+    engine.projects.create_task(Task(project_id=target, title="t1", assigned_agent="cro"))
+    engine.projects.create_task(Task(project_id=target, title="t2", assigned_agent="cmo"))
+
+    payload = cancel_project(target, CancelProjectRequest(reason="changed my mind"))
+    assert payload["cancelled"] is True
+    assert payload["status"] == "cancelled"
+    assert payload["tasks_stopped"] == 2
+
+    row = engine.db.execute("SELECT status FROM projects WHERE id = ?", (target,)).fetchone()
+    assert row["status"] == "cancelled"
+    task_statuses = {
+        r["status"] for r in engine.db.execute(
+            "SELECT status FROM tasks WHERE project_id = ?", (target,)
+        ).fetchall()
+    }
+    assert task_statuses == {"cancelled"}
+    events = [e["event_type"] for e in engine.audit.recent(limit=10)]
+    assert "project.cancelled" in events
+
+
+def test_cancel_already_terminal_is_idempotent(applied_engine: tuple[object, list[str]]) -> None:
+    from kompany.interfaces.api import cancel_project
+
+    engine, project_ids = applied_engine
+    target = project_ids[0]
+    engine.db.execute("UPDATE projects SET status='completed' WHERE id=?", (target,))
+    engine.db.commit()
+    payload = cancel_project(target)
+    assert payload["cancelled"] is False
+    assert payload["status"] == "completed"
+
+
 def test_activate_audit_records_transition(applied_engine: tuple[object, list[str]]) -> None:
     from kompany.interfaces.api import activate_project
 

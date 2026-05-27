@@ -8,7 +8,7 @@ import { renderOffice } from "/ui/static/modules/ui/office.js";
 import { renderInbox } from "/ui/static/modules/ui/inbox.js";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
-import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=4";
+import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=5";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";

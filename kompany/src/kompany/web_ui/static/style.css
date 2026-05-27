@@ -1725,3 +1725,15 @@ body.onboarding-body { padding-bottom: 40px; }
 .set-result.err { color: #ff6666; border-color: rgba(255, 80, 80, 0.6); background: rgba(255, 80, 80, 0.06); }
 .set-soon { opacity: 0.7; }
 .header .set-back { font-size: 12px; }
+
+/* Active-project abandon control (#10) */
+.ap-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ap-cancel {
+  background: transparent; border: 1px solid rgba(255, 80, 80, 0.5);
+  color: rgba(255, 120, 120, 0.95); font-family: inherit; font-size: 10px;
+  padding: 1px 7px; cursor: pointer; white-space: nowrap;
+}
+.ap-cancel:hover:not(:disabled) { background: rgba(255, 80, 80, 0.1); }
+.ap-cancel-armed { border-color: #ff4444; color: #ff6666; background: rgba(255, 80, 80, 0.12); }
+.ep-active-wrap { margin-bottom: 10px; }
+.ep-active-head { color: rgba(255, 200, 80, 0.85); font-size: 10px; letter-spacing: 0.06em; margin-bottom: 4px; }

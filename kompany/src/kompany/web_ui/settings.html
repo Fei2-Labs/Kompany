@@ -5,7 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Kompany // Settings</title>
   <link rel="icon" type="image/png" href="/ui/static/favicon.png">
-  <link rel="stylesheet" href="/ui/static/style.css?v=18">
+  <!-- First-paint theme bootstrap (same as the dashboard) — without this
+       the page renders with no theme variables = white background. -->
+  <script>
+    (function () {
+      try {
+        var V = { cyberpunk: 1, warm: 1, minimal: 1, midnight: 1 };
+        var p = new URLSearchParams(location.search);
+        var t = p.get("theme") || localStorage.getItem("kompany.theme");
+        document.documentElement.setAttribute("data-theme", V[t] ? t : "cyberpunk");
+        var m = p.get("motion") || localStorage.getItem("kompany.motion");
+        if (m !== "on" && m !== "off") {
+          m = (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) ? "off" : "on";
+        }
+        document.documentElement.setAttribute("data-motion", m);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="/ui/static/themes.css?v=2">
+  <link rel="stylesheet" href="/ui/static/style.css?v=19">
 </head>
 <body>
   <div class="header">

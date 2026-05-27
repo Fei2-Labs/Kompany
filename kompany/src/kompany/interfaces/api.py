@@ -2141,6 +2141,57 @@ def _kickoff_project_safely(project_id: str) -> None:
         )
 
 
+class CancelProjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = ""
+
+
+@app.post("/projects/{project_id}/cancel")
+def cancel_project(
+    project_id: str, req: CancelProjectRequest | None = None
+) -> dict[str, Any]:
+    """Abandon a plan: set the project to ``cancelled`` and stop its
+    unfinished tasks.
+
+    The founder's "放弃当前计划" need (#10). AI cost already spent is
+    real and stays in the ledger — abandoning doesn't refund. Frees the
+    founder to pick another directive. Idempotent on an already-terminal
+    project.
+    """
+    engine = get_engine()
+    row = engine.db.execute(
+        "SELECT id, status FROM projects WHERE id = ?", (project_id,)
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+    current = row["status"]
+    reason = (req.reason if req else "") or "founder abandoned the plan"
+    if current in ("completed", "cancelled", "failed"):
+        return {"id": project_id, "status": current, "previous_status": current,
+                "cancelled": False, "note": "already terminal"}
+
+    engine.db.execute(
+        "UPDATE projects SET status = 'cancelled', updated_at = datetime('now') "
+        "WHERE id = ?", (project_id,),
+    )
+    # Stop unfinished tasks (pending/active) so nothing keeps running.
+    stopped = engine.db.execute(
+        "UPDATE tasks SET status = 'cancelled', updated_at = datetime('now') "
+        "WHERE project_id = ? AND status IN ('pending', 'active')",
+        (project_id,),
+    ).rowcount
+    engine.db.commit()
+    engine.audit.record(
+        "project.cancelled",
+        f"Founder abandoned the plan ({reason})",
+        detail={"project_id": project_id, "previous_status": current,
+                "tasks_stopped": stopped, "reason": reason},
+        project_id=project_id,
+    )
+    return {"id": project_id, "status": "cancelled", "previous_status": current,
+            "cancelled": True, "tasks_stopped": stopped}
+
+
 @app.post("/projects/{project_id}/activate")
 def activate_project(
     project_id: str, background_tasks: BackgroundTasks = None  # type: ignore[assignment]

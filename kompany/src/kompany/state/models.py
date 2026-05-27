@@ -48,6 +48,7 @@ class ProjectStatus(str, Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"   # founder abandoned the plan
 
 
 class ProjectType(str, Enum):
