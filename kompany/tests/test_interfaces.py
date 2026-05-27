@@ -455,6 +455,41 @@ runner = CliRunner()
 client = TestClient(app)
 
 
+def test_directive_llm_failure_returns_graceful_200(monkeypatch):
+    """A directive whose LLM call blows up must NOT surface as a raw
+    HTTP 500. The endpoint catches it and returns 200 + status=failed +
+    a classified error_code so the timeline shows the real cause.
+    Regression: founder saw "directive failed: HTTP 500" when swedeapi
+    rejected gpt-5.5 with 'Param Incorrect / invalid_request_error'."""
+    fake_engine = FakeEngine()
+
+    def boom(_text):
+        raise RuntimeError(
+            "LLM 'gpt-5.5' unavailable after retry: BadRequestError: "
+            '{"error":{"message":"Param Incorrect",'
+            '"type":"invalid_request_error"}} upstream_error'
+        )
+
+    fake_engine.process_directive = boom  # type: ignore[assignment]
+    monkeypatch.setattr("kompany.interfaces.api._engine", fake_engine)
+
+    response = client.post("/directive", json={"text": "abandon the call plan"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["error_code"] == "provider_error"
+    assert body["message"]
+
+
+def test_classify_ping_error_buckets_invalid_request_as_provider_error():
+    from kompany.interfaces.api import _classify_ping_error
+
+    assert _classify_ping_error("BadRequestError: Param Incorrect") == "provider_error"
+    assert _classify_ping_error("invalid_request_error upstream_error") == "provider_error"
+    assert _classify_ping_error("AuthenticationError: 401") == "unauthorized"
+    assert _classify_ping_error("RateLimitError: 429 quota") == "rate_limited"
+
+
 def test_sdk_init_returns_full_payload(monkeypatch):
     fake_engine = FakeSDKEngine()
     monkeypatch.setattr("kompany.interfaces.sdk.KompanyEngine", lambda config_path=None: fake_engine)

@@ -571,6 +571,19 @@ def _classify_ping_error(detail: str) -> str:
             "service unavailable",
             "bad gateway",
             "gateway timeout",
+            # The provider accepted auth but rejected the request itself —
+            # e.g. a custom/OpenAI-compatible endpoint that doesn't support
+            # a param or model (swedeapi gpt-5.5 returned "Param Incorrect /
+            # invalid_request_error / upstream_error"). Bucket as
+            # provider_error so the UI says "try a different model/params".
+            "badrequesterror",
+            "bad request",
+            "invalid_request_error",
+            "invalid request",
+            "param incorrect",
+            "upstream_error",
+            "upstream error",
+            "400",
         )
     ):
         return "provider_error"
@@ -862,9 +875,35 @@ def init_company(req: InitRequest) -> dict[str, Any]:
 
 @app.post("/directive")
 def send_directive(req: DirectiveRequest) -> dict[str, Any]:
-    """Send a directive to Kompany."""
+    """Send a directive to Kompany.
+
+    ``process_directive`` re-raises on LLM failure (its library contract).
+    The HTTP layer must NOT surface that as a raw 500 — the founder sees
+    "directive failed: HTTP 500" with no clue. Instead we catch it and
+    return a graceful 200 with a classified, honest error so the live
+    timeline can render the real cause (quota / auth / network / provider).
+    """
     engine = get_engine()
-    result = engine.process_directive(req.text)
+    try:
+        result = engine.process_directive(req.text)
+    except Exception as exc:  # noqa: BLE001 — surface honestly, never 500
+        detail = f"{type(exc).__name__}: {exc}"
+        code = _classify_ping_error(detail)
+        human = {
+            "rate_limited": "Your LLM provider hit a rate/quota limit. Wait a moment and retry.",
+            "unauthorized": "Your LLM provider rejected the API key. Check it in settings.",
+            "network": "Couldn't reach your LLM provider. Check your connection and retry.",
+            "provider_error": "Your LLM provider rejected the request (it may not support this model/params). Try a different model in settings.",
+        }.get(code, "The team's LLM call failed. Retry, or switch model/provider in settings.")
+        return {
+            "status": "failed",
+            "message": human,
+            "error_code": code,
+            "project_id": None,
+            "approval_id": None,
+            "total_ai_cost": 0.0,
+            "agents_used": [],
+        }
     return {
         "status": result.status,
         "message": result.message,
