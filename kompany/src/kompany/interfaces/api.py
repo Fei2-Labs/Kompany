@@ -1040,6 +1040,10 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
     engine = get_engine()
     if not getattr(engine.settings, "vault_key", ""):
         return IntegrationActionResponse(ok=False, detail="vault key not configured")
+    # Verify auth, NOT scope: a Resend "sending access" key (the right
+    # kind for an app) returns 403 on /domains because it lacks
+    # domains-read permission — but it CAN send. So 200 and 403 both
+    # mean "key authenticates"; only 401 = invalid key.
     try:
         vr = urllib.request.Request(
             "https://api.resend.com/domains",
@@ -1047,7 +1051,10 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
         )
         urllib.request.urlopen(vr, timeout=30).read()
     except urllib.error.HTTPError as e:
-        return IntegrationActionResponse(ok=False, detail=f"Resend rejected the key ({e.code})")
+        if e.code == 401:
+            return IntegrationActionResponse(ok=False, detail="Resend rejected the key (401 — invalid)")
+        # 403 (restricted scope) or other auth-passing codes → accept;
+        # the send test will surface any real send-time problem.
     except Exception as exc:  # noqa: BLE001
         return IntegrationActionResponse(ok=False, detail=f"verify failed: {type(exc).__name__}: {exc}")
     engine.credentials.set("resend_api_key", req.api_key.strip())
