@@ -1,7 +1,20 @@
-"""Agent activity status persistence."""
+"""Agent activity status persistence.
+
+Each agent row carries two orthogonal axes:
+
+* ``status`` — the lifecycle phase (idle / working / thinking / dispatching).
+* ``activity_kind`` — the *kind* of work, derived from the role (see
+  :mod:`kompany.state.activity`). Advisory: clients may use it or derive their own.
+
+Plus the raw project context (``project_id`` / ``project_type``) so a client can
+join to the project itself. Every ``set()`` also streams an ``agent.activity``
+event carrying the full contract, for real-time consumers (dashboard + the
+future sprite-world client).
+"""
 
 from __future__ import annotations
 
+from kompany.state.activity import derive_activity_kind
 from kompany.state.database import Database
 
 
@@ -16,17 +29,26 @@ class AgentStatusStore:
         agent_role: str,
         status: str,
         current_task: str | None = None,
+        project_id: str | None = None,
+        project_type: str | None = None,
     ) -> None:
+        activity_kind = derive_activity_kind(agent_role, status, project_type)
         self.db.execute(
-            """INSERT INTO agent_status (agent_role, status, current_task, updated_at)
-               VALUES (?, ?, ?, datetime('now'))
+            """INSERT INTO agent_status
+                   (agent_role, status, current_task, project_id, project_type,
+                    activity_kind, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                ON CONFLICT(agent_role) DO UPDATE SET
                    status = excluded.status,
                    current_task = excluded.current_task,
+                   project_id = excluded.project_id,
+                   project_type = excluded.project_type,
+                   activity_kind = excluded.activity_kind,
                    updated_at = datetime('now')""",
-            (agent_role, status, current_task),
+            (agent_role, status, current_task, project_id, project_type, activity_kind),
         )
         self.db.commit()
+        self._emit(agent_role, status, current_task, project_id, project_type, activity_kind)
 
     def get(self, agent_role: str) -> dict | None:
         row = self.db.execute(
@@ -40,3 +62,31 @@ class AgentStatusStore:
             "SELECT * FROM agent_status ORDER BY agent_role",
         ).fetchall()
         return [dict(row) for row in rows]
+
+    @staticmethod
+    def _emit(
+        agent_role: str,
+        status: str,
+        current_task: str | None,
+        project_id: str | None,
+        project_type: str | None,
+        activity_kind: str,
+    ) -> None:
+        """Stream the activity contract. Best-effort — a publish failure must
+        never break a status write."""
+        try:
+            from kompany.core.event_hub import get_event_hub
+
+            get_event_hub().publish(
+                "agent.activity",
+                {
+                    "agent_role": agent_role,
+                    "status": status,
+                    "current_task": current_task,
+                    "project_id": project_id,
+                    "project_type": project_type,
+                    "activity_kind": activity_kind,
+                },
+            )
+        except Exception:
+            pass

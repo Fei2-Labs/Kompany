@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS agent_status (
     agent_role TEXT PRIMARY KEY,
     status TEXT NOT NULL DEFAULT 'idle',
     current_task TEXT,
+    project_id TEXT,
+    project_type TEXT,
+    activity_kind TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -277,6 +280,18 @@ class Database:
                ON agent_memories(agent_role, pattern_key)
                WHERE pattern_key IS NOT NULL"""
         )
+        # activity_kind contract (05-27): carry project context + the advisory
+        # work-kind on each agent_status row so the dashboard and the future
+        # sprite client can render "what each agent is doing".
+        for col, defn in [
+            ("project_id", "TEXT"),
+            ("project_type", "TEXT"),
+            ("activity_kind", "TEXT"),
+        ]:
+            try:
+                self.conn.execute(f"ALTER TABLE agent_status ADD COLUMN {col} {defn}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         self.conn.execute(
             """CREATE TABLE IF NOT EXISTS tool_authorizations (
                    agent_role TEXT NOT NULL,

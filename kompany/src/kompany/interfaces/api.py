@@ -2269,6 +2269,8 @@ def agents_status() -> list[dict[str, Any]]:
             }
 
     result = []
+    from kompany.state.activity import derive_activity_kind
+
     for role in C_SUITE_ROLES:
         row = rows_by_role.get(role)
         if row is None:
@@ -2277,13 +2279,24 @@ def agents_status() -> list[dict[str, Any]]:
                 "status": "idle",
                 "last_action": None,
                 "latency_ms": None,
+                "activity_kind": "idle",
+                "project_id": None,
+                "project_type": None,
             })
         else:
+            status = row.get("status") or "idle"
+            project_type = row.get("project_type")
             result.append({
                 "role": role.upper(),
-                "status": row.get("status") or "idle",
+                "status": status,
                 "last_action": row.get("last_action") or row.get("action"),
                 "latency_ms": row.get("latency_ms"),
+                # Advisory kind: prefer the stored value; derive for audit-fallback
+                # rows that predate the column.
+                "activity_kind": row.get("activity_kind")
+                or derive_activity_kind(role, status, project_type),
+                "project_id": row.get("project_id"),
+                "project_type": project_type,
             })
     return result
 

@@ -312,7 +312,13 @@ class ProjectRunner:
         """Execute a single task using the assigned agent."""
         # Mark as active
         self._engine.projects.update_task_status(task.id, TaskStatus.ACTIVE)
-        self._engine.agent_status.set(task.assigned_agent, "working", task.title)
+        self._engine.agent_status.set(
+            task.assigned_agent,
+            "working",
+            task.title,
+            project_id=project.id,
+            project_type=project.type.value,
+        )
         self._engine.audit.record(
             "task.started",
             "Started task execution",

@@ -560,7 +560,13 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             project_id=project.id,
         )
 
-        self.agent_status.set("coo", "dispatching", project.name)
+        self.agent_status.set(
+            "coo",
+            "dispatching",
+            project.name,
+            project_id=project.id,
+            project_type=project.type.value,
+        )
         self.audit.record(
             "governed_execution.dispatched",
             "COO dispatched project execution",
