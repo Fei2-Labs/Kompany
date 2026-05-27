@@ -1703,3 +1703,25 @@ body.onboarding-body { padding-bottom: 40px; }
 .tp-seg.active { background: rgba(var(--fg-rgb), 0.15); color: var(--fg); border-color: var(--fg); }
 
 .tp-hint { font-size: 10px; color: rgba(var(--fg-rgb), 0.45); margin-top: 6px; line-height: 1.4; }
+
+/* Settings page (minimal — model switcher; grows into full settings, #8) */
+.set-wrap { max-width: 760px; margin: 24px auto; padding: 0 18px; display: flex; flex-direction: column; gap: 18px; }
+.set-back { color: rgba(0, 255, 65, 0.8); text-decoration: none; }
+.set-back:hover { color: #00ff41; }
+.set-h { color: #00ff41; font-size: 14px; margin: 0 0 6px; letter-spacing: 0.06em; }
+.set-note { color: rgba(0, 255, 65, 0.6); font-size: 12px; line-height: 1.5; margin: 0 0 14px; }
+.set-row { display: flex; flex-direction: column; gap: 6px; }
+.set-row label { color: rgba(0, 255, 65, 0.85); font-size: 12px; letter-spacing: 0.04em; }
+.set-control { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.set-control select {
+  flex: 1 1 240px; background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.4); color: #00ff41;
+  font-family: inherit; font-size: 14px; padding: 8px 10px;
+}
+.set-meta { margin-top: 10px; font-size: 11px; color: rgba(0, 255, 65, 0.5); }
+.set-result { margin-top: 12px; padding: 8px 12px; font-size: 12px; border: 1px solid; }
+.set-result[hidden] { display: none; }
+.set-result.ok { color: #00ff41; border-color: rgba(0, 255, 65, 0.6); background: rgba(0, 255, 65, 0.06); }
+.set-result.err { color: #ff6666; border-color: rgba(255, 80, 80, 0.6); background: rgba(255, 80, 80, 0.06); }
+.set-soon { opacity: 0.7; }
+.header .set-back { font-size: 12px; }

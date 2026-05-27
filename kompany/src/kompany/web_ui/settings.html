@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kompany // Settings</title>
+  <link rel="icon" type="image/png" href="/ui/static/favicon.png">
+  <link rel="stylesheet" href="/ui/static/style.css?v=18">
+</head>
+<body>
+  <div class="header">
+    <div class="brand">KOMPANY//<span>SETTINGS</span></div>
+    <div class="stats"><a class="set-back" href="/ui/">[ ◂ back to dashboard ]</a></div>
+  </div>
+
+  <div class="set-wrap">
+    <div class="frame" data-label="SETTINGS // model">
+      <h2 class="set-h">// LLM MODEL</h2>
+      <p class="set-note">All three tiers (apex / primary / economy) use this model. Switching takes effect immediately — no restart.</p>
+
+      <div class="set-row">
+        <label for="set-model">Active model</label>
+        <div class="set-control">
+          <select id="set-model"><option>loading…</option></select>
+          <button type="button" id="set-apply" class="onb-btn onb-btn-submit" disabled>[ ▸ APPLY ]</button>
+        </div>
+      </div>
+      <div class="set-meta" id="set-meta"></div>
+      <div class="set-result" id="set-result" hidden></div>
+    </div>
+
+    <div class="frame set-soon" data-label="SETTINGS // more">
+      <p class="set-note">Integrations, credentials, founder profile + rules are coming here (backlog #5–#8). For now this page switches the model — useful when your provider drops one.</p>
+    </div>
+  </div>
+
+  <script type="module">
+    const sel = document.getElementById("set-model");
+    const apply = document.getElementById("set-apply");
+    const meta = document.getElementById("set-meta");
+    const result = document.getElementById("set-result");
+
+    function showResult(msg, ok) {
+      result.hidden = false;
+      result.textContent = msg;
+      result.className = "set-result " + (ok ? "ok" : "err");
+    }
+
+    async function load() {
+      try {
+        const r = await fetch("/settings/model", { headers: { Accept: "application/json" } });
+        const d = await r.json();
+        const cur = d.current_model || "";
+        const models = (d.available_models || []);
+        sel.innerHTML = "";
+        const opts = models.length ? models : (cur ? [cur] : []);
+        if (!opts.length) {
+          sel.innerHTML = `<option value="">(no models — check provider)</option>`;
+        } else {
+          for (const m of opts) {
+            const o = document.createElement("option");
+            o.value = m; o.textContent = m;
+            if (m === cur) o.selected = true;
+            sel.appendChild(o);
+          }
+        }
+        meta.textContent = `provider: ${d.provider || "?"}${d.base_url ? " · " + d.base_url : ""}${d.error ? " · ⚠ " + d.error : ""}`;
+        apply.disabled = false;
+      } catch (e) {
+        showResult("failed to load: " + e.message, false);
+      }
+    }
+
+    apply.addEventListener("click", async () => {
+      const model = sel.value;
+      if (!model) return;
+      apply.disabled = true;
+      apply.textContent = "[ ▸ applying… ]";
+      try {
+        const r = await fetch("/settings/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ model }),
+        });
+        const d = await r.json();
+        if (r.ok) showResult(`✓ model switched to ${d.current_model}`, true);
+        else showResult("switch failed", false);
+      } catch (e) {
+        showResult("switch failed: " + e.message, false);
+      } finally {
+        apply.disabled = false;
+        apply.textContent = "[ ▸ APPLY ]";
+      }
+    });
+
+    load();
+  </script>
+</body>
+</html>

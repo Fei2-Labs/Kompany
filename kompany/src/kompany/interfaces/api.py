@@ -873,6 +873,77 @@ def init_company(req: InitRequest) -> dict[str, Any]:
     }
 
 
+class ModelSettingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_model: str = ""
+    provider: str = ""
+    base_url: str = ""
+    available_models: list[str] = []
+    error: str = ""
+
+
+class SetModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model: str = Field(..., min_length=1)
+
+
+@app.get("/settings/model", response_model=ModelSettingResponse)
+def get_model_setting() -> ModelSettingResponse:
+    """Current model + the models the configured endpoint advertises.
+
+    Lets the founder switch model from the UI when their provider drops
+    a model (e.g. swedeapi's gpt-5.x went down mid-session and the only
+    fix was hand-editing .env). For custom endpoints we query the live
+    /models list; other providers return their tier model with no list.
+    """
+    engine = get_engine()
+    s = engine.settings
+    current = getattr(s, "model_primary", "") or ""
+    base_url = getattr(s, "custom_base_url", "") or ""
+    available: list[str] = []
+    err = ""
+    provider = "custom" if base_url else "default"
+    if base_url:
+        try:
+            from kompany.llm.providers import list_openai_compatible_models
+            available = list_openai_compatible_models(
+                base_url, getattr(s, "custom_api_key", "") or ""
+            )
+        except Exception as exc:  # noqa: BLE001
+            err = f"{type(exc).__name__}: {exc}"
+    return ModelSettingResponse(
+        current_model=current, provider=provider, base_url=base_url,
+        available_models=available, error=err,
+    )
+
+
+@app.post("/settings/model", response_model=ModelSettingResponse)
+def set_model_setting(req: SetModelRequest) -> ModelSettingResponse:
+    """Switch the model for all three tiers. Persists to company_config
+    (``custom_model_picked``, the same key the engine applies on boot)
+    AND updates the live engine so the change takes effect immediately —
+    no restart needed."""
+    engine = get_engine()
+    model = req.model.strip()
+    engine.db.execute(
+        """INSERT INTO company_config (key, value, updated_at)
+           VALUES ('custom_model_picked', ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET
+             value = excluded.value, updated_at = excluded.updated_at""",
+        (model,),
+    )
+    engine.db.commit()
+    engine.settings.model_apex = model
+    engine.settings.model_primary = model
+    engine.settings.model_economy = model
+    engine.audit.record(
+        "settings.model_changed",
+        f"Founder switched model to {model}",
+        detail={"model": model},
+    )
+    return get_model_setting()
+
+
 @app.post("/directive")
 def send_directive(req: DirectiveRequest) -> dict[str, Any]:
     """Send a directive to Kompany.

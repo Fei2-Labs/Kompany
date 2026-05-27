@@ -455,6 +455,42 @@ runner = CliRunner()
 client = TestClient(app)
 
 
+def test_set_model_persists_and_applies_live(monkeypatch):
+    """POST /settings/model writes custom_model_picked and updates the
+    live engine tiers so a founder can switch model when their provider
+    drops one (swedeapi gpt-5.x outage). GET reflects it back."""
+    from types import SimpleNamespace
+
+    class _FakeDB:
+        def __init__(self):
+            self.writes = []
+
+        def execute(self, sql, params=()):
+            self.writes.append((sql, params))
+            return self
+
+        def commit(self):
+            pass
+
+    class _ModelEngine:
+        def __init__(self):
+            self.db = _FakeDB()
+            self.settings = SimpleNamespace(
+                model_apex="gpt-5.5", model_primary="gpt-5.5",
+                model_economy="gpt-5.5", custom_base_url="", custom_api_key="",
+            )
+            self.audit = SimpleNamespace(record=lambda *a, **k: None)
+
+    eng = _ModelEngine()
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    res = client.post("/settings/model", json={"model": "mimo-v2.5-pro"})
+    assert res.status_code == 200
+    assert eng.settings.model_primary == "mimo-v2.5-pro"
+    assert eng.settings.model_apex == "mimo-v2.5-pro"
+    assert res.json()["current_model"] == "mimo-v2.5-pro"
+
+
 def test_directive_llm_failure_returns_graceful_200(monkeypatch):
     """A directive whose LLM call blows up must NOT surface as a raw
     HTTP 500. The endpoint catches it and returns 200 + status=failed +
