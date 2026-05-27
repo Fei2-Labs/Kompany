@@ -12,8 +12,11 @@ both gate it). Credentials live in the encrypted vault.
 
 from __future__ import annotations
 
+import json
 import smtplib
 import ssl
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 
 from pydantic import BaseModel
@@ -28,6 +31,8 @@ from kompany.plugins.contract import (
 )
 
 REQUIRED_CREDENTIALS = ("smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from")
+RESEND_CREDENTIALS = ("resend_api_key", "resend_from")
+RESEND_API = "https://api.resend.com/emails"
 
 
 class SendEmailInput(BaseModel):
@@ -72,6 +77,27 @@ def _smtp_send(creds: dict[str, str], to: str, subject: str, body: str) -> str:
     return f"sent to {to} via {host}:{port}"
 
 
+def _resend_send(api_key: str, sender: str, to: str, subject: str, body: str) -> str:
+    """Send one email via the Resend API. Returns a detail string with
+    the message id. Raises on failure."""
+    if not api_key or not sender:
+        raise ValueError("Resend not fully configured (need api_key + from)")
+    payload = json.dumps({
+        "from": sender, "to": [to], "subject": subject, "text": body,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        RESEND_API, data=payload, method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        return f"sent to {to} via Resend (id {data.get('id', '?')})"
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "ignore")[:200]
+        raise RuntimeError(f"Resend {e.code}: {detail}") from e
+
+
 class SendEmailTool(Tool):
     name = "email.send"
     description = (
@@ -88,9 +114,17 @@ class SendEmailTool(Tool):
         return CostEstimate(llm_usd=0.0, external_usd=0.0, confidence=1.0)
 
     def execute(self, inputs: BaseModel, ctx: ToolContext) -> BaseModel:
-        creds = {k: (ctx.credentials.get(k) or "") for k in REQUIRED_CREDENTIALS}
+        # Provider-aware: prefer Resend (native API) when connected,
+        # else fall back to raw SMTP. One tool, either backend — the
+        # agent just calls "email.send".
+        resend_key = ctx.credentials.get("resend_api_key") or ""
         try:
-            detail = _smtp_send(creds, inputs.to, inputs.subject, inputs.body)
+            if resend_key:
+                sender = ctx.credentials.get("resend_from") or ""
+                detail = _resend_send(resend_key, sender, inputs.to, inputs.subject, inputs.body)
+            else:
+                creds = {k: (ctx.credentials.get(k) or "") for k in REQUIRED_CREDENTIALS}
+                detail = _smtp_send(creds, inputs.to, inputs.subject, inputs.body)
             return SendEmailOutput(sent=True, detail=detail, to=inputs.to)
         except Exception as exc:  # noqa: BLE001 — surface honestly
             return SendEmailOutput(sent=False, detail=f"{type(exc).__name__}: {exc}", to=inputs.to)
@@ -100,6 +134,19 @@ class EmailIntegration(Integration):
     integration_id = "email_smtp"
     display_name = "Email (SMTP)"
     required_credentials = REQUIRED_CREDENTIALS
+
+    def tools(self) -> list[Tool]:
+        return [SendEmailTool()]
+
+
+class ResendIntegration(Integration):
+    """Resend (native API) email integration. Same email.send tool —
+    SendEmailTool routes to Resend automatically when resend_api_key is
+    present, so connecting Resend just works for the agent."""
+
+    integration_id = "resend"
+    display_name = "Resend (Email API)"
+    required_credentials = RESEND_CREDENTIALS
 
     def tools(self) -> list[Tool]:
         return [SendEmailTool()]

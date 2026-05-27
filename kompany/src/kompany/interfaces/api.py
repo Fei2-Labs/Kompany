@@ -971,11 +971,11 @@ class IntegrationActionResponse(BaseModel):
 def list_integrations() -> list[IntegrationInfo]:
     """List built-in integrations + whether the founder has connected
     each (all required credentials present in the vault)."""
-    from kompany.integrations.email_smtp import EmailIntegration
+    from kompany.integrations.email_smtp import EmailIntegration, ResendIntegration
 
     engine = get_engine()
     out: list[IntegrationInfo] = []
-    for integ in (EmailIntegration(),):
+    for integ in (EmailIntegration(), ResendIntegration()):
         creds = integ.required_credentials
         connected = bool(creds) and all(
             (engine.credentials.get(c) or "") for c in creds
@@ -1024,6 +1024,39 @@ def connect_email(req: ConnectEmailRequest) -> IntegrationActionResponse:
     return IntegrationActionResponse(ok=True, detail=f"connected {req.smtp_user} @ {host}:{port}")
 
 
+class ConnectResendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    api_key: str = Field(..., min_length=1)
+    resend_from: str = Field(..., min_length=1)
+
+
+@app.post("/integrations/resend/connect", response_model=IntegrationActionResponse)
+def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
+    """Store + verify a Resend API key. Verifies by listing domains
+    (validates the key) before saving."""
+    import urllib.error
+    import urllib.request
+
+    engine = get_engine()
+    if not getattr(engine.settings, "vault_key", ""):
+        return IntegrationActionResponse(ok=False, detail="vault key not configured")
+    try:
+        vr = urllib.request.Request(
+            "https://api.resend.com/domains",
+            headers={"Authorization": f"Bearer {req.api_key}"},
+        )
+        urllib.request.urlopen(vr, timeout=30).read()
+    except urllib.error.HTTPError as e:
+        return IntegrationActionResponse(ok=False, detail=f"Resend rejected the key ({e.code})")
+    except Exception as exc:  # noqa: BLE001
+        return IntegrationActionResponse(ok=False, detail=f"verify failed: {type(exc).__name__}: {exc}")
+    engine.credentials.set("resend_api_key", req.api_key.strip())
+    engine.credentials.set("resend_from", req.resend_from.strip())
+    engine.audit.record("integration.connected", "Connected Resend",
+                        detail={"integration": "resend", "from": req.resend_from})
+    return IntegrationActionResponse(ok=True, detail=f"connected Resend (from {req.resend_from})")
+
+
 class ProposeEmailRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     to: str = Field(..., min_length=1)
@@ -1055,7 +1088,11 @@ def test_email() -> IntegrationActionResponse:
     from kompany.plugins.contract import ToolContext
 
     engine = get_engine()
-    to = engine.credentials.get("smtp_from") or engine.credentials.get("smtp_user")
+    to = (
+        engine.credentials.get("resend_from")
+        or engine.credentials.get("smtp_from")
+        or engine.credentials.get("smtp_user")
+    )
     if not to:
         return IntegrationActionResponse(ok=False, detail="email not connected")
     ctx = ToolContext(

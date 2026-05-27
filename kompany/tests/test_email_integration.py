@@ -110,6 +110,40 @@ def test_propose_then_approve_executes_send(monkeypatch, tmp_path):
     assert sent["to"] == "lead@x.com"
 
 
+def test_send_routes_to_resend_when_connected(monkeypatch):
+    """When resend_api_key is present, email.send uses the Resend API,
+    not SMTP — one tool, provider auto-selected."""
+    used = {}
+    monkeypatch.setattr(
+        "kompany.integrations.email_smtp._resend_send",
+        lambda key, sender, to, subject, body: used.update(via="resend", to=to) or "sent via Resend (id x)",
+    )
+    monkeypatch.setattr(
+        "kompany.integrations.email_smtp._smtp_send",
+        lambda *a, **k: used.update(via="smtp") or "smtp",
+    )
+    out = SendEmailTool().execute(
+        SendEmailInput(to="a@b.com", subject="hi", body="x"),
+        _ctx({"resend_api_key": "re_123", "resend_from": "me@dom.com"}),
+    )
+    assert out.sent is True
+    assert used["via"] == "resend"
+
+
+def test_send_falls_back_to_smtp_without_resend(monkeypatch):
+    used = {}
+    monkeypatch.setattr(
+        "kompany.integrations.email_smtp._smtp_send",
+        lambda *a, **k: used.update(via="smtp") or "smtp ok",
+    )
+    out = SendEmailTool().execute(
+        SendEmailInput(to="a@b.com", subject="hi", body="x"),
+        _ctx({"smtp_host": "h", "smtp_user": "u", "smtp_password": "p"}),
+    )
+    assert out.sent is True
+    assert used["via"] == "smtp"
+
+
 def test_send_email_failure_is_honest(monkeypatch):
     def boom(*a, **k):
         raise OSError("connection refused")

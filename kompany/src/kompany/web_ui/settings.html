@@ -48,7 +48,18 @@
     </div>
 
     <div class="frame" data-label="SETTINGS // integrations">
-      <h2 class="set-h">// EMAIL (SMTP)</h2>
+      <h2 class="set-h">// EMAIL — RESEND (recommended)</h2>
+      <p class="set-note">Connect Resend (API). Preferred over raw SMTP — better deliverability + delivery ids. Paste your Resend API key + a verified sender address.</p>
+      <div class="set-meta" id="resend-status">checking…</div>
+      <div class="set-row"><label>Resend API key</label><input id="rs-key" type="password" placeholder="re_..." autocomplete="off"></div>
+      <div class="set-row"><label>From (verified sender)</label><input id="rs-from" placeholder="you@yourdomain.com" autocomplete="off"></div>
+      <div class="set-control">
+        <button type="button" id="rs-connect" class="onb-btn onb-btn-submit">[ ▸ CONNECT + VERIFY ]</button>
+        <button type="button" id="rs-test" class="onb-btn onb-btn-discuss">[ ✉ send test ]</button>
+      </div>
+      <div class="set-result" id="resend-result" hidden></div>
+
+      <h2 class="set-h" style="margin-top:18px">// EMAIL (SMTP) — alternative</h2>
       <p class="set-note">Connect an email account so the team can actually SEND outreach — not just draft it. Works with Gmail app-passwords or any SMTP provider. Stored encrypted in the vault.</p>
       <div class="set-meta" id="email-status">checking…</div>
       <div class="set-row"><label>SMTP host</label><input id="em-host" placeholder="smtp.gmail.com"></div>
@@ -128,6 +139,43 @@
     });
 
     load();
+
+    // ---- Resend integration ----
+    const rsStatus = document.getElementById("resend-status");
+    const rsResult = document.getElementById("resend-result");
+    function rsShow(msg, ok) {
+      rsResult.hidden = false; rsResult.textContent = msg;
+      rsResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    async function rsLoad() {
+      try {
+        const list = await fetch("/integrations", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        const r = (list || []).find((i) => i.integration_id === "resend");
+        rsStatus.textContent = r && r.connected ? "✓ connected — team sends via Resend" : "not connected";
+      } catch (_) { rsStatus.textContent = "status unavailable"; }
+    }
+    document.getElementById("rs-connect").addEventListener("click", async () => {
+      const body = { api_key: document.getElementById("rs-key").value.trim(), resend_from: document.getElementById("rs-from").value.trim() };
+      if (!body.api_key || !body.resend_from) { rsShow("api key + from required", false); return; }
+      rsShow("verifying…", true);
+      try {
+        const r = await fetch("/integrations/resend/connect", {
+          method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        rsShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
+        if (d.ok) rsLoad();
+      } catch (e) { rsShow("connect failed: " + e.message, false); }
+    });
+    document.getElementById("rs-test").addEventListener("click", async () => {
+      rsShow("sending test…", true);
+      try {
+        const d = await fetch("/integrations/email/test", { method: "POST", headers: { Accept: "application/json" } }).then((r) => r.json());
+        rsShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
+      } catch (e) { rsShow("test failed: " + e.message, false); }
+    });
+    rsLoad();
 
     // ---- Email integration ----
     const emStatus = document.getElementById("email-status");

@@ -31,6 +31,9 @@ ALLOWED_CREDENTIALS = {
     "smtp_user",
     "smtp_password",
     "smtp_from",
+    # Resend (native API) — preferred over raw SMTP when present.
+    "resend_api_key",
+    "resend_from",
 }
 
 
