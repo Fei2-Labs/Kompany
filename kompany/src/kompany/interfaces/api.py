@@ -1024,9 +1024,45 @@ def connect_email(req: ConnectEmailRequest) -> IntegrationActionResponse:
     return IntegrationActionResponse(ok=True, detail=f"connected {req.smtp_user} @ {host}:{port}")
 
 
+class IntegrationCredsResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")  # arbitrary string fields
+
+
+@app.get("/integrations/{integration_id}/credentials")
+def get_integration_credentials(integration_id: str) -> dict[str, Any]:
+    """Return the founder's stored credentials for one integration so
+    the Settings form can pre-fill on page load. Secrets are MASKED
+    (last 4 chars only) — non-secret fields (from address, host, user,
+    port) come back in full so the founder sees what's saved."""
+    engine = get_engine()
+    fields_by_id = {
+        "email_smtp": (
+            ("smtp_host", False), ("smtp_port", False), ("smtp_user", False),
+            ("smtp_password", True), ("smtp_from", False),
+        ),
+        "resend": (("resend_api_key", True), ("resend_from", False)),
+    }
+    cfg = fields_by_id.get(integration_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"unknown integration: {integration_id}")
+    out: dict[str, Any] = {}
+    for name, is_secret in cfg:
+        v = engine.credentials.get(name) or ""
+        if is_secret and v:
+            out[name + "_mask"] = "•" * 6 + v[-4:]
+            out[name + "_set"] = True
+        else:
+            out[name] = v
+            if is_secret:
+                out[name + "_set"] = False
+    return out
+
+
 class ConnectResendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    api_key: str = Field(..., min_length=1)
+    # Empty string means "keep the saved key" — lets the founder change
+    # the From without re-pasting the key every time.
+    api_key: str = ""
     resend_from: str = Field(..., min_length=1)
 
 
@@ -1040,6 +1076,11 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
     engine = get_engine()
     if not getattr(engine.settings, "vault_key", ""):
         return IntegrationActionResponse(ok=False, detail="vault key not configured")
+    api_key = req.api_key.strip()
+    if not api_key:
+        api_key = engine.credentials.get("resend_api_key") or ""
+    if not api_key:
+        return IntegrationActionResponse(ok=False, detail="api key required")
     # Verify auth, NOT scope: a Resend "sending access" key (the right
     # kind for an app) returns 403 on /domains because it lacks
     # domains-read permission — but it CAN send. So 200 and 403 both
@@ -1047,7 +1088,7 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
     try:
         vr = urllib.request.Request(
             "https://api.resend.com/domains",
-            headers={"Authorization": f"Bearer {req.api_key}"},
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         urllib.request.urlopen(vr, timeout=30).read()
     except urllib.error.HTTPError as e:
@@ -1057,7 +1098,7 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
         # the send test will surface any real send-time problem.
     except Exception as exc:  # noqa: BLE001
         return IntegrationActionResponse(ok=False, detail=f"verify failed: {type(exc).__name__}: {exc}")
-    engine.credentials.set("resend_api_key", req.api_key.strip())
+    engine.credentials.set("resend_api_key", api_key)
     engine.credentials.set("resend_from", req.resend_from.strip())
     engine.audit.record("integration.connected", "Connected Resend",
                         detail={"integration": "resend", "from": req.resend_from})

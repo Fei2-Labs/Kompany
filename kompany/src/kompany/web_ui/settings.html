@@ -152,11 +152,28 @@
         const list = await fetch("/integrations", { headers: { Accept: "application/json" } }).then((r) => r.json());
         const r = (list || []).find((i) => i.integration_id === "resend");
         rsStatus.textContent = r && r.connected ? "✓ connected — team sends via Resend" : "not connected";
+        // Pre-fill the form from saved values (key masked).
+        const creds = await fetch("/integrations/resend/credentials").then((r) => r.json());
+        if (creds && creds.resend_from) {
+          document.getElementById("rs-from").value = creds.resend_from;
+        }
+        const keyEl = document.getElementById("rs-key");
+        if (creds && creds.resend_api_key_set) {
+          keyEl.placeholder = creds.resend_api_key_mask + " — leave blank to keep";
+          keyEl.dataset.saved = "1";
+        } else {
+          keyEl.placeholder = "re_..."; delete keyEl.dataset.saved;
+        }
       } catch (_) { rsStatus.textContent = "status unavailable"; }
     }
     document.getElementById("rs-connect").addEventListener("click", async () => {
-      const body = { api_key: document.getElementById("rs-key").value.trim(), resend_from: document.getElementById("rs-from").value.trim() };
-      if (!body.api_key || !body.resend_from) { rsShow("api key + from required", false); return; }
+      // Empty api_key tells the server "keep the saved key" — lets the
+      // founder edit From alone without re-pasting.
+      const body = {
+        api_key: document.getElementById("rs-key").value.trim(),
+        resend_from: document.getElementById("rs-from").value.trim(),
+      };
+      if (!body.resend_from) { rsShow("from required", false); return; }
       rsShow("verifying…", true);
       try {
         const r = await fetch("/integrations/resend/connect", {
