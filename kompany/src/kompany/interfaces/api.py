@@ -1088,7 +1088,12 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
     try:
         vr = urllib.request.Request(
             "https://api.resend.com/domains",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                # Cloudflare fronts api.resend.com and 403s requests with
+                # the default urllib UA as "error code: 1010".
+                "User-Agent": "Kompany/0.1 (+https://kompany.dev)",
+            },
         )
         urllib.request.urlopen(vr, timeout=30).read()
     except urllib.error.HTTPError as e:

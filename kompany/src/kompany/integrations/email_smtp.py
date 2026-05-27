@@ -87,7 +87,16 @@ def _resend_send(api_key: str, sender: str, to: str, subject: str, body: str) ->
     }).encode("utf-8")
     req = urllib.request.Request(
         RESEND_API, data=payload, method="POST",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            # Cloudflare in front of api.resend.com returns
+            # ``error code: 1010`` for requests without a sane
+            # User-Agent (treats them as bots). Without this header
+            # every send 403'd with the cryptic 1010 — nothing to do
+            # with the Resend API key/domain themselves.
+            "User-Agent": "Kompany/0.1 (+https://kompany.dev)",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -95,18 +104,10 @@ def _resend_send(api_key: str, sender: str, to: str, subject: str, body: str) ->
         return f"sent to {to} via Resend (id {data.get('id', '?')})"
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "ignore")
-        # Resend uses numeric "error codes" inside the body. Translate
-        # the common ones into actionable founder guidance.
-        hint = ""
-        if "1010" in body or "restricted" in body.lower():
-            hint = (" — restricted API key: either (a) verify a domain in "
-                    "Resend and use a From@that-domain, or (b) use a key "
-                    "with 'Full access' and a verified sender")
-        elif "validation_error" in body or "from address" in body.lower():
-            hint = " — sender domain not verified in Resend (verify the domain or use onboarding@resend.dev for testing to your own email)"
-        elif e.code == 401:
-            hint = " — the API key is invalid"
-        raise RuntimeError(f"Resend {e.code}: {body[:200]}{hint}") from e
+        # Surface the full error body — Resend's actual `message` field
+        # tells the real cause (account restricted vs domain unverified
+        # vs sandbox-only). Earlier truncation hid it behind "1010".
+        raise RuntimeError(f"Resend {e.code}: {body}") from e
 
 
 class SendEmailTool(Tool):
