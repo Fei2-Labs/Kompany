@@ -1024,6 +1024,30 @@ def connect_email(req: ConnectEmailRequest) -> IntegrationActionResponse:
     return IntegrationActionResponse(ok=True, detail=f"connected {req.smtp_user} @ {host}:{port}")
 
 
+class ProposeEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    to: str = Field(..., min_length=1)
+    subject: str = Field(..., min_length=1)
+    body: str = Field(..., min_length=1)
+
+
+@app.post("/integrations/email/propose")
+def propose_email(req: ProposeEmailRequest) -> dict[str, Any]:
+    """Queue an email send for founder approval (does NOT send now).
+
+    Demonstrates the deferred-action pipeline: the proposal lands in the
+    inbox; approving it (POST /approvals/{id}/approve) actually sends.
+    This is how an agent will hand off an external action — propose,
+    founder approves, it happens."""
+    engine = get_engine()
+    return engine.propose_action(
+        "email.send",
+        {"to": req.to, "subject": req.subject, "body": req.body},
+        summary=f"Send email to {req.to}: {req.subject}",
+        severity="medium",
+    )
+
+
 @app.post("/integrations/email/test", response_model=IntegrationActionResponse)
 def test_email() -> IntegrationActionResponse:
     """Send a test email to the connected address (proves real sending)."""

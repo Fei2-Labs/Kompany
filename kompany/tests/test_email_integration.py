@@ -77,6 +77,39 @@ def test_list_integrations_reports_connected(monkeypatch, tmp_path):
     assert email["connected"] is True
 
 
+def test_propose_then_approve_executes_send(monkeypatch, tmp_path):
+    """The deferred-action pipeline (#5): propose → inbox approval →
+    approve → real send executes. The action does NOT fire on propose,
+    only on approve (founder gate)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("KOMPANY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KOMPANY_TEST_MODE", "1")
+    from kompany.core.engine import KompanyEngine
+
+    sent = {}
+    monkeypatch.setattr(
+        "kompany.integrations.email_smtp._smtp_send",
+        lambda creds, to, subject, body: sent.update(to=to) or f"sent to {to}",
+    )
+
+    engine = KompanyEngine()
+    proposal = engine.propose_action(
+        "email.send",
+        {"to": "lead@x.com", "subject": "hi", "body": "hello"},
+        summary="Send email to lead@x.com",
+    )
+    # Lands in inbox, NOT sent yet.
+    assert "id" in proposal
+    assert sent == {}
+    inbox = engine.inbox()
+    assert any(r["id"] == proposal["id"] and r["action_type"] == "tool_action" for r in inbox)
+
+    # Approve → executes the real send.
+    res = engine.approve_request(proposal["id"], approved_by="master")
+    assert res["tool_result"]["sent"] is True
+    assert sent["to"] == "lead@x.com"
+
+
 def test_send_email_failure_is_honest(monkeypatch):
     def boom(*a, **k):
         raise OSError("connection refused")

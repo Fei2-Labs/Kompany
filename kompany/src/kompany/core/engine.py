@@ -2680,6 +2680,15 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 self._finalize_target_feasibility(request, outcome="approved")
             if request.action_type == "glossary_review":
                 self._finalize_glossary_review(request, outcome="approved")
+            # Deferred tool action (#5): the founder approved a proposed
+            # external action (e.g. send email). Execute it for real now —
+            # this is the autonomy payoff: agent proposes → founder
+            # approves → it actually happens, with a real-result audit.
+            if request.action_type == "tool_action":
+                out = self._execute_tool_action(request)
+                payload = request.model_dump(mode="json")
+                payload["tool_result"] = out
+                return payload
             return request.model_dump(mode="json")
         return None
 
@@ -2715,6 +2724,101 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 self._finalize_glossary_review(request, outcome="rejected")
             return request.model_dump(mode="json")
         return None
+
+    # ------------------------------------------------------------------
+    # Deferred tool actions (#5) — propose → approval queue → execute
+    # ------------------------------------------------------------------
+
+    def _tool_registry(self) -> dict:
+        """Map tool name → Tool instance. Built-in integrations now;
+        plugin integrations (entry-point discovered) will merge in here."""
+        from kompany.integrations.email_smtp import EmailIntegration
+
+        registry: dict = {}
+        for integ in (EmailIntegration(),):
+            for tool in integ.tools():
+                registry[tool.name] = tool
+        return registry
+
+    def propose_action(
+        self,
+        tool_name: str,
+        inputs: dict,
+        summary: str,
+        *,
+        severity: str = "medium",
+        requested_by: str = "team",
+        directive_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict:
+        """Queue a deferred external action for founder approval.
+
+        The action does NOT run now — it lands in the inbox as a
+        ``tool_action`` approval carrying the tool + inputs. On approve,
+        ``approve_request`` executes it for real. This is the founder's
+        money/decision gate: nothing external happens without a yes.
+        """
+        from kompany.state.models import ApprovalRequest
+
+        request = self.approvals.create(ApprovalRequest(
+            action_type="tool_action",
+            summary=summary,
+            payload={"tool_name": tool_name, "inputs": inputs},
+            requested_by=requested_by,
+            severity=severity,
+            directive_id=directive_id,
+            project_id=project_id,
+        ))
+        self.audit.record(
+            "tool_action.proposed",
+            f"Proposed action for approval: {tool_name}",
+            detail={"approval_id": request.id, "tool_name": tool_name},
+            directive_id=directive_id,
+            project_id=project_id,
+        )
+        return request.model_dump(mode="json")
+
+    def _execute_tool_action(self, request) -> dict:
+        """Execute an approved ``tool_action`` for real. Records the
+        real result (sent id / charge id / error) to audit + as an
+        approval comment so the founder sees what happened."""
+        from kompany.plugins.contract import ToolContext
+
+        payload = request.payload or {}
+        tool_name = payload.get("tool_name", "")
+        inputs = payload.get("inputs", {}) or {}
+        tool = self._tool_registry().get(tool_name)
+        if tool is None:
+            out = {"ok": False, "detail": f"unknown tool: {tool_name}"}
+            self.audit.record("tool_action.failed", f"Unknown tool {tool_name}",
+                              detail={"approval_id": request.id}, project_id=request.project_id)
+            return out
+        ctx = ToolContext(
+            run_id=current_run_id() or "",
+            ledger=self.ledger, audit=self.audit,
+            credentials=self.credentials, settings=self.settings,
+        )
+        try:
+            schema = tool.input_schema
+            parsed = schema(**inputs) if schema else inputs
+            result = tool.execute(parsed, ctx)
+            out = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        except Exception as exc:  # noqa: BLE001
+            out = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
+        self.audit.record(
+            "tool_action.executed",
+            f"Executed approved action: {tool_name}",
+            detail={"approval_id": request.id, "tool_name": tool_name, "result": out},
+            project_id=request.project_id,
+        )
+        try:
+            self.approvals.add_comment(
+                request.id, by_type="system", by_id=None,
+                body=f"Executed {tool_name}: {out}",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
     # ------------------------------------------------------------------
     # Approval thread + RPG inbox (05-18-approval-thread-and-rpg)
