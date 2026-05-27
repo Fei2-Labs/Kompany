@@ -237,12 +237,27 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
 
     def _apply_vault_credentials(self) -> None:
         if self.settings.vault_key:
+            # Project only credentials the settings model actually declares.
+            # ``ALLOWED_CREDENTIALS`` has grown to cover integration creds
+            # (resend_api_key, smtp_*, ...) that don't appear on
+            # ``KompanySettings``; setattr-ing them raised ValueError and
+            # crashed engine boot once those credentials were stored.
+            declared = set(getattr(type(self.settings), "model_fields", {}) or ())
             for name in sorted(ALLOWED_CREDENTIALS):
+                if declared and name not in declared:
+                    continue
                 if getattr(self.settings, name, ""):
                     continue
                 value = self.credentials.get(name)
-                if value:
+                if not value:
+                    continue
+                try:
                     setattr(self.settings, name, value)
+                except (ValueError, TypeError):
+                    # Non-pydantic test fakes or fields not on the model —
+                    # skip silently, the vault remains source of truth via
+                    # credentials.get().
+                    continue
         # Custom-provider tier override: onboarding writes the discovered
         # model id into company_config so every engine boot re-applies
         # the override. Without this, settings fall through to the

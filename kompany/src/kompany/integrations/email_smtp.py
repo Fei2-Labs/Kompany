@@ -94,8 +94,19 @@ def _resend_send(api_key: str, sender: str, to: str, subject: str, body: str) ->
             data = json.loads(r.read().decode("utf-8"))
         return f"sent to {to} via Resend (id {data.get('id', '?')})"
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "ignore")[:200]
-        raise RuntimeError(f"Resend {e.code}: {detail}") from e
+        body = e.read().decode("utf-8", "ignore")
+        # Resend uses numeric "error codes" inside the body. Translate
+        # the common ones into actionable founder guidance.
+        hint = ""
+        if "1010" in body or "restricted" in body.lower():
+            hint = (" — restricted API key: either (a) verify a domain in "
+                    "Resend and use a From@that-domain, or (b) use a key "
+                    "with 'Full access' and a verified sender")
+        elif "validation_error" in body or "from address" in body.lower():
+            hint = " — sender domain not verified in Resend (verify the domain or use onboarding@resend.dev for testing to your own email)"
+        elif e.code == 401:
+            hint = " — the API key is invalid"
+        raise RuntimeError(f"Resend {e.code}: {body[:200]}{hint}") from e
 
 
 class SendEmailTool(Tool):
