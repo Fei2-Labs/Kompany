@@ -1737,3 +1737,17 @@ body.onboarding-body { padding-bottom: 40px; }
 .ap-cancel-armed { border-color: #ff4444; color: #ff6666; background: rgba(255, 80, 80, 0.12); }
 .ep-active-wrap { margin-bottom: 10px; }
 .ep-active-head { color: rgba(255, 200, 80, 0.85); font-size: 10px; letter-spacing: 0.06em; margin-bottom: 4px; }
+
+/* Settings text inputs were unstyled (native white). Theme them. */
+.set-row input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 255, 65, 0.4);
+  color: #00ff41;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.set-row input::placeholder { color: rgba(0, 255, 65, 0.35); }
+.set-row input:focus { outline: none; border-color: #00ff41; }
