@@ -621,7 +621,7 @@ export function initChannel() {
   _root.innerHTML = `
     <div class="channel-head">
       <span class="channel-summary" id="channel-summary"></span>
-      <button type="button" class="onb-btn channel-toggle">[ expand ▴ ]</button>
+      <button type="button" class="channel-toggle">[ expand ▴ ]</button>
     </div>
     <div class="channel-thread" id="channel-thread"></div>
   `;
@@ -632,6 +632,14 @@ export function initChannel() {
   }
   _threadEl = _root.querySelector("#channel-thread");
   _summaryEl = _root.querySelector("#channel-summary");
+
+  // Pull the [ LOG ] timeline trigger into the channel head so every bottom
+  // affordance lives in one thin strip — kills the floating-FAB overlap.
+  // timeline_modal.js already bound its click handler (inits earlier); moving
+  // the node keeps the listener.
+  const fab = document.getElementById("timeline-fab");
+  const head = _root.querySelector(".channel-head");
+  if (fab && head) head.insertBefore(fab, head.querySelector(".channel-toggle"));
 
   _root.querySelector(".channel-toggle").addEventListener("click", toggleExpanded);
   _summaryEl.addEventListener("click", () => { if (!_expanded) setExpanded(true); });

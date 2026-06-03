@@ -369,23 +369,25 @@ body::after {
  * ------------------------------------------------------------------ */
 .channel-panel {
   position: fixed;
-  left: 24px;
-  right: 24px;
-  /* Sit directly on top of the fixed directive bar (~52px tall). */
+  left: 0;
+  right: 0;
+  /* Flush on top of the fixed directive bar (~52px tall) — one continuous
+     bottom strip, full width, no floating gap. */
   bottom: 52px;
   z-index: 49;
   background: var(--bg);
   margin-bottom: 0;
-  padding: 10px 16px 12px 16px;
+  padding: 0 24px;
   display: flex;
   flex-direction: column;
-  /* Collapsed: only the head row shows (the thread is height:0). */
+  /* Collapsed: only the thin head row shows (the thread is height:0). */
 }
 .channel-panel .channel-head {
   display: flex;
   align-items: center;
   gap: 12px;
   flex: 0 0 auto;
+  height: 34px;
 }
 .channel-summary {
   flex: 1 1 auto;
@@ -400,7 +402,31 @@ body::after {
 .channel-summary.is-clarify { color: var(--warn); }
 .channel-summary.is-gated { color: var(--alert); }
 .channel-summary.is-busy { color: rgba(var(--fg-rgb), 0.8); }
-.channel-toggle { flex: 0 0 auto; font-size: 11px; padding: 2px 8px; }
+
+/* Thin text buttons in the strip — [ LOG ] and [ expand ▴ ] sit inline,
+   right-aligned, matching weight. No chunky bordered boxes. */
+.channel-toggle,
+.channel-head .timeline-fab {
+  position: static;
+  flex: 0 0 auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid rgba(var(--fg-rgb), 0.25);
+  color: rgba(var(--fg-rgb), 0.65);
+  cursor: pointer;
+}
+.channel-toggle:hover,
+.channel-head .timeline-fab:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+  background: rgba(var(--fg-rgb), 0.06);
+}
 
 /* Thread: hidden when collapsed, scrolls internally when expanded. */
 .channel-thread {
@@ -416,18 +442,23 @@ body::after {
 }
 .channel-panel.is-expanded {
   /* Top edge stops below the header so panels behind stay framed; thread
-     scrolls within. 120px ~ header + top margin reserve. */
+     scrolls within. 120px ~ header + top margin reserve. Inset to match
+     the panel gutters (collapsed strip is full-bleed). */
+  left: 24px;
+  right: 24px;
   top: 120px;
+  padding: 10px 16px 12px 16px;
   border: var(--frame-border-width) solid var(--fg);
   box-shadow: 0 0 24px rgba(var(--shadow-rgb), 0.6);
 }
+.channel-panel.is-expanded .channel-head { height: auto; }
 .channel-panel.is-expanded .channel-thread {
   height: auto;
   margin-top: 12px;
 }
 .channel-panel:not(.is-expanded) {
   border: 0;
-  border-top: 1px dashed rgba(var(--fg-rgb), 0.2);
+  border-top: 1px solid rgba(var(--fg-rgb), 0.18);
 }
 .channel-panel:not(.is-expanded)::before { display: none; }
 
@@ -541,9 +572,9 @@ body::after {
   height: 100vh;
   height: 100dvh;
   /* Reserve room for the fixed directive bar + the collapsed CEO-channel
-     summary line that sits above it so panels never hide behind either.
-     (~52px bar + ~40px channel head + breathing room.) */
-  padding: 24px 24px 112px 24px;
+     strip that sits flush above it so panels never hide behind either.
+     (~52px bar + 34px channel strip + breathing room.) */
+  padding: 24px 24px 98px 24px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
