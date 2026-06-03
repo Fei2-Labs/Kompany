@@ -360,6 +360,163 @@ body::after {
 #directive-status.err { color: var(--alert); }
 #directive-status.ok { color: var(--fg); }
 
+/* ---------------------------------------------------------------------
+ * CEO channel (06-03-ceo-channel, PR4)
+ * Collapsible thread anchored ABOVE the directive bar. Collapsed = a thin
+ * summary line (does NOT grow the bar area). Expanded = an overlay that
+ * grows UPWARD over the panels, bounded by the viewport (header + margins);
+ * the thread scrolls internally. Page-level scroll never appears.
+ * ------------------------------------------------------------------ */
+.channel-panel {
+  position: fixed;
+  left: 24px;
+  right: 24px;
+  /* Sit directly on top of the fixed directive bar (~52px tall). */
+  bottom: 52px;
+  z-index: 49;
+  background: var(--bg);
+  margin-bottom: 0;
+  padding: 10px 16px 12px 16px;
+  display: flex;
+  flex-direction: column;
+  /* Collapsed: only the head row shows (the thread is height:0). */
+}
+.channel-panel .channel-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.channel-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: rgba(var(--fg-rgb), 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.channel-summary.is-clarify { color: var(--warn); }
+.channel-summary.is-gated { color: var(--alert); }
+.channel-summary.is-busy { color: rgba(var(--fg-rgb), 0.8); }
+.channel-toggle { flex: 0 0 auto; font-size: 11px; padding: 2px 8px; }
+
+/* Thread: hidden when collapsed, scrolls internally when expanded. */
+.channel-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 0;
+  margin-top: 0;
+  transition: none;
+}
+.channel-panel.is-expanded {
+  /* Top edge stops below the header so panels behind stay framed; thread
+     scrolls within. 120px ~ header + top margin reserve. */
+  top: 120px;
+  border: var(--frame-border-width) solid var(--fg);
+  box-shadow: 0 0 24px rgba(var(--shadow-rgb), 0.6);
+}
+.channel-panel.is-expanded .channel-thread {
+  height: auto;
+  margin-top: 12px;
+}
+.channel-panel:not(.is-expanded) {
+  border: 0;
+  border-top: 1px dashed rgba(var(--fg-rgb), 0.2);
+}
+.channel-panel:not(.is-expanded)::before { display: none; }
+
+.channel-empty {
+  color: rgba(var(--fg-rgb), 0.35);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* Turns */
+.channel-turn {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 10px;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-left: 3px solid transparent;
+}
+.channel-turn-who {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(var(--fg-rgb), 0.5);
+}
+.channel-turn-body { word-break: break-word; color: rgba(var(--fg-rgb), 0.85); }
+.channel-turn.role-founder {
+  border-left-color: rgba(var(--fg-rgb), 0.4);
+  background: rgba(var(--fg-rgb), 0.03);
+}
+.channel-turn.role-ceo {
+  border-left-color: var(--info, var(--fg));
+  background: rgba(var(--fg-rgb), 0.015);
+}
+.channel-turn.role-ceo .channel-turn-who { color: var(--info, var(--fg)); }
+.channel-turn.kind-clarify_question {
+  border-left-color: var(--warn);
+  background: rgba(var(--warn-rgb), 0.08);
+}
+.channel-turn.kind-clarify_question .channel-turn-who { color: var(--warn); }
+.channel-turn.kind-preview {
+  border-left-color: var(--alert);
+  background: rgba(var(--alert-rgb), 0.07);
+}
+.channel-turn.is-resolved { opacity: 0.55; }
+
+/* Cost chip + cross-links on final turns */
+.channel-cost-chip {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 2px 8px;
+  border: 1px solid rgba(var(--fg-rgb), 0.4);
+  font-size: 10px;
+  color: rgba(var(--fg-rgb), 0.7);
+}
+.channel-links { margin-top: 6px; display: flex; gap: 8px; }
+.channel-link {
+  background: transparent;
+  border: 1px solid rgba(var(--fg-rgb), 0.3);
+  color: rgba(var(--fg-rgb), 0.7);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.channel-link:hover { background: rgba(var(--fg-rgb), 0.1); color: var(--fg); }
+
+/* Gate (preview) actions */
+.channel-gate-actions { margin-top: 10px; display: flex; gap: 8px; }
+.channel-gate-actions .key { font-size: 11px; }
+
+/* Progress bubble */
+.channel-prog { color: rgba(var(--fg-rgb), 0.85); font-size: 12px; }
+.channel-prog-cost { color: var(--warn); margin-left: 8px; }
+.channel-prog-spin { color: var(--warn); }
+.channel-prog-line {
+  font-size: 10px;
+  color: rgba(var(--fg-rgb), 0.5);
+  margin-top: 3px;
+}
+
+/* Cross-link flash highlight on INBOX / EPISODES targets */
+.channel-flash {
+  animation: channel-flash-kf 1.6s ease-out;
+}
+@keyframes channel-flash-kf {
+  0%, 30% { box-shadow: 0 0 0 2px var(--warn) inset; background: rgba(var(--warn-rgb), 0.15); }
+  100% { box-shadow: none; }
+}
+
 /* Empty states */
 .empty {
   color: rgba(var(--fg-rgb), 0.35);
@@ -383,9 +540,10 @@ body::after {
 .dashboard-body {
   height: 100vh;
   height: 100dvh;
-  /* Reserve room for the fixed directive bar at the bottom so panels
-     never sit behind it. Override the shared body padding. */
-  padding: 24px 24px 72px 24px;
+  /* Reserve room for the fixed directive bar + the collapsed CEO-channel
+     summary line that sits above it so panels never hide behind either.
+     (~52px bar + ~40px channel head + breathing room.) */
+  padding: 24px 24px 112px 24px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1796,7 +1954,9 @@ body.onboarding-body { padding-bottom: 40px; }
 .timeline-fab {
   position: fixed;
   right: 24px;
-  bottom: 72px;   /* clear the fixed directive bar */
+  /* Clear the fixed directive bar AND the collapsed CEO-channel summary
+     line that now sits above it (06-03-ceo-channel PR4). */
+  bottom: 100px;
   z-index: 900;
   font-family: inherit;
   font-size: 11px;

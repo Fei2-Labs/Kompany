@@ -28,6 +28,14 @@ export const api = {
   status: () => getJSON("/status"),
   episode: (id) => getJSON(`/episodes/${encodeURIComponent(id)}`),
   directive: (text) => postJSON("/directive", { text }),
+  // CEO channel (06-03-ceo-channel).
+  channelSend: (text, sessionId) =>
+    postJSON("/channel/send", sessionId ? { text, session_id: sessionId } : { text }),
+  channelSessions: (limit = 20) => getJSON(`/channel/sessions?limit=${encodeURIComponent(limit)}`),
+  channelSession: (id) => getJSON(`/channel/sessions/${encodeURIComponent(id)}`),
+  channelGo: (id) => postJSON(`/channel/sessions/${encodeURIComponent(id)}/go`, {}),
+  channelAbandon: (id) => postJSON(`/channel/sessions/${encodeURIComponent(id)}/abandon`, {}),
+  channelRunCost: (runId) => getJSON(`/channel/runs/${encodeURIComponent(runId)}/cost`),
   approve: (id, comment) => postJSON(`/approvals/${encodeURIComponent(id)}/approve`, { comment: comment || "" }),
   reject: (id, reason, comment) => postJSON(`/approvals/${encodeURIComponent(id)}/reject`, { reason: reason || "", comment: comment || "" }),
   revise: (id, counter, comment) => postJSON(`/approvals/${encodeURIComponent(id)}/revise`, { counter, comment: comment || "" }),

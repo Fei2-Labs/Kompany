@@ -10,7 +10,7 @@ import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
 import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=5";
-import { initDirective } from "/ui/static/modules/ui/directive.js";
+import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";
 import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js?v=2";
@@ -156,20 +156,12 @@ async function boot() {
       }
     })
     .catch(() => { /* non-fatal */ });
-  initDirective(async (text) => {
-    pushTimeline({ level: "warn", text: `directive submitted: ${text}` });
-    try {
-      const result = await api.directive(text);
-      pushTimeline({
-        level: result.status === "ok" || result.status === "completed" ? "ok" : "warn",
-        text: `directive ${result.status}: ${result.message || ""}`,
-      });
-      // Refresh inbox after directive (an approval may have appeared).
-      api.inbox().then((rows) => store.update("inbox", rows)).catch(() => {});
-    } catch (err) {
-      pushTimeline({ level: "err", text: `directive failed: ${err.message}` });
-    }
-  });
+  // CEO channel owns the directive bar now (06-03-ceo-channel, PR4). It
+  // renders the founder↔team thread above the input, drives send/clarify/
+  // gate/final, and reuses the single SSE feed via channelHandleEvent.
+  // directive.js is left untouched for any non-dashboard caller but is no
+  // longer wired here (no dead dual handlers on the input).
+  initChannel();
 
   // 4. Start the live SSE feed.
   connectSSE("/events", {
@@ -206,6 +198,10 @@ function handleEvent(evt) {
     const chip = getCostChip();
     if (chip) chip.onSpend(data || {});
   }
+
+  // CEO channel bubble: live cost (llm.spend), status lines (audit.*),
+  // and session reconcile (channel.updated). Reuses the single SSE feed.
+  channelHandleEvent(type, data || {});
 
   // Dispatch type-specific store refreshes.
   if (type === "inbox.updated") {
