@@ -23,21 +23,32 @@
     })();
   </script>
   <link rel="stylesheet" href="/ui/static/themes.css?v=2">
-  <link rel="stylesheet" href="/ui/static/style.css?v=20">
+  <link rel="stylesheet" href="/ui/static/style.css?v=23">
 </head>
-<body>
+<body class="dashboard-body">
+  <!-- Header (Phase 3, issue #12): one tidy unit at any width.
+       - .brand is a single non-wrapping inline group; company name (#brand-name)
+         ellipsis-truncates instead of wrapping mid-word; cursor stays attached.
+       - .stats degrade by founder priority at narrow widths via data-prio
+         (high=money signals -> low=run/ep); low priority hides first, no ragged wrap.
+       - .header-actions (settings) stays pinned right and never collides. -->
   <div class="header">
-    <div class="brand"><img src="/ui/static/logo.png" alt="K" class="brand-logo">KOMPANY//<span id="brand-name">SOLO-FOUNDER</span> <span class="blink">&#9608;</span></div>
+    <div class="brand">
+      <img src="/ui/static/logo.png" alt="K" class="brand-logo">
+      <span class="brand-prefix">KOMPANY//</span><span id="brand-name" class="brand-name">SOLO-FOUNDER</span><span class="blink">&#9608;</span>
+    </div>
     <div class="stats">
-      <div class="stat"><span>cash:</span> <b id="stat-cash">$0.00</b></div>
-      <div class="stat"><span>burn:</span> <b id="stat-burn">$0/h</b></div>
-      <div class="stat"><span>rev:</span> <b id="stat-rev">--</b></div>
-      <div class="stat"><span>days:</span> <b id="stat-days">--</b></div>
-      <div class="stat"><span>run:</span> <b id="stat-run">--</b></div>
-      <div class="stat"><span>ep:</span> <b id="stat-episodes">0</b></div>
-      <div class="stat cost-chip-stat" title="LLM spend total — click to preview the next call's cost"><span>llm:</span> <b id="stat-llmspend">$0.00</b></div>
-      <div class="stat"><span>sse:</span> <b id="stat-sse">offline</b></div>
-      <div class="stat"><a class="set-back" href="/ui/settings.html" title="Settings — switch model">[ ⚙ settings ]</a></div>
+      <div class="stat" data-prio="high"><span>cash:</span> <b id="stat-cash">$0.00</b></div>
+      <div class="stat" data-prio="high"><span>burn:</span> <b id="stat-burn">$0/h</b></div>
+      <div class="stat" data-prio="high"><span>rev:</span> <b id="stat-rev">--</b></div>
+      <div class="stat" data-prio="high"><span>days:</span> <b id="stat-days">--</b></div>
+      <div class="stat cost-chip-stat" data-prio="mid" title="LLM spend total — click to preview the next call's cost"><span>llm:</span> <b id="stat-llmspend">$0.00</b></div>
+      <div class="stat" data-prio="mid"><span>sse:</span> <b id="stat-sse">offline</b></div>
+      <div class="stat" data-prio="low"><span>run:</span> <b id="stat-run">--</b></div>
+      <div class="stat" data-prio="low"><span>ep:</span> <b id="stat-episodes">0</b></div>
+    </div>
+    <div class="header-actions">
+      <a class="set-back" href="/ui/settings.html" title="Settings — switch model">[ ⚙ settings ]</a>
     </div>
   </div>
 
@@ -55,7 +66,11 @@
         </div>
       </div>
 
-      <div class="frame" data-label="LIVE TIMELINE">
+      <!-- LIVE TIMELINE docked panel — hidden by default (founder decision
+           2026-06-03: timeline is process noise). The #timeline element is
+           moved into the modal or this dock by timeline_modal.js depending
+           on the persisted pin state. -->
+      <div class="frame timeline-dock" data-label="LIVE TIMELINE" id="timeline-dock" hidden>
         <div class="timeline" id="timeline">
           <div class="line ok">boot sequence...</div>
         </div>
@@ -76,12 +91,16 @@
     </div>
   </div>
 
+  <!-- Unobtrusive affordance to open the LIVE TIMELINE as a modal overlay.
+       Sits above the directive bar, bottom-right. -->
+  <button type="button" class="timeline-fab" id="timeline-fab" title="Open live timeline (LOG)">[ LOG ]</button>
+
   <div class="directive-bar">
     <span class="prompt-prefix">kompany&gt;</span>
     <input type="text" id="directive-input" placeholder="type a directive and press enter..." autocomplete="off">
     <span id="directive-status"></span>
   </div>
 
-  <script type="module" src="/ui/static/app.js?v=8"></script>
+  <script type="module" src="/ui/static/app.js?v=10"></script>
 </body>
 </html>

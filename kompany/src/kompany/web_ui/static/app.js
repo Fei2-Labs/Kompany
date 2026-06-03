@@ -7,12 +7,13 @@ import { connectSSE } from "/ui/static/modules/sse.js";
 import { renderOffice } from "/ui/static/modules/ui/office.js";
 import { renderInbox } from "/ui/static/modules/ui/inbox.js";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
+import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
 import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=5";
 import { initDirective } from "/ui/static/modules/ui/directive.js";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";
-import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js";
+import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js?v=2";
 import { initAmbient } from "/ui/static/modules/ui/ambient.js";
 
 async function boot() {
@@ -136,6 +137,9 @@ async function boot() {
   initThemePanel();
   initAmbient();
   initTimeline();
+  // Timeline is hidden by default; this wires the LOG affordance, modal
+  // overlay, and restores the persisted pin/dock state.
+  initTimelineModal();
   // Backfill the timeline with recent audit history so a run that
   // happened before this EventSource connected (e.g. the kickoff that
   // fired during onboarding) is visible instead of an empty "ready."

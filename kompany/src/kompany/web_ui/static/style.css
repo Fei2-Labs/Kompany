@@ -373,6 +373,194 @@ body::after {
 #stat-sse.connecting { color: var(--warn); }
 
 /* ---------------------------------------------------------------------
+ * Dashboard single-viewport layout (#3)
+ * Scoped to .dashboard-body so other pages keep normal page scrolling.
+ * The whole dashboard fits one viewport: header (auto) + content (1fr),
+ * with long lists scrolling inside their own panels (overflow-y: auto)
+ * instead of the page. min-height: 0 on every nested flex child is what
+ * lets those inner regions actually shrink and scroll.
+ * ------------------------------------------------------------------ */
+.dashboard-body {
+  height: 100vh;
+  height: 100dvh;
+  /* Reserve room for the fixed directive bar at the bottom so panels
+     never sit behind it. Override the shared body padding. */
+  padding: 24px 24px 72px 24px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header keeps its natural height, just trim the gap below it. */
+.dashboard-body .header { flex: 0 0 auto; margin-bottom: 16px; }
+
+/* ------------------------------------------------------------------
+ * Responsive header (Phase 3, issue #12) — scoped to .dashboard-body so
+ * the simpler shared headers on settings/onboarding/design/glossary keep
+ * their existing layout. Goals: brand never wraps mid-word, stats degrade
+ * by founder priority (cash/burn/rev/days > llm/sse > run/ep) instead of
+ * ragged wrapping, settings stays pinned right.
+ * ------------------------------------------------------------------ */
+
+/* Three slots: brand (shrinkable) | stats (wraps/degrades) | actions (pinned). */
+.dashboard-body .header {
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  align-items: baseline;
+}
+
+/* Brand = one inline unit, never wraps mid-word; company name truncates. */
+.dashboard-body .brand {
+  flex: 0 1 auto;
+  min-width: 0;           /* allow the ellipsis child to actually shrink */
+  white-space: nowrap;
+  overflow: hidden;
+  align-items: baseline;
+}
+.dashboard-body .brand .brand-logo {
+  flex: 0 0 auto;
+  align-self: center;
+}
+.dashboard-body .brand .brand-prefix { flex: 0 0 auto; white-space: nowrap; }
+.dashboard-body .brand .brand-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Cursor stays attached to the end of the brand text, never floats away. */
+.dashboard-body .brand .blink {
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+
+/* Stats: still a flex row that can wrap to a 2nd clean row, but items
+   degrade by priority (below) so it never breaks into a ragged mess. */
+.dashboard-body .stats {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  align-items: baseline;
+  row-gap: 6px;
+  min-width: 0;
+}
+
+/* Actions (settings, future theme toggle) pinned hard right. */
+.dashboard-body .header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+/* Priority degradation. Hide low-priority stats first, then mid, as the
+   viewport narrows. Money signals (data-prio="high") always stay. */
+@media (max-width: 1024px) {
+  .dashboard-body .stats .stat[data-prio="low"] { display: none; }
+}
+@media (max-width: 820px) {
+  .dashboard-body .stats .stat[data-prio="mid"] { display: none; }
+}
+/* Very narrow: drop the static stat labels to the bare value so the four
+   money signals stay on one tidy row instead of wrapping. */
+@media (max-width: 560px) {
+  .dashboard-body .stats { gap: 12px; }
+  .dashboard-body .stats .stat span { display: none; }
+}
+
+/* The dashboard frame is a flex column: the ::before label sits absolutely
+   so the inner scroll region (next direct child) gets the remaining space. */
+.dashboard-body .frame {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+  min-height: 0;
+  /* No overflow:hidden here — it would clip the ::before frame label that
+     sits at top:-10px. The inner scroll region owns overflow instead. */
+}
+
+/* Top region: STAFF (left) + INBOX/TIMELINE stack (right). */
+.dashboard-body .layout {
+  flex: 1 1 60%;
+  min-height: 0;
+  align-items: stretch;   /* kill the STAFF<->EPISODES dead gap: both
+                             columns stretch to fill the row height */
+  margin-bottom: 16px;
+}
+
+/* STAFF list scrolls internally. */
+.dashboard-body .agents-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+}
+
+/* Right column. Two states (Phase 2, 2026-06-03):
+   - Timeline hidden (default): INBOX fills the whole column.
+   - Timeline pinned/docked: INBOX capped ~45%, timeline dock fills the rest
+     (the original Phase 1 proportions). */
+.dashboard-body .right-col {
+  min-height: 0;
+  gap: 16px;
+}
+/* Default: INBOX owns the full right column. */
+.dashboard-body #inbox-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* When the timeline dock is visible, restore the capped INBOX height so the
+   docked timeline frame gets the remaining space. */
+.dashboard-body .right-col:has(#timeline-dock:not([hidden])) #inbox-frame {
+  flex: 0 1 auto;
+  max-height: 45%;
+}
+.dashboard-body .inbox-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.dashboard-body .timeline-dock {
+  flex: 1 1 auto;   /* docked TIMELINE frame fills remaining right-col height */
+}
+.dashboard-body .timeline-dock[hidden] {
+  display: none;    /* belt-and-suspenders: keep it out of flex flow */
+}
+.dashboard-body .timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;   /* override shared 360px cap; flex governs height */
+}
+
+/* Bottom region: EPISODES, list + detail side by side. */
+.dashboard-body #episodes-frame {
+  flex: 1 1 40%;
+  min-height: 0;
+}
+.dashboard-body .episodes-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+}
+.dashboard-body .episodes-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.dashboard-body .episodes-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;   /* override shared 360px cap */
+}
+.dashboard-body .episodes-payload {
+  min-height: 0;
+  max-height: none;   /* override shared 360px cap */
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------------------
  * Onboarding wizard — first-boot in-window form.
  * ------------------------------------------------------------------ */
 body.onboarding-body { padding-bottom: 40px; }
@@ -1597,6 +1785,56 @@ body.onboarding-body { padding-bottom: 40px; }
 .cost-modal-result span { color: rgba(var(--fg-rgb), 0.55); }
 .cost-modal-result b { color: var(--fg); }
 .cost-modal-actions { margin-top: 14px; display: flex; justify-content: flex-end; }
+
+/* ----------------------------------------------------------------
+ * Timeline affordance + modal (Phase 2, #3) — timeline demoted to a
+ * hidden, on-demand modal overlay with an optional pinned dock.
+ * Reuses the cost-modal backdrop/frame conventions. Scoped so nothing
+ * leaks to other pages: the FAB only renders on .dashboard-body, the
+ * modal classes are timeline-specific.
+ * ---------------------------------------------------------------- */
+.timeline-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 72px;   /* clear the fixed directive bar */
+  z-index: 900;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  background: rgba(var(--fg-rgb), 0.04);
+  border: 1px solid rgba(var(--fg-rgb), 0.35);
+  color: rgba(var(--fg-rgb), 0.75);
+  cursor: pointer;
+}
+.timeline-fab:hover {
+  color: var(--fg);
+  border-color: var(--fg);
+  background: rgba(var(--fg-rgb), 0.08);
+}
+
+/* Modal: a flex column so the timeline body owns the scroll, not the page. */
+.timeline-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 92vw);
+  max-height: 80vh;
+  overflow: hidden;   /* inner body scrolls; ::before label not clipped here
+                         because the body has its own padding margin */
+}
+.timeline-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The relocated #timeline inside the modal must not keep the docked flex
+   sizing or the 360px cap — let the modal body govern height. */
+.timeline-modal-body .timeline {
+  max-height: none;
+  flex: none;
+}
+.timeline-modal-actions { flex: 0 0 auto; gap: 8px; }
+.timeline-pin-btn.is-pinned { border-color: var(--fg); color: var(--fg); }
 
 /* ----------------------------------------------------------------
  * Theme switcher (feature A #4) — trigger chip + popover panel.

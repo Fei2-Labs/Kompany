@@ -23,8 +23,13 @@ let panelEl = null;
 let triggerEl = null;
 
 export function initThemePanel() {
-  const stats = document.querySelector(".header .stats");
-  if (!stats || document.querySelector(".theme-trigger")) return;
+  // Mount the trigger into the right-pinned actions group (post header
+  // restructure) so it sits next to settings, not after the hideable stats.
+  // Other/older headers without .header-actions fall back to .stats.
+  const mount =
+    document.querySelector(".header .header-actions") ||
+    document.querySelector(".header .stats");
+  if (!mount || document.querySelector(".theme-trigger")) return;
 
   triggerEl = document.createElement("button");
   triggerEl.className = "theme-trigger";
@@ -37,7 +42,8 @@ export function initThemePanel() {
     e.stopPropagation();
     togglePanel();
   });
-  stats.appendChild(triggerEl);
+  // Place AFTER the settings link: settings then ◑ (matches the screenshot).
+  mount.appendChild(triggerEl);
 }
 
 function togglePanel() {
