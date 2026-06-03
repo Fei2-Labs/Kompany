@@ -480,6 +480,57 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_approval_requests_predecessor_id "
             "ON approval_requests(predecessor_id)"
         )
+
+        # CEO channel — founder<->team conversation sessions + turns
+        # (06-03-ceo-channel). Structural twin of approval_requests +
+        # approval_comments: parent session row + ordered child turns. New
+        # tables go in _migrate() (not _SCHEMA) so upgraded DBs get them too.
+        # run_id columns are declared inline (brand-new tables, no ALTER
+        # needed) with their own indexes — see run_context.py.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS channel_sessions (
+                   id TEXT PRIMARY KEY,
+                   state TEXT NOT NULL DEFAULT 'open',
+                   route TEXT,
+                   clarify_turns INTEGER NOT NULL DEFAULT 0,
+                   directive_id TEXT,
+                   project_id TEXT,
+                   approval_id TEXT,
+                   run_id TEXT,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   closed_at TEXT
+               )"""
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_channel_sessions_state "
+            "ON channel_sessions(state)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_channel_sessions_run_id "
+            "ON channel_sessions(run_id)"
+        )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS channel_turns (
+                   id TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   turn_index INTEGER NOT NULL DEFAULT 0,
+                   role TEXT NOT NULL,
+                   content TEXT NOT NULL,
+                   kind TEXT NOT NULL DEFAULT 'message',
+                   cost REAL NOT NULL DEFAULT 0.0,
+                   run_id TEXT,
+                   directive_id TEXT,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_channel_turns_session_id "
+            "ON channel_turns(session_id)"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_channel_turns_run_id "
+            "ON channel_turns(run_id)"
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

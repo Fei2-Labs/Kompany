@@ -91,6 +91,8 @@ def engine(tmp_path, monkeypatch):
     engine.memory = memory
     engine.audit = audit
     engine.approvals = approvals
+    from kompany.state.conversation import ConversationStore
+    engine.channel = ConversationStore(db)
     engine.agent_status = agent_status
     engine.checkpoints = checkpoints
     engine.cost_tracker = cost_tracker
@@ -165,6 +167,7 @@ def test_process_directive_writes_audit_events_and_status(engine):
             directive_id=None,
             targets_summary=None,
             glossary_summary=None,
+            **kwargs,
         ):
             return DirectiveClassification(
                 directive_type="informational",
@@ -204,7 +207,7 @@ def test_process_directive_populates_run_id(engine):
     from kompany.core.run_context import is_valid_run_id
 
     class FakeCEO:
-        def classify(self, raw_input, directive_id=None, targets_summary=None, glossary_summary=None):
+        def classify(self, raw_input, directive_id=None, targets_summary=None, glossary_summary=None, **kwargs):
             return DirectiveClassification(
                 directive_type="informational",
                 reasoning="status query",

@@ -102,6 +102,8 @@ def _make_engine(tmp_path):
     engine.memory = memory
     engine.audit = audit
     engine.approvals = approvals
+    from kompany.state.conversation import ConversationStore
+    engine.channel = ConversationStore(db)
     engine.agent_status = agent_status
     engine.checkpoints = checkpoints
     engine.cost_tracker = cost_tracker
@@ -258,6 +260,7 @@ def test_trace_run_reconstructs_directive_chain(tmp_path):
             directive_id=None,
             targets_summary=None,
             glossary_summary=None,
+            **kwargs,
         ):
             return DirectiveClassification(
                 directive_type="informational",
@@ -332,6 +335,7 @@ def test_distinct_directives_get_distinct_run_ids(tmp_path):
             directive_id=None,
             targets_summary=None,
             glossary_summary=None,
+            **kwargs,
         ):
             return DirectiveClassification(
                 directive_type="informational",

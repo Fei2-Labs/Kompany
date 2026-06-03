@@ -499,7 +499,7 @@ def test_directive_llm_failure_returns_graceful_200(monkeypatch):
     rejected gpt-5.5 with 'Param Incorrect / invalid_request_error'."""
     fake_engine = FakeEngine()
 
-    def boom(_text):
+    def boom(_text, session_id=None):
         raise RuntimeError(
             "LLM 'gpt-5.5' unavailable after retry: BadRequestError: "
             '{"error":{"message":"Param Incorrect",'

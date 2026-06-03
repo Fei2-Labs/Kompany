@@ -57,3 +57,9 @@ class DirectiveResult(BaseModel):
     # Populated by ``process_directive``; lets callers (CEO channel, SSE
     # clients) scope ``llm.spend`` / ``agent.activity`` events to this run.
     run_id: str | None = None
+    # CEO-channel session this directive belongs to (06-03-ceo-channel).
+    # Populated by ``process_directive`` whether the session was opened by
+    # this call or continued. ``status="clarify"`` results carry the question
+    # in ``message`` and the session_id here so the founder's reply continues
+    # the same session.
+    session_id: str | None = None

@@ -18,6 +18,20 @@ class DirectiveClassification(BaseModel):
     agents_needed: list[str] = Field(default_factory=list)
     approval_tier: str = Field(description="auto|ceo|master")
     execution_plan: str = ""
+    # CEO-channel routing (06-03-ceo-channel). The conductor auto-detects how
+    # to handle each founder message: ``execute`` (clear intent → dispatch the
+    # pipeline) / ``clarify`` (ambiguous → ask back with ONE concrete
+    # question) / ``answer`` (a pure question → reply only, no work).
+    # ``informational`` maps to ``answer``; ``directive_type`` is kept for
+    # backward compat with the existing handler routing.
+    route: str = Field(
+        default="execute",
+        description="execute|clarify|answer",
+    )
+    clarify_question: str = Field(
+        default="",
+        description="when route=clarify, the ONE concrete question to ask back",
+    )
 
 
 class RevenuePath(BaseModel):
@@ -82,6 +96,8 @@ class CEOAgent(BaseAgent):
         directive_id: str | None = None,
         targets_summary: str | None = None,
         glossary_summary: str | None = None,
+        session_context: str | None = None,
+        clarify_capped: bool = False,
     ) -> DirectiveClassification:
         """Classify a raw directive from the Master.
 
@@ -103,11 +119,41 @@ class CEOAgent(BaseAgent):
         target_block = (
             f"{targets_summary}\n\n" if targets_summary else ""
         )
+        # CEO-channel session context: when continuing a conversation, inject
+        # the prior turns of THIS session only (session-scoped per Decision 2)
+        # so a clarify reply is judged against the question that was asked.
+        context_block = (
+            f"Conversation so far (this session only):\n{session_context}\n\n"
+            if session_context
+            else ""
+        )
+        # Routing guidance. At the clarify cap the conductor may no longer ask
+        # another question — it must commit to execute or answer (engine
+        # hard-enforces this too, but tell the model so it picks the right one).
+        if clarify_capped:
+            route_block = (
+                "ROUTING (clarify limit reached — you MUST commit now):\n"
+                "- You have already asked the maximum number of clarifying "
+                "questions. Do NOT choose 'clarify'.\n"
+                "- route=answer if this is a question; route=execute otherwise.\n\n"
+            )
+        else:
+            route_block = (
+                "ROUTING — set 'route' to exactly one of:\n"
+                "- execute: intent is clear enough to dispatch the team now.\n"
+                "- clarify: intent is AMBIGUOUS — set clarify_question to ONE "
+                "concrete question that would unblock execution (grill-style "
+                "requirements discovery). Use sparingly.\n"
+                "- answer: this is a pure question (status/balance/runway/"
+                "how-to) needing a reply only, no work. INFORMATIONAL → answer.\n\n"
+            )
         prompt = (
             f"{glossary_block}"
             f"{target_block}"
+            f"{context_block}"
             f"The Master has given this directive:\n\n"
             f'"{raw_input}"\n\n'
+            f"{route_block}"
             f"Classify this directive. Consider:\n"
             f"- ACQUISITION: buying, getting, hiring something specific\n"
             f"- STRATEGIC: questions about direction, approach, should-we decisions\n"

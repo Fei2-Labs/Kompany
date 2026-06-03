@@ -745,6 +745,10 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
 
 class DirectiveRequest(BaseModel):
     text: str
+    # CEO-channel session to continue (06-03-ceo-channel). Optional: omitting
+    # it opens a fresh session, preserving the legacy one-shot /directive
+    # behaviour. A clarify reply passes the session_id from the prior result.
+    session_id: str | None = None
 
 
 class OverrideRequest(BaseModel):
@@ -1185,7 +1189,7 @@ def send_directive(req: DirectiveRequest) -> dict[str, Any]:
     """
     engine = get_engine()
     try:
-        result = engine.process_directive(req.text)
+        result = engine.process_directive(req.text, session_id=req.session_id)
     except Exception as exc:  # noqa: BLE001 — surface honestly, never 500
         detail = f"{type(exc).__name__}: {exc}"
         code = _classify_ping_error(detail)
@@ -1212,6 +1216,7 @@ def send_directive(req: DirectiveRequest) -> dict[str, Any]:
         "total_ai_cost": result.total_ai_cost,
         "agents_used": result.agents_used,
         "run_id": result.run_id,
+        "session_id": result.session_id,
     }
 
 

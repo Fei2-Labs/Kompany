@@ -152,6 +152,79 @@ class ApprovalComment(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+# ---------------------------------------------------------------------------
+# CEO channel — founder<->team conversation sessions + turns
+# (06-03-ceo-channel). A session is the parent row (cf. approval_requests);
+# turns are the ordered children (cf. approval_comments). The CEO auto-routes
+# each founder message into execute / clarify / answer; the session lifecycle
+# tracks where that conversation is.
+# ---------------------------------------------------------------------------
+
+
+class SessionStatus(str, Enum):
+    OPEN = "open"
+    CLARIFYING = "clarifying"
+    DISPATCHED = "dispatched"      # terminal — founder intent executed
+    ANSWERED = "answered"          # terminal — pure question answered
+    ABANDONED = "abandoned"        # terminal — founder/CEO gave up
+    GATED = "gated"                # reserved for PR2 threshold gate
+
+
+# Terminal session statuses — a closed session rejects further sends.
+# ``gated`` is intentionally NOT terminal (PR2 resumes it on founder GO).
+SESSION_TERMINAL_STATUSES: frozenset[SessionStatus] = frozenset({
+    SessionStatus.DISPATCHED,
+    SessionStatus.ANSWERED,
+    SessionStatus.ABANDONED,
+})
+
+# Turn ``role`` enumeration. ``founder`` = the Master's message; ``ceo`` = the
+# conductor's reply (clarify question / answer / final dispatch summary).
+TURN_ROLES: frozenset[str] = frozenset({"founder", "ceo"})
+
+# Turn ``kind`` enumeration. Mirrors the cost-visibility surfaces:
+# ``message`` (founder input), ``clarify_question`` (CEO asks back),
+# ``preview`` (PR2 gate plan + est cost), ``final`` (CEO terminal reply),
+# ``progress_summary`` (collapsed STREAM summary).
+TURN_KINDS: frozenset[str] = frozenset({
+    "message",
+    "clarify_question",
+    "preview",
+    "final",
+    "progress_summary",
+})
+
+
+class ConversationSession(BaseModel):
+    """A CEO-channel conversation session (parent of turns)."""
+
+    id: str = Field(default_factory=_short_id)
+    state: SessionStatus = SessionStatus.OPEN
+    route: str | None = None  # last classified route: execute|clarify|answer
+    clarify_turns: int = 0    # count of clarify questions asked this session
+    directive_id: str | None = None
+    project_id: str | None = None
+    approval_id: str | None = None
+    run_id: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    closed_at: datetime | None = None
+
+
+class ConversationTurn(BaseModel):
+    """One turn in a CEO-channel session (child of a session)."""
+
+    id: str = Field(default_factory=_short_id)
+    session_id: str
+    turn_index: int = 0
+    role: str  # "founder" | "ceo"
+    content: str
+    kind: str = "message"
+    cost: float = 0.0
+    run_id: str | None = None
+    directive_id: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class RevenueProposal(BaseModel):
     owner: str = "cro"
     summary: str

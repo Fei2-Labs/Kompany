@@ -26,6 +26,7 @@ from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
+from kompany.state.conversation import ConversationStore
 from kompany.state.credentials import ALLOWED_CREDENTIALS, CredentialVaultStore
 from kompany.state.vault_keys import resolve_vault_key
 from kompany.state.database import Database
@@ -56,6 +57,8 @@ from kompany.state.models import (
     ProjectStatus,
     ProjectType,
     RevenueProposal,
+    SESSION_TERMINAL_STATUSES,
+    SessionStatus,
 )
 from kompany.state.backup import BackupManager
 from kompany.state.debates import Debates
@@ -114,6 +117,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         self.episodes = Episodes(self.db)
         self.health_events = HealthEvents(self.db)
         self.approvals = ApprovalRequests(self.db)
+        self.channel = ConversationStore(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
         self.runtime = RuntimeStateStore(self.db)
@@ -2180,6 +2184,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         self.episodes = Episodes(self.db)
         self.health_events = HealthEvents(self.db)
         self.approvals = ApprovalRequests(self.db)
+        self.channel = ConversationStore(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
         self.runtime = RuntimeStateStore(self.db)
@@ -2336,17 +2341,29 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             "briefing": briefing,
         }
 
-    def process_directive(self, raw_input: str) -> DirectiveResult:
+    def process_directive(
+        self,
+        raw_input: str,
+        session_id: str | None = None,
+    ) -> DirectiveResult:
         """Main entry point. Takes natural language, returns result.
 
         Opens a fresh ``run_scope`` so every state write made during this
-        directive (audit_log, decisions, ledger, memories, approvals)
-        carries the same ``run_id``. A nested call (e.g. CEO derives a
-        child directive) records the outer ``run_id`` as ``parent_run_id``
-        automatically — see :func:`kompany.core.run_context.run_scope`.
+        directive (audit_log, decisions, ledger, memories, approvals,
+        channel turns) carries the same ``run_id``. A nested call (e.g. CEO
+        derives a child directive) records the outer ``run_id`` as
+        ``parent_run_id`` automatically — see
+        :func:`kompany.core.run_context.run_scope`.
+
+        ``session_id`` is the CEO-channel session this message belongs to
+        (06-03-ceo-channel). It is **optional**: internal callers
+        (run_context replay, onboarding kickoff) pass only ``raw_input`` and a
+        fresh session is opened for them. When provided, the message continues
+        that session (a clarify reply); a closed session yields an error
+        result.
         """
         with run_scope() as run_id:
-            result = self._process_directive_inner(raw_input)
+            result = self._process_directive_inner(raw_input, session_id)
             # Stamp the run id onto the result so callers can scope per-run
             # SSE events (llm.spend / agent.activity both carry run_id) and
             # reconcile per-run cost. Done here — inside the scope — so even
@@ -2354,8 +2371,54 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             result.run_id = run_id
             return result
 
-    def _process_directive_inner(self, raw_input: str) -> DirectiveResult:
+    def _compose_session_context(self, session_id: str) -> str:
+        """Render prior turns of THIS session for the classify prompt.
+
+        Session-scoped per Decision 2 — no cross-session memory. Empty string
+        when the session has no turns yet.
+        """
+        lines: list[str] = []
+        for turn in self.channel.session_turns(session_id):
+            who = "Founder" if turn.role == "founder" else "CEO"
+            lines.append(f"{who}: {turn.content}")
+        return "\n".join(lines)
+
+    def _process_directive_inner(
+        self,
+        raw_input: str,
+        session_id: str | None = None,
+    ) -> DirectiveResult:
         directive = Directive(raw_input=raw_input)
+
+        # ----- Resolve / open the CEO-channel session -----
+        # No session_id → open a fresh session. session_id given → continue an
+        # existing one (must be open/clarifying); a closed session is an error.
+        if session_id is None:
+            session = self.channel.create_session()
+        else:
+            session = self.channel.get_session(session_id)
+            if session is None:
+                return DirectiveResult(
+                    directive=directive,
+                    status="failed",
+                    message=f"Unknown channel session {session_id!r}.",
+                    session_id=session_id,
+                    agents_used=[],
+                    total_ai_cost=0.0,
+                )
+            if session.state in SESSION_TERMINAL_STATUSES:
+                return DirectiveResult(
+                    directive=directive,
+                    status="failed",
+                    message=(
+                        f"Channel session is closed ({session.state.value}); "
+                        "start a new message to open a fresh session."
+                    ),
+                    session_id=session.id,
+                    agents_used=[],
+                    total_ai_cost=0.0,
+                )
+        session_id = session.id
 
         rt = self.runtime.get()
         if rt["state"] == "suspended":
@@ -2372,6 +2435,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     f"Engine is suspended ({rt['reason'] or 'manual'}). "
                     "Call resume() to continue."
                 ),
+                session_id=session_id,
                 agents_used=[],
                 total_ai_cost=0.0,
             )
@@ -2384,6 +2448,16 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             directive_id=directive.id,
         )
 
+        # Record the founder's turn before classification so the conversation
+        # thread reflects what was sent even if classify fails.
+        self.channel.add_turn(
+            session_id,
+            role="founder",
+            content=raw_input,
+            kind="message",
+            directive_id=directive.id,
+        )
+
         start_time = time.time()
         try:
             self.agent_status.set("ceo", "thinking", "classifying directive")
@@ -2391,12 +2465,16 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             # Inject the agreed-target summary so CEO classify weighs the
             # ask against the company's explicit revenue/customer/deadline
             # commitments (mission-targets task 05-19). Falls back to an
-            # innocuous default when no targets are set.
+            # innocuous default when no targets are set. Session context is
+            # the prior turns of THIS session only (Decision 2).
+            clarify_capped = self.channel.at_clarify_cap(session_id)
             classification = ceo.classify(
                 raw_input,
                 directive_id=directive.id,
                 targets_summary=self._compose_targets_summary(),
                 glossary_summary=self._compose_glossary_summary(),
+                session_context=self._compose_session_context(session_id) or None,
+                clarify_capped=clarify_capped,
             )
             self.audit.record(
                 "directive.classified",
@@ -2413,6 +2491,23 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             directive.budget_required = classification.estimated_cost_eur
             directive.budget_available = self.ledger.get_balance()
 
+            # ----- Route detection: execute | clarify | answer -----
+            # ``informational`` maps to answer regardless of the emitted route
+            # (keeps directive_type compat). At the clarify cap a ``clarify``
+            # route is rejected engine-side and forced to a deterministic
+            # resolution: answer for questions (informational), else execute.
+            route = self._resolve_channel_route(
+                classification, clarify_capped
+            )
+            if route == "clarify":
+                return self._handle_clarify(
+                    directive, classification, session_id, start_time
+                )
+            if route == "answer":
+                return self._handle_answer(
+                    directive, classification, ceo, session_id, start_time
+                )
+
             handler = {
                 DirectiveType.ACQUISITION: self._handle_acquisition,
                 DirectiveType.STRATEGIC: self._handle_strategic,
@@ -2427,6 +2522,24 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             )
 
             result = handler(directive, classification, ceo)
+            result.session_id = session_id
+            # Record the CEO's final (dispatch) turn and close the session.
+            self.channel.add_turn(
+                session_id,
+                role="ceo",
+                content=result.message,
+                kind="final",
+                cost=result.total_ai_cost,
+                directive_id=directive.id,
+            )
+            self.channel.update_session_state(
+                session_id,
+                SessionStatus.DISPATCHED,
+                route="execute",
+                directive_id=directive.id,
+                project_id=result.project_id,
+                approval_id=result.approval_id,
+            )
 
             decision_result_payload: dict[str, Any] = {
                 "status": result.status,
@@ -2471,6 +2584,156 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             raise
         finally:
             self.agent_status.set("ceo", "idle")
+
+    # ------------------------------------------------------------------
+    # CEO-channel routing (06-03-ceo-channel)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_channel_route(classification, clarify_capped: bool) -> str:
+        """Map a classification onto execute | clarify | answer.
+
+        ``informational`` always maps to ``answer`` (a pure status query
+        needs a reply, not dispatch) regardless of the emitted route. At the
+        clarify cap a ``clarify`` route is rejected and forced to a
+        deterministic resolution: ``answer`` for informational directives,
+        otherwise ``execute`` — so the conversation always terminates rather
+        than looping (PRD clarify-runaway guard).
+        """
+        route = (classification.route or "execute").strip().lower()
+        is_question = classification.directive_type == "informational"
+        if is_question:
+            return "answer"
+        if route == "clarify":
+            if clarify_capped or not (classification.clarify_question or "").strip():
+                # Cap reached, or model asked to clarify without a question:
+                # commit deterministically. Non-question intent → execute.
+                return "execute"
+            return "clarify"
+        if route == "answer":
+            return "answer"
+        return "execute"
+
+    def _handle_clarify(
+        self,
+        directive: Directive,
+        classification,
+        session_id: str,
+        start_time: float,
+    ) -> DirectiveResult:
+        """Record the CEO's clarify question and pause the session.
+
+        The session moves to ``clarifying`` and waits for the founder's reply
+        (which re-enters via ``process_directive(reply, session_id)``).
+        """
+        question = (classification.clarify_question or "").strip() or (
+            "Could you clarify what outcome you want here?"
+        )
+        cost = self.cost_tracker.run_total()
+        self.channel.add_turn(
+            session_id,
+            role="ceo",
+            content=question,
+            kind="clarify_question",
+            cost=cost,
+            directive_id=directive.id,
+        )
+        self.channel.update_session_state(
+            session_id,
+            SessionStatus.CLARIFYING,
+            route="clarify",
+            directive_id=directive.id,
+        )
+        self.audit.record(
+            "directive.clarify",
+            "CEO asked a clarifying question",
+            detail={"question": question[:500]},
+            agent_role="ceo",
+            directive_id=directive.id,
+        )
+        self.journal.log(Decision(
+            directive_id=directive.id,
+            directive_type=directive.directive_type.value if directive.directive_type else "unknown",
+            raw_input=directive.raw_input,
+            classification=classification.model_dump() if classification else {},
+            result={"status": "clarify", "message": question[:500]},
+            agents_involved=["ceo"],
+            total_ai_cost=cost,
+            duration_seconds=time.time() - start_time,
+        ))
+        return DirectiveResult(
+            directive=directive,
+            status="clarify",
+            message=question,
+            session_id=session_id,
+            total_ai_cost=cost,
+            agents_used=["ceo"],
+        )
+
+    def _handle_answer(
+        self,
+        directive: Directive,
+        classification,
+        ceo,
+        session_id: str,
+        start_time: float,
+    ) -> DirectiveResult:
+        """Answer a pure question — reply only, no project/dispatch.
+
+        Reuses the existing ``_handle_informational`` handler (canned company
+        financials/projects) for the answer body, then records the CEO's
+        final turn and closes the session as ``answered``. No project is
+        created and no approval is requested.
+        """
+        directive.directive_type = DirectiveType.INFORMATIONAL
+        self.audit.record(
+            "directive.routed",
+            "Routed directive to answer (informational)",
+            detail={"route": "answer"},
+            directive_id=directive.id,
+        )
+        result = self._handle_informational(directive, classification, ceo)
+        result.session_id = session_id
+        # _handle_informational hardcodes total_ai_cost=0; surface the real
+        # classify cost so the LEDGER chip is honest (cost-as-expense).
+        result.total_ai_cost = self.cost_tracker.run_total()
+        self.channel.add_turn(
+            session_id,
+            role="ceo",
+            content=result.message,
+            kind="final",
+            cost=result.total_ai_cost,
+            directive_id=directive.id,
+        )
+        self.channel.update_session_state(
+            session_id,
+            SessionStatus.ANSWERED,
+            route="answer",
+            directive_id=directive.id,
+        )
+        self.journal.log(Decision(
+            directive_id=directive.id,
+            directive_type="informational",
+            raw_input=directive.raw_input,
+            classification=classification.model_dump() if classification else {},
+            result={"status": result.status, "message": result.message[:500]},
+            agents_involved=result.agents_used,
+            total_ai_cost=result.total_ai_cost,
+            duration_seconds=time.time() - start_time,
+        ))
+        self.audit.record(
+            "journal.recorded",
+            "Recorded directive decision journal entry",
+            detail={"status": result.status},
+            directive_id=directive.id,
+        )
+        self.audit.record(
+            "directive.completed",
+            "Completed directive processing (answer)",
+            detail={"status": result.status},
+            directive_id=directive.id,
+        )
+        return result
 
     def _record_autonomy_result(
         self,
