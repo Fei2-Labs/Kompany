@@ -48,17 +48,31 @@ class Kompany:
             "stage": "solo",
         }
 
-    def directive(self, text: str) -> dict[str, Any]:
-        """Send a directive and return the result as a dict."""
-        result = self._engine.process_directive(text)
-        return {
-            "status": result.status,
-            "message": result.message,
-            "project_id": result.project_id,
-            "approval_id": result.approval_id,
-            "total_ai_cost": result.total_ai_cost,
-            "agents_used": result.agents_used,
-        }
+    def directive(self, text: str, session_id: str | None = None) -> dict[str, Any]:
+        """Send a directive and return the result as a dict.
+
+        Backward-compat one-shot entry point. ``session_id`` is optional —
+        omit it to open a fresh CEO-channel session (legacy behaviour); pass
+        the ``session_id`` from a prior ``clarify``/``gated`` result to
+        continue the same session. For ergonomic multi-turn use prefer
+        :pyattr:`channel`. Flattens through ``DirectiveResult.to_dict()`` so
+        the keys match REST/MCP exactly (status / message / project_id /
+        approval_id / total_ai_cost / agents_used / run_id / session_id).
+        """
+        result = self._engine.process_directive(text, session_id=session_id)
+        return result.to_dict()
+
+    @property
+    def channel(self) -> "_ChannelNamespace":
+        """CEO-channel session object (06-03-ceo-channel parity surface).
+
+        ``client.channel.send(text)`` opens a session and returns the
+        flattened result (carrying ``session_id``); ``.send(text,
+        session_id=...)`` continues it (clarify reply). ``.go(id)`` /
+        ``.abandon(id)`` act on a threshold-gated session; ``.sessions()`` /
+        ``.session(id)`` read history. Mirrors REST ``/channel/*``.
+        """
+        return _ChannelNamespace(self._engine)
 
     def debate(self, question: str) -> dict[str, Any]:
         """Run a full multi-agent debate on a strategic question."""
@@ -398,6 +412,98 @@ class Kompany:
         """Approval-thread operations: ``show``, ``approve``, ``reject``,
         ``revise``, ``snooze``, ``cancel``, ``comment``."""
         return _ApprovalsNamespace(self._engine)
+
+
+def _session_to_dict(session: Any) -> dict[str, Any]:
+    """Serialize a ``ConversationSession`` to the channel parity dict.
+
+    Same shape REST's ``_session_to_dict`` emits so SDK/REST stay
+    key-identical for the channel surface (interfaces.md equivalence rule).
+    """
+    return {
+        "session_id": session.id,
+        "state": session.state.value,
+        "route": session.route,
+        "clarify_turns": session.clarify_turns,
+        "created_at": str(session.created_at) if session.created_at is not None else None,
+        "closed_at": str(session.closed_at) if session.closed_at is not None else None,
+        "run_id": session.run_id,
+        "directive_id": session.directive_id,
+        "project_id": session.project_id,
+        "approval_id": session.approval_id,
+    }
+
+
+def _turn_to_dict(turn: Any) -> dict[str, Any]:
+    """Serialize a ``ConversationTurn`` to the channel parity dict."""
+    return {
+        "turn_index": turn.turn_index,
+        "role": turn.role,
+        "content": turn.content,
+        "kind": turn.kind,
+        "cost": turn.cost,
+        "run_id": turn.run_id,
+        "directive_id": turn.directive_id,
+        "created_at": str(turn.created_at) if turn.created_at is not None else None,
+    }
+
+
+class _ChannelNamespace:
+    """SDK sub-namespace for the CEO channel — a session object surface.
+
+    The same conversation capabilities the REST ``/channel/*`` routes expose,
+    as plain sync methods returning dicts (no Pydantic instances leak — SDK
+    contract). ``send`` flattens a ``DirectiveResult`` via ``to_dict()`` so a
+    caller can read ``result["session_id"]`` and pass it back on the next
+    ``send`` to continue a clarify/gated session.
+    """
+
+    def __init__(self, engine: KompanyEngine):
+        self._engine = engine
+
+    def send(self, text: str, session_id: str | None = None) -> dict[str, Any]:
+        """Founder message into the channel.
+
+        Omit ``session_id`` to open a new session; pass it to continue an
+        existing one (clarify reply / gated context). Returns the flattened
+        result; ``result["status"]`` may be ``clarify`` (CEO asks back),
+        ``gated`` (awaiting GO), or any execute/answer status.
+        """
+        return self._engine.process_directive(text, session_id=session_id).to_dict()
+
+    def go(self, session_id: str) -> dict[str, Any]:
+        """Founder GO on a threshold-gated session — execute the held directive."""
+        return self._engine.channel_go(session_id).to_dict()
+
+    def abandon(self, session_id: str) -> dict[str, Any]:
+        """Abandon a session — close it without executing."""
+        return self._engine.channel_abandon(session_id).to_dict()
+
+    def sessions(
+        self,
+        state: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List channel sessions, newest first, optionally filtered by state."""
+        limit = max(1, min(int(limit), 200))
+        return [
+            _session_to_dict(s)
+            for s in self._engine.channel.list_sessions(state=state, limit=limit)
+        ]
+
+    def session(self, session_id: str) -> dict[str, Any] | None:
+        """One session plus its ordered turns (the full thread).
+
+        Returns ``None`` if the session is unknown.
+        """
+        session = self._engine.channel.get_session(session_id)
+        if session is None:
+            return None
+        turns = self._engine.channel.session_turns(session_id)
+        return {
+            "session": _session_to_dict(session),
+            "turns": [_turn_to_dict(t) for t in turns],
+        }
 
 
 class _TemplatesNamespace:

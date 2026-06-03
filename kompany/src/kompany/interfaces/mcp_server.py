@@ -26,6 +26,40 @@ def _json_response(data: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, indent=2, default=str))]
 
 
+def _session_to_dict(session: Any) -> dict[str, Any]:
+    """Serialize a ``ConversationSession`` to the channel parity dict.
+
+    Same shape REST/SDK emit so the channel surface stays key-identical
+    across interfaces (interfaces.md equivalence rule).
+    """
+    return {
+        "session_id": session.id,
+        "state": session.state.value,
+        "route": session.route,
+        "clarify_turns": session.clarify_turns,
+        "created_at": str(session.created_at) if session.created_at is not None else None,
+        "closed_at": str(session.closed_at) if session.closed_at is not None else None,
+        "run_id": session.run_id,
+        "directive_id": session.directive_id,
+        "project_id": session.project_id,
+        "approval_id": session.approval_id,
+    }
+
+
+def _turn_to_dict(turn: Any) -> dict[str, Any]:
+    """Serialize a ``ConversationTurn`` to the channel parity dict."""
+    return {
+        "turn_index": turn.turn_index,
+        "role": turn.role,
+        "content": turn.content,
+        "kind": turn.kind,
+        "cost": turn.cost,
+        "run_id": turn.run_id,
+        "directive_id": turn.directive_id,
+        "created_at": str(turn.created_at) if turn.created_at is not None else None,
+    }
+
+
 TOOLS = [
     Tool(
         name="kompany_init",
@@ -44,13 +78,67 @@ TOOLS = [
     ),
     Tool(
         name="kompany_directive",
-        description="Send a natural language directive to Kompany. The CEO will classify, route, and execute it.",
+        description=(
+            "Send a natural language directive to Kompany. The CEO classifies, "
+            "routes, and executes it. The result's status may be 'clarify' (the "
+            "CEO asks a follow-up question — re-call with the returned session_id "
+            "to continue) or 'gated' (awaiting GO — call kompany_channel_go). "
+            "Pass session_id to continue an open session."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Directive in natural language"},
+                "session_id": {
+                    "type": "string",
+                    "description": "Continue an existing channel session (clarify reply / gated context). Omit to open a fresh session.",
+                },
             },
             "required": ["text"],
+        },
+    ),
+    Tool(
+        name="kompany_channel_sessions",
+        description="List CEO-channel conversation sessions, newest first. Optional state filter (open/clarifying/gated/dispatched/answered/abandoned).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "Filter by session lifecycle state"},
+                "limit": {"type": "number", "description": "Max sessions to return", "default": 50},
+            },
+        },
+    ),
+    Tool(
+        name="kompany_channel_session",
+        description="Fetch one CEO-channel session plus its ordered turns (the full conversation thread).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Session id to fetch"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="kompany_channel_go",
+        description="Founder GO on a threshold-gated channel session — execute the held directive.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Gated session to execute"},
+            },
+            "required": ["session_id"],
+        },
+    ),
+    Tool(
+        name="kompany_channel_abandon",
+        description="Abandon a CEO-channel session — close it without executing.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "Session to abandon"},
+            },
+            "required": ["session_id"],
         },
     ),
     Tool(
@@ -743,15 +831,37 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         })
 
     if name == "kompany_directive":
-        result = engine.process_directive(arguments["text"])
+        result = engine.process_directive(
+            arguments["text"],
+            session_id=arguments.get("session_id"),
+        )
+        return _json_response(result.to_dict())
+
+    if name == "kompany_channel_sessions":
+        limit = max(1, min(int(arguments.get("limit", 50)), 200))
+        sessions = engine.channel.list_sessions(
+            state=arguments.get("state"),
+            limit=limit,
+        )
+        return _json_response({"sessions": [_session_to_dict(s) for s in sessions]})
+
+    if name == "kompany_channel_session":
+        session = engine.channel.get_session(arguments["session_id"])
+        if session is None:
+            return _json_response(
+                {"error": f"Unknown channel session {arguments['session_id']!r}"}
+            )
+        turns = engine.channel.session_turns(arguments["session_id"])
         return _json_response({
-            "status": result.status,
-            "message": result.message,
-            "project_id": result.project_id,
-            "approval_id": result.approval_id,
-            "total_ai_cost": result.total_ai_cost,
-            "agents_used": result.agents_used,
+            "session": _session_to_dict(session),
+            "turns": [_turn_to_dict(t) for t in turns],
         })
+
+    if name == "kompany_channel_go":
+        return _json_response(engine.channel_go(arguments["session_id"]).to_dict())
+
+    if name == "kompany_channel_abandon":
+        return _json_response(engine.channel_abandon(arguments["session_id"]).to_dict())
 
     if name == "kompany_status":
         cfo = engine.registry.get("cfo")

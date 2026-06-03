@@ -63,3 +63,27 @@ class DirectiveResult(BaseModel):
     # in ``message`` and the session_id here so the founder's reply continues
     # the same session.
     session_id: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        """The shared parity dict every non-web interface serializes.
+
+        Single source of truth for the directive-result wire shape: REST
+        (``/directive`` + ``/channel/*``), CLI, MCP, and SDK all flatten a
+        ``DirectiveResult`` through this method so their top-level keys stay
+        identical (interfaces.md equivalence rule, enforced by
+        ``test_interfaces.py``). The six legacy keys (status / message /
+        project_id / approval_id / total_ai_cost / agents_used) plus
+        ``run_id`` (PR0) and ``session_id`` (PR1) — never ``directive`` or
+        ``debate_id`` (those stay internal). Drift here is a bug across four
+        surfaces at once, so they must not hand-roll their own dicts.
+        """
+        return {
+            "status": self.status,
+            "message": self.message,
+            "project_id": self.project_id,
+            "approval_id": self.approval_id,
+            "total_ai_cost": self.total_ai_cost,
+            "agents_used": self.agents_used,
+            "run_id": self.run_id,
+            "session_id": self.session_id,
+        }

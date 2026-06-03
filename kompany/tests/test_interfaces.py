@@ -451,6 +451,82 @@ class FakeSDKEngine(FakeEngine):
     pass
 
 
+class _FakeChannelStore:
+    """In-memory ConversationStore stand-in for parity tests (no DB)."""
+
+    def __init__(self):
+        self._sessions: dict[str, object] = {}
+        self._turns: dict[str, list[object]] = {}
+
+    def add_session(self, session):
+        self._sessions[session.id] = session
+        self._turns.setdefault(session.id, [])
+        return session
+
+    def add_turn(self, session_id, **kw):
+        from kompany.state.models import ConversationTurn
+
+        turns = self._turns.setdefault(session_id, [])
+        turn = ConversationTurn(
+            session_id=session_id,
+            turn_index=len(turns),
+            **kw,
+        )
+        turns.append(turn)
+        return turn
+
+    def list_sessions(self, state=None, limit=50):
+        rows = list(self._sessions.values())[::-1]
+        if state is not None:
+            rows = [s for s in rows if s.state.value == state]
+        return rows[:limit]
+
+    def get_session(self, session_id):
+        return self._sessions.get(session_id)
+
+    def session_turns(self, session_id):
+        return self._turns.get(session_id, [])
+
+
+class _ParityEngine(FakeEngine):
+    """FakeEngine plus the CEO-channel surface (send/go/abandon/history).
+
+    Drives the SDK / CLI / MCP parity tests: the same scripted
+    DirectiveResult flows through all three flatteners so the assertions can
+    compare top-level keys directly.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.channel = _FakeChannelStore()
+        self.send_calls = []
+        self.go_calls = []
+        self.abandon_calls = []
+        self._send_result = _directive_result(
+            status="completed", message="dispatched",
+            session_id="s-new", run_id="r1", total_ai_cost=0.5,
+            agents_used=["ceo", "coo"],
+        )
+
+    def process_directive(self, text, session_id=None):
+        self.send_calls.append((text, session_id))
+        return self._send_result
+
+    def channel_go(self, session_id):
+        self.go_calls.append(session_id)
+        return _directive_result(
+            status="completed", message="executed after GO",
+            session_id=session_id, run_id="r-go", total_ai_cost=0.42,
+        )
+
+    def channel_abandon(self, session_id):
+        self.abandon_calls.append(session_id)
+        return _directive_result(
+            status="abandoned", message="Abandoned by founder.",
+            session_id=session_id, agents_used=["ceo"],
+        )
+
+
 runner = CliRunner()
 client = TestClient(app)
 
@@ -2259,3 +2335,297 @@ def test_cli_status_json_output(monkeypatch):
         "total_ai_costs": 0.125,
         "active_projects": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# CEO channel parity (PR5): CLI + MCP + SDK emit the SAME flattened keys as
+# REST, incl. session_id + run_id. The shared source of truth is
+# DirectiveResult.to_dict(); these tests pin every non-web surface to it.
+# ---------------------------------------------------------------------------
+
+_PARITY_KEYS = {
+    "status", "message", "project_id", "approval_id",
+    "total_ai_cost", "agents_used", "run_id", "session_id",
+}
+
+
+def _call_mcp(name, arguments, engine, monkeypatch):
+    """Invoke an MCP tool against a fake engine and return the parsed JSON."""
+    import asyncio
+
+    from kompany.interfaces import mcp_server
+
+    monkeypatch.setattr(mcp_server, "_engine", engine)
+    out = asyncio.run(mcp_server.call_tool(name, arguments))
+    return json.loads(out[0].text)
+
+
+def test_directive_result_to_dict_is_the_parity_contract():
+    """to_dict() emits exactly the eight parity keys — never directive /
+    debate_id (internal) — so all four surfaces stay identical."""
+    result = _directive_result(
+        status="clarify", message="which platform?",
+        session_id="s1", run_id="r1", project_id="p1",
+        total_ai_cost=0.3, agents_used=["ceo"],
+    )
+    d = result.to_dict()
+    assert set(d) == _PARITY_KEYS
+    assert d["status"] == "clarify"
+    assert d["session_id"] == "s1"
+    assert d["run_id"] == "r1"
+
+
+def test_parity_sdk_mcp_rest_emit_identical_directive_keys(tmp_path, monkeypatch):
+    """The dict from SDK directive(), the MCP kompany_directive JSON, and the
+    REST /channel/send body all carry the SAME top-level keys + values for
+    one scripted DirectiveResult."""
+    # SDK
+    sdk_engine = _ParityEngine()
+    sdk = Kompany.__new__(Kompany)
+    sdk._engine = sdk_engine
+    sdk_body = sdk.directive("ship it")
+
+    # MCP
+    mcp_engine = _ParityEngine()
+    mcp_body = _call_mcp("kompany_directive", {"text": "ship it"}, mcp_engine, monkeypatch)
+
+    # REST (real flatten path)
+    rest_engine = _ChannelEngine(tmp_path)
+    rest_engine._send_result = _directive_result(
+        status="completed", message="dispatched",
+        session_id="s-new", run_id="r1", total_ai_cost=0.5,
+        agents_used=["ceo", "coo"],
+    )
+    monkeypatch.setattr("kompany.interfaces.api._engine", rest_engine)
+    rest_body = client.post("/channel/send", json={"text": "ship it"}).json()
+
+    assert set(sdk_body) == _PARITY_KEYS
+    assert set(mcp_body) == _PARITY_KEYS
+    assert _PARITY_KEYS <= set(rest_body)
+    # Same scripted result → identical values across surfaces.
+    for key in _PARITY_KEYS:
+        assert sdk_body[key] == mcp_body[key] == rest_body[key]
+
+
+# ----- SDK channel session object ------------------------------------------
+
+
+def test_sdk_channel_send_opens_session_and_continues(monkeypatch):
+    engine = _ParityEngine()
+    sdk = Kompany.__new__(Kompany)
+    sdk._engine = engine
+
+    first = sdk.channel.send("launch the beta")
+    assert set(first) == _PARITY_KEYS
+    assert first["session_id"] == "s-new"
+    assert engine.send_calls == [("launch the beta", None)]
+
+    # Continue the same session with the returned id (clarify reply).
+    engine._send_result = _directive_result(
+        status="completed", message="done", session_id="s-new", run_id="r2",
+    )
+    second = sdk.channel.send("iOS", session_id=first["session_id"])
+    assert engine.send_calls[-1] == ("iOS", "s-new")
+    assert second["session_id"] == "s-new"
+
+
+def test_sdk_channel_go_and_abandon(monkeypatch):
+    engine = _ParityEngine()
+    sdk = Kompany.__new__(Kompany)
+    sdk._engine = engine
+
+    go = sdk.channel.go("sess-1")
+    assert set(go) == _PARITY_KEYS
+    assert go["status"] == "completed"
+    assert engine.go_calls == ["sess-1"]
+
+    ab = sdk.channel.abandon("sess-2")
+    assert ab["status"] == "abandoned"
+    assert engine.abandon_calls == ["sess-2"]
+
+
+def test_sdk_channel_sessions_and_history(monkeypatch):
+    from kompany.state.models import ConversationSession, SessionStatus
+
+    engine = _ParityEngine()
+    sdk = Kompany.__new__(Kompany)
+    sdk._engine = engine
+
+    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
+    engine.channel.add_turn(s.id, role="founder", content="build a CRM")
+    engine.channel.add_turn(s.id, role="ceo", content="which segment?",
+                            kind="clarify_question")
+
+    rows = sdk.channel.sessions()
+    assert rows[0]["session_id"] == s.id
+    assert {"state", "route", "clarify_turns", "run_id"} <= set(rows[0])
+
+    detail = sdk.channel.session(s.id)
+    assert detail["session"]["session_id"] == s.id
+    assert [t["turn_index"] for t in detail["turns"]] == [0, 1]
+    assert detail["turns"][1]["kind"] == "clarify_question"
+    assert sdk.channel.session("nope") is None
+
+
+# ----- MCP session round-trip + history tools ------------------------------
+
+
+def test_mcp_directive_passes_session_id_and_returns_it(monkeypatch):
+    engine = _ParityEngine()
+    engine._send_result = _directive_result(
+        status="clarify", message="which platform?", session_id="s-c", run_id="r9",
+    )
+    body = _call_mcp(
+        "kompany_directive", {"text": "iOS", "session_id": "s-c"}, engine, monkeypatch
+    )
+    assert engine.send_calls == [("iOS", "s-c")]
+    assert body["status"] == "clarify"
+    assert body["session_id"] == "s-c"
+
+
+def test_mcp_channel_history_and_actions(monkeypatch):
+    from kompany.state.models import ConversationSession, SessionStatus
+
+    engine = _ParityEngine()
+    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
+    engine.channel.add_turn(s.id, role="founder", content="hi")
+
+    listing = _call_mcp("kompany_channel_sessions", {}, engine, monkeypatch)
+    assert listing["sessions"][0]["session_id"] == s.id
+
+    detail = _call_mcp("kompany_channel_session", {"session_id": s.id}, engine, monkeypatch)
+    assert detail["session"]["session_id"] == s.id
+    assert detail["turns"][0]["role"] == "founder"
+
+    missing = _call_mcp("kompany_channel_session", {"session_id": "nope"}, engine, monkeypatch)
+    assert "error" in missing
+
+    go = _call_mcp("kompany_channel_go", {"session_id": "g1"}, engine, monkeypatch)
+    assert set(go) == _PARITY_KEYS
+    assert engine.go_calls == ["g1"]
+
+    ab = _call_mcp("kompany_channel_abandon", {"session_id": "a1"}, engine, monkeypatch)
+    assert ab["status"] == "abandoned"
+    assert engine.abandon_calls == ["a1"]
+
+
+def test_mcp_channel_tools_registered():
+    from kompany.interfaces.mcp_server import TOOLS
+
+    names = {t.name for t in TOOLS}
+    assert {
+        "kompany_channel_sessions", "kompany_channel_session",
+        "kompany_channel_go", "kompany_channel_abandon",
+    } <= names
+    directive_tool = next(t for t in TOOLS if t.name == "kompany_directive")
+    assert "session_id" in directive_tool.inputSchema["properties"]
+
+
+# ----- CLI session continuation + history ----------------------------------
+
+
+def test_cli_directive_json_carries_session_and_run_id(monkeypatch):
+    engine = _ParityEngine()
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    result = runner.invoke(cli_app, ["directive", "launch", "--json"])
+    assert result.exit_code == 0
+    body = json.loads(result.stdout)
+    assert set(body) == _PARITY_KEYS
+    assert body["session_id"] == "s-new"
+    assert engine.send_calls == [("launch", None)]
+
+
+def test_cli_directive_session_flag_continues(monkeypatch):
+    engine = _ParityEngine()
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    result = runner.invoke(cli_app, ["directive", "iOS", "--session", "s-existing", "--json"])
+    assert result.exit_code == 0
+    assert engine.send_calls == [("iOS", "s-existing")]
+
+
+def test_cli_directive_oneshot_prints_session_id_on_clarify(monkeypatch):
+    engine = _ParityEngine()
+    engine._send_result = _directive_result(
+        status="clarify", message="which platform?", session_id="s-clar", run_id="r1",
+    )
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    result = runner.invoke(cli_app, ["directive", "build an app"])
+    assert result.exit_code == 0
+    # One-shot prints the question + session id for scripted continuation.
+    assert "s-clar" in result.stdout
+    assert "--session" in result.stdout
+
+
+def test_cli_directive_interactive_clarify_loop(monkeypatch):
+    """Interactive mode: CEO asks a clarify question, the founder's stdin
+    reply continues the SAME session until it resolves."""
+    engine = _ParityEngine()
+
+    seq = iter([
+        _directive_result(status="clarify", message="which platform?",
+                          session_id="s-1", run_id="r1"),
+        _directive_result(status="completed", message="dispatched",
+                          session_id="s-1", run_id="r1", total_ai_cost=0.4),
+    ])
+
+    def process(text, session_id=None):
+        engine.send_calls.append((text, session_id))
+        return next(seq)
+
+    engine.process_directive = process  # type: ignore[assignment]
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    # The injected stdin supplies the clarify reply.
+    result = runner.invoke(
+        cli_app, ["directive", "build an app", "--interactive"], input="iOS native\n"
+    )
+    assert result.exit_code == 0
+    assert engine.send_calls == [
+        ("build an app", None),
+        ("iOS native", "s-1"),
+    ]
+    assert "which platform?" in result.stdout
+
+
+def test_cli_directive_interactive_gate_go(monkeypatch):
+    """Interactive gate: status=gated prompts GO; typing 'go' executes."""
+    engine = _ParityEngine()
+    engine._send_result = _directive_result(
+        status="gated", message="Plan: spend $5. Reply GO.", session_id="s-g", run_id="r1",
+    )
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    result = runner.invoke(
+        cli_app, ["directive", "buy ads", "--interactive"], input="go\n"
+    )
+    assert result.exit_code == 0
+    assert engine.go_calls == ["s-g"]
+    assert "executed after GO" in result.stdout
+
+
+def test_cli_channel_sessions_and_show(monkeypatch):
+    from kompany.state.models import ConversationSession, SessionStatus
+
+    engine = _ParityEngine()
+    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
+    engine.channel.add_turn(s.id, role="founder", content="build a CRM")
+    engine.channel.add_turn(s.id, role="ceo", content="which segment?",
+                            kind="clarify_question")
+    monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
+
+    listing = runner.invoke(cli_app, ["channel", "sessions", "--json"])
+    assert listing.exit_code == 0
+    rows = json.loads(listing.stdout)
+    assert rows[0]["session_id"] == s.id
+
+    show = runner.invoke(cli_app, ["channel", "show", s.id, "--json"])
+    assert show.exit_code == 0
+    detail = json.loads(show.stdout)
+    assert detail["session"]["session_id"] == s.id
+    assert [t["turn_index"] for t in detail["turns"]] == [0, 1]
+
+    missing = runner.invoke(cli_app, ["channel", "show", "nope"])
+    assert missing.exit_code == 1

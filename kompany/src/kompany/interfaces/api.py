@@ -1190,21 +1190,13 @@ def test_email(req: TestEmailRequest | None = Body(default=None)) -> Integration
 def _flatten_directive_result(result: Any) -> dict[str, Any]:
     """Serialize a ``DirectiveResult`` to the shared parity dict.
 
-    The same six legacy top-level keys (status / message / project_id /
-    approval_id / total_ai_cost / agents_used) plus run_id + session_id
-    (added in PR0/PR1). Used by /directive, /channel/send, /channel/*/go and
-    /channel/*/abandon so every channel response has an identical shape.
+    Delegates to ``DirectiveResult.to_dict()`` — the single source of truth
+    shared by CLI/MCP/SDK so every non-web surface emits identical top-level
+    keys (status / message / project_id / approval_id / total_ai_cost /
+    agents_used / run_id / session_id). Used by /directive, /channel/send,
+    /channel/*/go and /channel/*/abandon.
     """
-    return {
-        "status": result.status,
-        "message": result.message,
-        "project_id": result.project_id,
-        "approval_id": result.approval_id,
-        "total_ai_cost": result.total_ai_cost,
-        "agents_used": result.agents_used,
-        "run_id": result.run_id,
-        "session_id": result.session_id,
-    }
+    return result.to_dict()
 
 
 def _process_directive_graceful(text: str, session_id: str | None) -> dict[str, Any]:
