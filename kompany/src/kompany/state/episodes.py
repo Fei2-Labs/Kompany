@@ -231,17 +231,30 @@ class Episodes:
         ).fetchone()
         return self._row_to_dict(row) if row else None
 
-    def list(self, retention_tier: str | None = None) -> list[dict[str, Any]]:
+    def list(
+        self,
+        retention_tier: str | None = None,
+        *,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if limit is not None and limit <= 0:
+            return []
+
         if retention_tier is None:
-            rows = self.db.execute(
-                "SELECT * FROM project_episodes ORDER BY updated_at DESC"
-            ).fetchall()
+            sql = "SELECT * FROM project_episodes ORDER BY updated_at DESC"
+            params: tuple[Any, ...] = ()
         else:
-            rows = self.db.execute(
+            sql = (
                 "SELECT * FROM project_episodes WHERE retention_tier = ? "
-                "ORDER BY updated_at DESC",
-                (retention_tier,),
-            ).fetchall()
+                "ORDER BY updated_at DESC"
+            )
+            params = (retention_tier,)
+
+        if limit is not None:
+            sql += " LIMIT ?"
+            params += (limit,)
+
+        rows = self.db.execute(sql, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     # ------------------------------------------------------------------

@@ -106,10 +106,11 @@ def test_service_load_then_compose_summary_round_trip(tmp_path) -> None:
 
 
 class _CapturingLLM:
-    """Fake LLM client that records the prompt text without calling out."""
+    """Fake LLM client that records prompts without calling out."""
 
     def __init__(self):
         self.last_prompt: str | None = None
+        self.last_freeform_prompt: str | None = None
 
     def call_structured(
         self,
@@ -139,6 +140,26 @@ class _CapturingLLM:
         )
         resp.parsed = parsed
         return resp
+
+    def call(
+        self,
+        *,
+        model,
+        system,
+        prompt,
+        agent_name=None,
+        max_tokens=4096,
+        directive_id=None,
+        action_type=None,
+    ) -> LLMResponse:
+        self.last_freeform_prompt = prompt
+        return LLMResponse(
+            text="ok",
+            input_tokens=10,
+            output_tokens=5,
+            cost_usd=0.0,
+            model="claude-test",
+        )
 
 
 def _make_ceo(tmp_path) -> tuple[CEOAgent, _CapturingLLM]:
@@ -180,3 +201,40 @@ def test_ceo_classify_without_glossary_omits_block(tmp_path) -> None:
     ceo.classify("What is our balance?", glossary_summary=None)
     assert llm.last_prompt is not None
     assert "COMPANY GLOSSARY" not in llm.last_prompt
+
+
+def test_ceo_answer_prompt_points_target_changes_to_onboarding_when_present(tmp_path) -> None:
+    ceo, llm = _make_ceo(tmp_path)
+    ceo.answer(
+        "How do I change our targets?",
+        company_context=(
+            "Company: TestCo\n\n"
+            "MISSION / TARGETS CURRENTLY SET:\n"
+            "  Status: set (agreed)\n"
+            "  Summary: Company targets: revenue target $1,000; deadline 2026-08-31.\n"
+            "  Change/re-specify path: /ui/onboarding.html (current product uses onboarding; settings does not edit company targets yet)\n"
+        ),
+    )
+    assert llm.last_freeform_prompt is not None
+    assert "If the founder asks how to change or re-specify targets" in llm.last_freeform_prompt
+    assert "/ui/onboarding.html" in llm.last_freeform_prompt
+    assert "settings does not edit company targets yet" in llm.last_freeform_prompt
+    assert "If mission/targets are present, do NOT imply they are missing or lost." in llm.last_freeform_prompt
+
+
+def test_ceo_answer_prompt_points_target_setup_to_onboarding_when_missing(tmp_path) -> None:
+    ceo, llm = _make_ceo(tmp_path)
+    ceo.answer(
+        "How do I set our targets?",
+        company_context=(
+            "Company: TestCo\n\n"
+            "MISSION / TARGETS CURRENTLY SET:\n"
+            "  Status: missing\n"
+            "  Summary: Company targets: none set.\n"
+            "  Set/re-specify path: /ui/onboarding.html (current product uses onboarding; settings does not edit company targets yet)\n"
+        ),
+    )
+    assert llm.last_freeform_prompt is not None
+    assert "/ui/onboarding.html" in llm.last_freeform_prompt
+    assert "If the founder asks how to change or re-specify targets" in llm.last_freeform_prompt
+    assert "If active work count is zero, say that plainly" in llm.last_freeform_prompt

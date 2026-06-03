@@ -159,6 +159,10 @@ steps in the same window:
 6. **Provisioning** — the dashboard pivots in once the picked
    directive is activated and the team starts executing it.
 
+To change company targets later, reopen the onboarding flow at
+`/ui/onboarding.html`. The current Settings page does not edit mission /
+target numbers yet.
+
 Time in Kompany is **virtual**: one completed task = one virtual day,
 so a paused app doesn't burn runway and a fast-working team isn't
 penalised by the wall clock. The header's `days: N/M vd` tracks

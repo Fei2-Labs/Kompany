@@ -3835,8 +3835,11 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         return glossary.compose_summary()
 
     def _compose_answer_context(self) -> tuple[str, bool]:
-        """Bounded real-state snapshot for the CEO ``answer`` route (PR7)."""
-        return compose_answer_context(self)
+        """Bounded real-state snapshot for the CEO ``answer`` route (PR7/PR8)."""
+        return compose_answer_context(
+            self,
+            targets_summary=self._compose_targets_summary(),
+        )
 
     # ------------------------------------------------------------------
     # Company glossary (glossary-and-drift-detection task 05-19)

@@ -206,7 +206,13 @@ class CEOAgent(BaseAgent):
             "----------------------------------------\n\n"
             "Answer the founder's actual question using this context. Be factual "
             "and brief. If the context does not contain what is needed to answer, "
-            "say so plainly rather than guessing."
+            "say so plainly rather than guessing.\n\n"
+            "Important answer behavior:\n"
+            "- Treat ACTIVE WORK NOW, RECENT COMPLETED WORK, and MISSION / TARGETS CURRENTLY SET as separate signals.\n"
+            "- If active work count is zero, say that plainly — but do NOT imply the company has done nothing. When relevant, also mention RECENT COMPLETED WORK and the current mission/targets.\n"
+            "- If mission/targets are present, do NOT imply they are missing or lost.\n"
+            "- If the founder asks how to change or re-specify targets, point to the exact path shown in the context. If targets are missing, say they should be set there; if already present, say they can be revised there.\n"
+            "- Prefer the authoritative targets summary over any empty goal/time_horizon fields elsewhere."
         )
         return self.call(
             prompt=prompt,

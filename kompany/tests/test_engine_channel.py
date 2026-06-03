@@ -11,7 +11,8 @@ import pytest
 
 from kompany.agents.ceo import DirectiveClassification
 from kompany.core.engine import KompanyEngine
-from kompany.state.models import SessionStatus
+from kompany.state.models import ProjectStatus, SessionStatus
+from kompany.state.targets import CompanyTargets
 
 
 @pytest.fixture
@@ -64,6 +65,7 @@ def _build_engine(tmp_path, monkeypatch, initialize=True):
     from kompany.state.conversation import ConversationStore
     from kompany.state.credentials import CredentialVaultStore
     from kompany.state.database import Database
+    from kompany.state.episodes import Episodes
     from kompany.state.journal import Journal
     from kompany.state.ledger import Ledger
     from kompany.state.memory import AgentMemory
@@ -84,6 +86,7 @@ def _build_engine(tmp_path, monkeypatch, initialize=True):
     engine.projects = Projects(db)
     engine.memory = AgentMemory(db)
     engine.audit = AuditLog(db)
+    engine.episodes = Episodes(db)
     engine.approvals = ApprovalRequests(db)
     engine.channel = ConversationStore(db)
     engine.agent_status = AgentStatusStore(db)
@@ -208,26 +211,43 @@ def test_answer_flow_creates_no_project(engine):
 
 
 def test_answer_is_question_driven_not_canned(engine):
-    """PR7: the answer route is a real CEO reply, NOT the canned financials.
+    """PR8: answer context carries active work, recent completion, and targets.
 
     Asserts (1) the reply is generated from the founder's question, (2) the
     old canned company-financials template is NOT what gets returned, (3) the
-    context handed to CEO.answer() carries the active-project/task and staff
-    sections, and (4) the real run cost + agents_used are recorded.
+    context handed to CEO.answer() distinguishes active work now vs recent
+    completed work vs current mission/targets, and (4) the real run cost +
+    agents_used are recorded.
     """
     # Seed real state so the assembled context has projects/tasks + staff.
-    from kompany.state.models import Project, ProjectStatus, Task, TaskStatus
-    project = Project(
+    from kompany.state.models import Project, Task, TaskStatus
+
+    active = Project(
         name="Launch landing page", type="operational",
         status=ProjectStatus.ACTIVE, target_amount=100.0, funded_amount=10.0,
         assigned_agents=["cmo"],
     )
-    engine.projects.create(project)
+    engine.projects.create(active)
     engine.projects.create_task(Task(
-        project_id=project.id, title="Draft hero copy",
+        project_id=active.id, title="Draft hero copy",
         status=TaskStatus.ACTIVE, assigned_agent="cmo",
     ))
     engine.agent_status.set("cmo", "working", "Draft hero copy")
+
+    done = Project(
+        name="Shipped onboarding refresh", type="operational",
+        status=ProjectStatus.COMPLETED, target_amount=0.0, funded_amount=0.0,
+        assigned_agents=["ceo"],
+    )
+    engine.projects.create(done)
+    engine.episodes.record_or_update(done.id)
+    engine.set_targets(CompanyTargets(
+        initial_budget=50.0,
+        revenue_target=1000.0,
+        customer_target=10,
+        deadline="2026-08-31T00:00:00+00:00",
+        source="agreed",
+    ))
 
     fake = _install_ceo(engine, [DirectiveClassification(
         directive_type="informational",
@@ -248,11 +268,20 @@ def test_answer_is_question_driven_not_canned(engine):
     assert "Total income:" not in result.message
     assert "Total AI costs:" not in result.message
 
-    # (3) the context passed to answer() carries real sections.
+    # (3) the context passed to answer() carries the new, separated sections.
     ctx = fake.answer_company_context
-    assert "ACTIVE PROJECTS:" in ctx
+    assert "MISSION / TARGETS CURRENTLY SET:" in ctx
+    assert "Status: set (agreed)" in ctx
+    assert "Company targets:" in ctx
+    assert "/ui/onboarding.html" in ctx
+    assert "ACTIVE WORK NOW:" in ctx
+    assert "Active projects: 1" in ctx
+    assert "Open tasks in active projects: 1" in ctx
     assert "Launch landing page" in ctx
     assert "Draft hero copy" in ctx
+    assert "RECENT COMPLETED WORK:" in ctx
+    assert "Completed episodes/projects shown: 1" in ctx
+    assert "Shipped onboarding refresh" in ctx
     assert "STAFF ACTIVITY:" in ctx
     assert "cmo" in ctx
     assert "FINANCIALS:" in ctx
@@ -269,6 +298,87 @@ def test_answer_is_question_driven_not_canned(engine):
 # ----------------------------------------------------------------------
 # Clarify flow — ambiguous → clarify, reply converges → dispatched.
 # ----------------------------------------------------------------------
+
+def test_answer_context_surfaces_completed_work_when_no_active_projects(engine):
+    """PR8: zero active work must still surface recent completed work + targets."""
+    from kompany.state.models import Project
+
+    done1 = Project(
+        name="Closed first sales sprint", type="strategic",
+        status=ProjectStatus.COMPLETED, target_amount=0.0, funded_amount=0.0,
+        assigned_agents=["cro"],
+    )
+    done2 = Project(
+        name="Published pricing page", type="operational",
+        status=ProjectStatus.COMPLETED, target_amount=0.0, funded_amount=0.0,
+        assigned_agents=["cmo"],
+    )
+    engine.projects.create(done1)
+    engine.projects.create(done2)
+    engine.episodes.record_or_update(done1.id)
+    engine.episodes.record_or_update(done2.id)
+    engine.set_targets(CompanyTargets(
+        initial_budget=50.0,
+        revenue_target=3000.0,
+        customer_target=20,
+        deadline="2026-09-01T00:00:00+00:00",
+        source="agreed",
+    ))
+
+    fake = _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="team status query",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )])
+
+    result = engine.process_directive("现在团队正在进行的任务有哪些")
+
+    assert result.status == "completed"
+    ctx = fake.answer_company_context
+    assert "ACTIVE WORK NOW:" in ctx
+    assert "Active projects: 0" in ctx
+    assert "Open tasks in active projects: 0" in ctx
+    assert "(none right now)" in ctx
+    assert "RECENT COMPLETED WORK:" in ctx
+    assert "Completed episodes/projects shown: 2" in ctx
+    assert "Closed first sales sprint" in ctx or "Published pricing page" in ctx
+    assert "MISSION / TARGETS CURRENTLY SET:" in ctx
+    assert "Status: set (agreed)" in ctx
+    assert "/ui/onboarding.html" in ctx
+
+
+def test_answer_context_reads_recent_completed_work_with_limit(engine, monkeypatch):
+    """PR8: completed-work lookup stays bounded at the store layer."""
+    calls: list[tuple[str | None, int | None]] = []
+    original = engine.episodes.list
+
+    def wrapped(retention_tier=None, *, limit=None):
+        calls.append((retention_tier, limit))
+        return original(retention_tier, limit=limit)
+
+    monkeypatch.setattr(engine.episodes, "list", wrapped)
+
+    fake = _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="team status query",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )])
+
+    result = engine.process_directive("现在团队正在进行的任务有哪些")
+
+    assert result.status == "completed"
+    assert calls == [(None, 4)]
+    assert "RECENT COMPLETED WORK:" in fake.answer_company_context
+
+
+# ----------------------------------------------------------------------
+# Clarify flow — ambiguous → clarify, reply converges → dispatched.
+# ----------------------------------------------------------------------
+
 
 def test_clarify_then_converge_to_dispatch(engine):
     fake = _install_ceo(engine, [
