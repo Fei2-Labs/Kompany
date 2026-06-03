@@ -53,3 +53,7 @@ class DirectiveResult(BaseModel):
     debate_id: str | None = None
     total_ai_cost: float = 0.0
     agents_used: list[str] = Field(default_factory=list)
+    # The ``run_id`` of the ``run_scope`` this directive executed under.
+    # Populated by ``process_directive``; lets callers (CEO channel, SSE
+    # clients) scope ``llm.spend`` / ``agent.activity`` events to this run.
+    run_id: str | None = None

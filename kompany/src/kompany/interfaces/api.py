@@ -1211,6 +1211,7 @@ def send_directive(req: DirectiveRequest) -> dict[str, Any]:
         "approval_id": result.approval_id,
         "total_ai_cost": result.total_ai_cost,
         "agents_used": result.agents_used,
+        "run_id": result.run_id,
     }
 
 

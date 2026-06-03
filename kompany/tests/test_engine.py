@@ -197,6 +197,53 @@ def test_process_directive_writes_audit_events_and_status(engine):
     assert engine.agent_status.get("ceo")["status"] == "idle"
 
 
+def test_process_directive_populates_run_id(engine):
+    """process_directive stamps the run_scope's run_id onto the result so
+    callers can scope per-run SSE events / cost reconcile."""
+    from kompany.agents.ceo import DirectiveClassification
+    from kompany.core.run_context import is_valid_run_id
+
+    class FakeCEO:
+        def classify(self, raw_input, directive_id=None, targets_summary=None, glossary_summary=None):
+            return DirectiveClassification(
+                directive_type="informational",
+                reasoning="status query",
+                primary_squad="strategy",
+                approval_tier="auto",
+            )
+
+    original_registry = engine.registry
+
+    class FakeRegistry:
+        def get(self, role, company_state=None):
+            if role == "ceo":
+                return FakeCEO()
+            return original_registry.get(role, company_state)
+
+    engine.initialize_company(name="TestCo", goal="AI tools", capital=50.0)
+    engine.registry = FakeRegistry()
+
+    result = engine.process_directive("What's our balance?")
+
+    assert result.run_id is not None
+    assert is_valid_run_id(result.run_id)
+
+
+def test_process_directive_suspended_result_carries_run_id(engine):
+    """Even the early suspended-return path is tagged with the run_id
+    (stamped inside run_scope in process_directive)."""
+    from kompany.core.run_context import is_valid_run_id
+
+    engine.initialize_company(name="TestCo", goal="AI tools", capital=50.0)
+    engine.runtime.set("suspended", reason="test")
+
+    result = engine.process_directive("anything")
+
+    assert result.status == "suspended"
+    assert result.run_id is not None
+    assert is_valid_run_id(result.run_id)
+
+
 def test_constitution_exists_with_core_rules():
     constitution = Path(__file__).parents[2] / "CONSTITUTION.md"
     text = constitution.read_text()

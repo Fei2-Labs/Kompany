@@ -39,3 +39,20 @@ def test_directive_result_structure():
     assert r.status == "completed"
     assert r.total_ai_cost == 0.03
     assert r.project_id is None
+
+
+def test_directive_result_run_id_defaults_none():
+    d = Directive(raw_input="test")
+    r = DirectiveResult(directive=d, status="completed", message="Done")
+    assert r.run_id is None
+
+
+def test_directive_result_carries_run_id():
+    d = Directive(raw_input="test")
+    r = DirectiveResult(
+        directive=d,
+        status="completed",
+        message="Done",
+        run_id="r_01HXXXXXXXXXXXXXXXXXXXXXXX",
+    )
+    assert r.run_id == "r_01HXXXXXXXXXXXXXXXXXXXXXXX"

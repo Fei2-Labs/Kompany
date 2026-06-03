@@ -2345,8 +2345,14 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         child directive) records the outer ``run_id`` as ``parent_run_id``
         automatically — see :func:`kompany.core.run_context.run_scope`.
         """
-        with run_scope():
-            return self._process_directive_inner(raw_input)
+        with run_scope() as run_id:
+            result = self._process_directive_inner(raw_input)
+            # Stamp the run id onto the result so callers can scope per-run
+            # SSE events (llm.spend / agent.activity both carry run_id) and
+            # reconcile per-run cost. Done here — inside the scope — so even
+            # the early "suspended" return path gets tagged.
+            result.run_id = run_id
+            return result
 
     def _process_directive_inner(self, raw_input: str) -> DirectiveResult:
         directive = Directive(raw_input=raw_input)
@@ -3502,7 +3508,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     )
                 ),
                 approval_id=approval_id,
-                total_ai_cost=self.cost_tracker.session_total,
+                total_ai_cost=self.cost_tracker.run_total(),
                 agents_used=["ceo", "cfo"],
             )
 
@@ -3545,7 +3551,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             f"Revenue paths:\n{paths_text}\n\n"
             f"Recommended: {plan.recommended_path}\n"
             f"Estimated timeframe: {plan.estimated_timeframe}\n\n"
-            f"AI cost for this directive: ${self.cost_tracker.session_total:.4f}"
+            f"AI cost for this directive: ${self.cost_tracker.run_total():.4f}"
         )
 
         directive.status = DirectiveStatus.ACTIVE
@@ -3554,7 +3560,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             status="revenue_project_created",
             message=msg,
             project_id=project.id,
-            total_ai_cost=self.cost_tracker.session_total,
+            total_ai_cost=self.cost_tracker.run_total(),
             agents_used=["ceo", "cfo"],
         )
 
@@ -3595,7 +3601,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 else f"CEO Recommendation (awaiting approval):\n\n{resp.text}"
             ),
             approval_id=approval_id,
-            total_ai_cost=self.cost_tracker.session_total,
+            total_ai_cost=self.cost_tracker.run_total(),
             agents_used=["ceo"],
         )
 
@@ -3666,7 +3672,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     parts.append(f"  - {step}")
 
         parts.append(
-            f"\nAI cost for this debate: ${self.cost_tracker.session_total:.4f}"
+            f"\nAI cost for this debate: ${self.cost_tracker.run_total():.4f}"
         )
 
         can_auto_proceed = self.autonomy.check(
@@ -3689,7 +3695,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             message="\n".join(parts),
             approval_id=approval_id,
             debate_id=debate_id,
-            total_ai_cost=self.cost_tracker.session_total,
+            total_ai_cost=self.cost_tracker.run_total(),
             agents_used=result.agents_participated + ["cos", "ceo"],
         )
 
@@ -3725,7 +3731,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 else f"CEO Delegation Plan (awaiting approval):\n\n{resp.text}"
             ),
             approval_id=approval_id,
-            total_ai_cost=self.cost_tracker.session_total,
+            total_ai_cost=self.cost_tracker.run_total(),
             agents_used=["ceo"],
         )
 

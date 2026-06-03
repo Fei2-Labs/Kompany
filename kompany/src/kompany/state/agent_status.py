@@ -73,9 +73,18 @@ class AgentStatusStore:
         activity_kind: str,
     ) -> None:
         """Stream the activity contract. Best-effort — a publish failure must
-        never break a status write."""
+        never break a status write.
+
+        ``run_id`` is read from the active :func:`current_run_id` scope so SSE
+        clients can demux concurrent CEO-channel sessions (each
+        ``process_directive`` runs in its own ``run_scope``). It is ``None``
+        for status writes made outside any run (bootstrap, ad-hoc test sets).
+        The field is purely additive — existing consumers that read
+        ``agent_role`` / ``status`` / ``project_id`` are unaffected.
+        """
         try:
             from kompany.core.event_hub import get_event_hub
+            from kompany.core.run_context import current_run_id
 
             get_event_hub().publish(
                 "agent.activity",
@@ -86,6 +95,7 @@ class AgentStatusStore:
                     "project_id": project_id,
                     "project_type": project_type,
                     "activity_kind": activity_kind,
+                    "run_id": current_run_id(),
                 },
             )
         except Exception:
