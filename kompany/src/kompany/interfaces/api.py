@@ -11,7 +11,7 @@ from pathlib import Path
 from secrets import compare_digest
 from typing import Any, AsyncIterator
 
-from fastapi import BackgroundTasks, FastAPI, Form, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Body, FastAPI, Form, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -1134,20 +1134,33 @@ def propose_email(req: ProposeEmailRequest) -> dict[str, Any]:
     )
 
 
+class TestEmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Optional. Empty → send to the connected From address (self-test).
+    # Set a different inbox to prove real external delivery, not loopback.
+    to: str = Field("", description="recipient; defaults to the connected From address")
+
+
 @app.post("/integrations/email/test", response_model=IntegrationActionResponse)
-def test_email() -> IntegrationActionResponse:
-    """Send a test email to the connected address (proves real sending)."""
+def test_email(req: TestEmailRequest | None = Body(default=None)) -> IntegrationActionResponse:
+    """Send a test email (proves real sending).
+
+    Default recipient is the connected From address (self-test). The
+    founder can override ``to`` to send to a different inbox — that
+    separates "did the send succeed" from "does my From mailbox receive".
+    """
     from kompany.integrations.email_smtp import SendEmailTool, SendEmailInput
     from kompany.plugins.contract import ToolContext
 
     engine = get_engine()
-    to = (
+    sender = (
         engine.credentials.get("resend_from")
         or engine.credentials.get("smtp_from")
         or engine.credentials.get("smtp_user")
     )
-    if not to:
+    if not sender:
         return IntegrationActionResponse(ok=False, detail="email not connected")
+    to = (req.to.strip() if req and req.to else "") or sender
     ctx = ToolContext(
         run_id="", ledger=engine.ledger, audit=engine.audit,
         credentials=engine.credentials, settings=engine.settings,

@@ -53,6 +53,7 @@
       <div class="set-meta" id="resend-status">checking…</div>
       <div class="set-row"><label>Resend API key</label><input id="rs-key" type="password" placeholder="re_..." autocomplete="off"></div>
       <div class="set-row"><label>From (verified sender)</label><input id="rs-from" placeholder="you@yourdomain.com" autocomplete="off"></div>
+      <div class="set-row"><label>Send test to</label><input id="rs-testto" placeholder="defaults to the From address — set a real inbox to test delivery" autocomplete="off"></div>
       <div class="set-control">
         <button type="button" id="rs-connect" class="onb-btn onb-btn-submit">[ ▸ CONNECT + VERIFY ]</button>
         <button type="button" id="rs-test" class="onb-btn onb-btn-discuss">[ ✉ send test ]</button>
@@ -67,6 +68,7 @@
       <div class="set-row"><label>User (email)</label><input id="em-user" placeholder="you@gmail.com" autocomplete="off"></div>
       <div class="set-row"><label>Password / app-password</label><input id="em-pass" type="password" autocomplete="off"></div>
       <div class="set-row"><label>From (optional)</label><input id="em-from" placeholder="defaults to user"></div>
+      <div class="set-row"><label>Send test to</label><input id="em-testto" placeholder="defaults to the From address — set a real inbox to test delivery" autocomplete="off"></div>
       <div class="set-control">
         <button type="button" id="em-connect" class="onb-btn onb-btn-submit">[ ▸ CONNECT + VERIFY ]</button>
         <button type="button" id="em-test" class="onb-btn onb-btn-discuss">[ ✉ send test ]</button>
@@ -186,9 +188,14 @@
       } catch (e) { rsShow("connect failed: " + e.message, false); }
     });
     document.getElementById("rs-test").addEventListener("click", async () => {
-      rsShow("sending test…", true);
+      const to = document.getElementById("rs-testto").value.trim();
+      rsShow(to ? `sending test to ${to}…` : "sending test…", true);
       try {
-        const d = await fetch("/integrations/email/test", { method: "POST", headers: { Accept: "application/json" } }).then((r) => r.json());
+        const d = await fetch("/integrations/email/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ to }),
+        }).then((r) => r.json());
         rsShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
       } catch (e) { rsShow("test failed: " + e.message, false); }
     });
@@ -234,9 +241,14 @@
       } catch (e) { emShow("connect failed: " + e.message, false); }
     });
     document.getElementById("em-test").addEventListener("click", async () => {
-      emShow("sending test…", true);
+      const to = document.getElementById("em-testto").value.trim();
+      emShow(to ? `sending test to ${to}…` : "sending test…", true);
       try {
-        const r = await fetch("/integrations/email/test", { method: "POST", headers: { Accept: "application/json" } });
+        const r = await fetch("/integrations/email/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ to }),
+        });
         const d = await r.json();
         emShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
       } catch (e) { emShow("test failed: " + e.message, false); }
