@@ -20,6 +20,8 @@ is needed later).
 
 from __future__ import annotations
 
+import json
+
 from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
@@ -81,8 +83,8 @@ class ConversationStore:
         self.db.execute(
             """INSERT INTO channel_sessions
                (id, state, route, clarify_turns, directive_id, project_id,
-                approval_id, run_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                approval_id, run_id, payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.state.value,
@@ -92,6 +94,7 @@ class ConversationStore:
                 session.project_id,
                 session.approval_id,
                 session.run_id,
+                json.dumps(session.payload or {}),
             ),
         )
         self.db.commit()
@@ -184,6 +187,27 @@ class ConversationStore:
         )
         self.db.commit()
         _publish_channel_updated(f"state.{target.value}", session_id)
+        return self.get_session(session_id)
+
+    def set_session_payload(
+        self,
+        session_id: str,
+        payload: dict,
+    ) -> ConversationSession | None:
+        """Persist a server-side scratch payload on a session.
+
+        PR2 stores the gated-directive snapshot here (raw_input + CEO
+        classification) so a founder GO survives an engine restart. Replaces
+        any existing payload (pass ``{}`` to clear it).
+        """
+        existing = self.get_session(session_id)
+        if existing is None:
+            return None
+        self.db.execute(
+            "UPDATE channel_sessions SET payload = ? WHERE id = ?",
+            (json.dumps(payload or {}), session_id),
+        )
+        self.db.commit()
         return self.get_session(session_id)
 
     def at_clarify_cap(self, session_id: str) -> bool:
@@ -325,6 +349,14 @@ class ConversationStore:
     @staticmethod
     def _row_to_session(row) -> ConversationSession:
         keys = set(row.keys())
+        payload: dict = {}
+        if "payload" in keys and row["payload"]:
+            try:
+                parsed = json.loads(row["payload"])
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except (TypeError, ValueError):
+                payload = {}
         return ConversationSession(
             id=row["id"],
             state=row["state"],
@@ -334,6 +366,7 @@ class ConversationStore:
             project_id=row["project_id"],
             approval_id=row["approval_id"] if "approval_id" in keys else None,
             run_id=row["run_id"] if "run_id" in keys else None,
+            payload=payload,
             created_at=row["created_at"],
             closed_at=row["closed_at"] if "closed_at" in keys else None,
         )

@@ -206,6 +206,12 @@ class ConversationSession(BaseModel):
     project_id: str | None = None
     approval_id: str | None = None
     run_id: str | None = None
+    # Server-side scratch payload for a session. PR2 stores the gated
+    # directive snapshot here (raw_input + CEO classification) so a founder
+    # GO survives an engine restart — a gated session is a parked decision
+    # that may sit for hours/days, and the desktop app restarts the engine
+    # routinely. Empty dict for non-gated sessions.
+    payload: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     closed_at: datetime | None = None
 

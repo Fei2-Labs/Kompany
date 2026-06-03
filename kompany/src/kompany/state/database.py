@@ -497,10 +497,22 @@ class Database:
                    project_id TEXT,
                    approval_id TEXT,
                    run_id TEXT,
+                   payload TEXT NOT NULL DEFAULT '{}',
                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
                    closed_at TEXT
                )"""
         )
+        # ``payload`` holds the PR2 gated-directive snapshot (raw_input + CEO
+        # classification) so a founder GO survives an engine restart. Added
+        # via ALTER too, so DBs created before PR2 (table already exists from
+        # PR1) pick up the column. Idempotent: ALTER fails on existing column.
+        try:
+            self.conn.execute(
+                "ALTER TABLE channel_sessions ADD COLUMN payload "
+                "TEXT NOT NULL DEFAULT '{}'"
+            )
+        except sqlite3.OperationalError:
+            pass  # column already exists
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_channel_sessions_state "
             "ON channel_sessions(state)"

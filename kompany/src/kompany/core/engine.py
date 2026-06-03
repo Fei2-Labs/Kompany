@@ -1113,6 +1113,24 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         except (TypeError, ValueError):
             return default
 
+    def _get_float_config(self, key: str, default: float) -> float:
+        """Read a float config value from ``company_config``.
+
+        Falls back to ``default`` if the row is missing or unparseable.
+        ``company_config`` is the founder-configurable settings store (cf.
+        ``targets.*`` rows, watchdog interval overrides); this is the same
+        seam the channel spend threshold uses.
+        """
+        row = self.db.execute(
+            "SELECT value FROM company_config WHERE key = ?", (key,)
+        ).fetchone()
+        if not row:
+            return default
+        try:
+            return float(row["value"])
+        except (TypeError, ValueError):
+            return default
+
     def list_episodes(
         self,
         retention_tier: str | None = None,
@@ -2508,6 +2526,18 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     directive, classification, ceo, session_id, start_time
                 )
 
+            # ----- Threshold spend gate (PR2, Decision 7) -----
+            # ``auto``/``ceo`` tier under the founder threshold runs
+            # immediately (cost streams live). ``master`` tier OR an
+            # estimated cost over the founder-set threshold posts a preview
+            # turn and pauses — NOTHING executes before a founder GO. The
+            # estimate is the CEO's guess; the preview labels it as such and
+            # the post-GO final turn records the ACTUAL run cost.
+            if self._should_gate(classification):
+                return self._handle_gate(
+                    directive, classification, session_id, start_time
+                )
+
             handler = {
                 DirectiveType.ACQUISITION: self._handle_acquisition,
                 DirectiveType.STRATEGIC: self._handle_strategic,
@@ -2734,6 +2764,391 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             directive_id=directive.id,
         )
         return result
+
+    # ------------------------------------------------------------------
+    # CEO-channel threshold spend gate (PR2, Decision 7)
+    # ------------------------------------------------------------------
+
+    # Founder-configurable spend threshold (EUR). The ``company_config`` key
+    # the founder rules / settings UI writes to; default 1.0. A directive whose
+    # estimated cost exceeds this (strictly greater — at exactly the threshold
+    # the directive runs) is gated for explicit founder GO. ``master``-tier
+    # directives are always gated regardless of cost.
+    CHANNEL_SPEND_THRESHOLD_KEY = "channel_spend_threshold_eur"
+    CHANNEL_SPEND_THRESHOLD_DEFAULT = 1.0
+
+    def _channel_spend_threshold(self) -> float:
+        """Founder-set spend threshold (EUR) for the channel gate."""
+        return self._get_float_config(
+            self.CHANNEL_SPEND_THRESHOLD_KEY,
+            self.CHANNEL_SPEND_THRESHOLD_DEFAULT,
+        )
+
+    def _should_gate(self, classification) -> bool:
+        """Whether this directive needs a founder GO before executing.
+
+        Gate triggers when the CEO marks it ``master`` tier OR when the
+        estimated cost is **strictly greater** than the founder threshold.
+        Boundary: a directive whose estimate equals the threshold runs
+        without a gate (``> threshold`` gates; ``== threshold`` does not).
+        """
+        if (classification.approval_tier or "").strip().lower() == "master":
+            return True
+        estimated = classification.estimated_cost_eur or 0.0
+        return estimated > self._channel_spend_threshold()
+
+    def _gate_preview_content(self, classification) -> str:
+        """Render the preview turn body: plan + estimated cost + tier.
+
+        The cost is explicitly labelled an ESTIMATE (the CEO's guess, PREVIEW
+        in the cost-visibility discipline); the actual run cost is recorded on
+        the post-GO final turn (LEDGER).
+        """
+        plan = (classification.execution_plan or "").strip() or (
+            classification.reasoning or ""
+        ).strip() or "Execute the requested directive."
+        estimated = classification.estimated_cost_eur or 0.0
+        tier = (classification.approval_tier or "unknown").strip().lower()
+        return (
+            f"{plan}\n\n"
+            f"Estimated cost (CEO estimate): €{estimated:.2f}\n"
+            f"Approval tier: {tier}\n\n"
+            "Reply GO to execute, or abandon to drop it. Nothing has run yet."
+        )
+
+    def _handle_gate(
+        self,
+        directive: Directive,
+        classification,
+        session_id: str,
+        start_time: float,
+    ) -> DirectiveResult:
+        """Pause a directive at the spend gate — nothing executes.
+
+        Records a CEO ``preview`` turn (plan + estimated cost + tier), moves
+        the session to ``gated``, and persists a classification snapshot on
+        the session so a later GO re-runs the held plan WITHOUT a second
+        classify LLM call. No squad dispatch, no project, no approval.
+        """
+        preview = self._gate_preview_content(classification)
+        cost = self.cost_tracker.run_total()
+        self.channel.add_turn(
+            session_id,
+            role="ceo",
+            content=preview,
+            kind="preview",
+            cost=cost,
+            directive_id=directive.id,
+        )
+        # Persist the directive text + classification snapshot so GO can replay
+        # the exact held plan without re-classifying (avoids double LLM spend).
+        # Written to the session row (survives an engine restart) AND cached
+        # in memory for the common same-process GO.
+        self._stash_gated_directive(session_id, directive, classification)
+        self.channel.update_session_state(
+            session_id,
+            SessionStatus.GATED,
+            route="execute",
+            directive_id=directive.id,
+        )
+        self.audit.record(
+            "directive.gated",
+            "Directive gated awaiting founder GO",
+            detail={
+                "approval_tier": classification.approval_tier,
+                "estimated_cost_eur": classification.estimated_cost_eur,
+                "threshold_eur": self._channel_spend_threshold(),
+            },
+            agent_role="ceo",
+            directive_id=directive.id,
+        )
+        self.journal.log(Decision(
+            directive_id=directive.id,
+            directive_type=directive.directive_type.value if directive.directive_type else "unknown",
+            raw_input=directive.raw_input,
+            classification=classification.model_dump() if classification else {},
+            result={"status": "gated", "message": preview[:500]},
+            agents_involved=["ceo"],
+            total_ai_cost=cost,
+            duration_seconds=time.time() - start_time,
+        ))
+        return DirectiveResult(
+            directive=directive,
+            status="gated",
+            message=preview,
+            session_id=session_id,
+            total_ai_cost=cost,
+            agents_used=["ceo"],
+        )
+
+    # Key under which the gated-directive snapshot lives in the session
+    # payload (raw founder text + the CEO classification). The payload is the
+    # DURABLE source of truth — a gated session is a parked founder decision
+    # that may sit for hours/days, and the desktop app restarts the engine
+    # routinely; a GO must still work against a brand-new engine instance.
+    _GATED_PAYLOAD_KEY = "gated_directive"
+
+    # In-memory cache of held (gated) directives keyed by session_id, used for
+    # the common same-process GO. The session-row payload mirrors it so GO
+    # survives a restart (rehydrate path in :meth:`_pop_gated_directive`).
+    def _stash_gated_directive(
+        self,
+        session_id: str,
+        directive: Directive,
+        classification,
+    ) -> None:
+        if not hasattr(self, "_gated_directives"):
+            self._gated_directives: dict[str, tuple[str, Any]] = {}
+        self._gated_directives[session_id] = (
+            directive.raw_input,
+            classification,
+        )
+        # Durable copy on the session row so a GO survives an engine restart.
+        try:
+            session = self.channel.get_session(session_id)
+            payload = dict(session.payload) if session else {}
+            payload[self._GATED_PAYLOAD_KEY] = {
+                "raw_input": directive.raw_input,
+                "classification": classification.model_dump(),
+            }
+            self.channel.set_session_payload(session_id, payload)
+        except Exception:  # pragma: no cover — persistence is best-effort
+            # The in-memory cache still allows a same-process GO; only the
+            # restart-survival guarantee is lost on a serialization failure.
+            pass
+
+    def _pop_gated_directive(self, session_id: str):
+        """Return ``(raw_input, classification)`` for a gated session.
+
+        Tries the in-memory cache first; on a miss (e.g. the engine was
+        restarted since the gate), rehydrates from the persisted session
+        payload and reconstructs the CEO classification — NO re-classify, so
+        no double LLM spend. Returns ``None`` only when neither source has a
+        snapshot. Always clears the in-memory entry; the durable payload is
+        cleaned up by the caller once the GO/abandon resolves.
+        """
+        store = getattr(self, "_gated_directives", None)
+        if store and session_id in store:
+            return store.pop(session_id, None)
+        return self._rehydrate_gated_directive(session_id)
+
+    def _rehydrate_gated_directive(self, session_id: str):
+        """Rebuild a gated snapshot from the persisted session payload."""
+        session = self.channel.get_session(session_id)
+        if session is None:
+            return None
+        snapshot = (session.payload or {}).get(self._GATED_PAYLOAD_KEY)
+        if not snapshot:
+            return None
+        from kompany.agents.ceo import DirectiveClassification
+        try:
+            classification = DirectiveClassification.model_validate(
+                snapshot["classification"]
+            )
+        except Exception:
+            return None
+        return snapshot.get("raw_input", ""), classification
+
+    def _clear_gated_payload(self, session_id: str) -> None:
+        """Drop the durable gated snapshot once a GO/abandon resolves."""
+        try:
+            session = self.channel.get_session(session_id)
+            if session is None or self._GATED_PAYLOAD_KEY not in (
+                session.payload or {}
+            ):
+                return
+            payload = dict(session.payload)
+            payload.pop(self._GATED_PAYLOAD_KEY, None)
+            self.channel.set_session_payload(session_id, payload)
+        except Exception:  # pragma: no cover — best-effort cleanup
+            pass
+
+    def channel_go(self, session_id: str) -> DirectiveResult:
+        """Execute a gated session's held directive on founder GO.
+
+        Re-runs the stored directive through the execute pipeline using the
+        persisted classification snapshot — NO re-classify, so no double LLM
+        spend. The session moves to ``dispatched`` and the CEO's final turn
+        records the ACTUAL run cost (LEDGER), not the earlier estimate.
+
+        A GO on a non-gated / closed / unknown session returns a clear error
+        result (no exception leaks — per error-handling spec).
+        """
+        with run_scope():
+            session = self.channel.get_session(session_id)
+            if session is None:
+                return self._channel_action_error(
+                    session_id, f"Unknown channel session {session_id!r}."
+                )
+            if session.state != SessionStatus.GATED:
+                return self._channel_action_error(
+                    session_id,
+                    f"Session is not awaiting GO (state={session.state.value}); "
+                    "nothing to execute.",
+                )
+            stashed = self._pop_gated_directive(session_id)
+            if stashed is None:
+                return self._channel_action_error(
+                    session_id,
+                    "No held directive for this gated session; cannot GO.",
+                )
+            raw_input, classification = stashed
+            return self._dispatch_gated(session_id, raw_input, classification)
+
+    def _dispatch_gated(
+        self,
+        session_id: str,
+        raw_input: str,
+        classification,
+    ) -> DirectiveResult:
+        """Run the held plan through the execute handler map (no re-classify)."""
+        directive = Directive(raw_input=raw_input)
+        directive.directive_type = DirectiveType(classification.directive_type)
+        directive.assigned_squad = classification.primary_squad
+        directive.assigned_agents = classification.agents_needed
+        directive.requires_approval = classification.approval_tier
+        directive.budget_required = classification.estimated_cost_eur
+        directive.budget_available = self.ledger.get_balance()
+        start_time = time.time()
+        try:
+            ceo = self.registry.get(
+                "ceo", company_state=self.get_company_state()
+            )
+            handler = {
+                DirectiveType.ACQUISITION: self._handle_acquisition,
+                DirectiveType.STRATEGIC: self._handle_strategic,
+                DirectiveType.OPERATIONAL: self._handle_operational,
+                DirectiveType.INFORMATIONAL: self._handle_informational,
+            }.get(directive.directive_type, self._handle_operational)
+            self.audit.record(
+                "directive.routed",
+                "Routed gated directive to handler after GO",
+                detail={"directive_type": directive.directive_type.value},
+                directive_id=directive.id,
+            )
+            result = handler(directive, classification, ceo)
+            result.session_id = session_id
+            # ACTUAL run cost (LEDGER) — the estimate was the PREVIEW guess.
+            self.channel.add_turn(
+                session_id,
+                role="ceo",
+                content=result.message,
+                kind="final",
+                cost=result.total_ai_cost,
+                directive_id=directive.id,
+            )
+            self.channel.update_session_state(
+                session_id,
+                SessionStatus.DISPATCHED,
+                route="execute",
+                directive_id=directive.id,
+                project_id=result.project_id,
+                approval_id=result.approval_id,
+            )
+            self.journal.log(Decision(
+                directive_id=directive.id,
+                directive_type=directive.directive_type.value if directive.directive_type else "unknown",
+                raw_input=directive.raw_input,
+                classification=classification.model_dump() if classification else {},
+                result={"status": result.status, "message": result.message[:500]},
+                agents_involved=result.agents_used,
+                total_ai_cost=result.total_ai_cost,
+                duration_seconds=time.time() - start_time,
+            ))
+            self.audit.record(
+                "directive.completed",
+                "Completed gated directive after GO",
+                detail={"status": result.status},
+                directive_id=directive.id,
+            )
+            # Success: the held directive ran, the session is dispatched. Drop
+            # the durable snapshot so it can never be replayed.
+            self._clear_gated_payload(session_id)
+            return result
+        except Exception as exc:
+            # Dispatch failed mid-GO. Keep the session GATED so the founder can
+            # retry, restore the in-memory snapshot (the durable payload is
+            # untouched), and return a clean failed result — no exception leak
+            # (per error-handling spec) and no stuck dispatched-but-failed
+            # session.
+            self.audit.record(
+                "directive.failed",
+                "Gated directive execution failed after GO",
+                detail={"error": str(exc)},
+                directive_id=directive.id,
+            )
+            self._stash_gated_directive(session_id, directive, classification)
+            return self._channel_action_error(
+                session_id,
+                f"Execution failed after GO: {exc}. Session remains gated; "
+                "reply GO to retry or abandon to drop it.",
+            )
+        finally:
+            self.agent_status.set("ceo", "idle")
+
+    def channel_abandon(self, session_id: str) -> DirectiveResult:
+        """Founder gives up on a gated / clarifying / open session.
+
+        Records a CEO abandonment turn and closes the session as
+        ``abandoned``. A non-abandonable (closed / unknown) session returns a
+        clear error result.
+        """
+        session = self.channel.get_session(session_id)
+        if session is None:
+            return self._channel_action_error(
+                session_id, f"Unknown channel session {session_id!r}."
+            )
+        if session.state in SESSION_TERMINAL_STATUSES:
+            return self._channel_action_error(
+                session_id,
+                f"Session is already closed ({session.state.value}); "
+                "nothing to abandon.",
+            )
+        # Drop any held gated directive (in-memory cache + durable payload) so
+        # it can never be replayed later.
+        self._pop_gated_directive(session_id)
+        self._clear_gated_payload(session_id)
+        directive = Directive(raw_input="")
+        turn = self.channel.add_turn(
+            session_id,
+            role="ceo",
+            content="Abandoned by founder. Nothing was executed.",
+            kind="final",
+        )
+        self.channel.update_session_state(
+            session_id,
+            SessionStatus.ABANDONED,
+            directive_id=session.directive_id,
+        )
+        self.audit.record(
+            "directive.abandoned",
+            "Channel session abandoned by founder",
+            detail={"from_state": session.state.value},
+            agent_role="ceo",
+            directive_id=session.directive_id,
+        )
+        return DirectiveResult(
+            directive=directive,
+            status="abandoned",
+            message=turn.content,
+            session_id=session_id,
+            agents_used=["ceo"],
+        )
+
+    def _channel_action_error(
+        self,
+        session_id: str,
+        message: str,
+    ) -> DirectiveResult:
+        """A clear failed result for an illegal GO/abandon (no exception)."""
+        return DirectiveResult(
+            directive=Directive(raw_input=""),
+            status="failed",
+            message=message,
+            session_id=session_id,
+            agents_used=[],
+            total_ai_cost=0.0,
+        )
 
     def _record_autonomy_result(
         self,
