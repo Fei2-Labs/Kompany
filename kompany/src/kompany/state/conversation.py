@@ -49,12 +49,22 @@ class IllegalSessionTransition(ValueError):
     """
 
 
-def _publish_channel_updated(reason: str, session_id: str | None = None) -> None:
-    """Best-effort SSE push that a channel session changed."""
+def _publish_channel_updated(
+    reason: str,
+    session_id: str | None = None,
+    state: str | None = None,
+) -> None:
+    """Best-effort SSE push that a channel session changed.
+
+    The payload carries ``session_id`` + ``state`` so a client can decide what
+    to refetch (the session detail / thread) without parsing ``reason``. SSE
+    has no replay, so this is a nudge to reconcile via REST, not the source of
+    truth.
+    """
     try:
         get_event_hub().publish(
             "channel.updated",
-            {"reason": reason, "session_id": session_id},
+            {"reason": reason, "session_id": session_id, "state": state},
         )
     except Exception:  # pragma: no cover — best-effort live feed
         pass
@@ -98,7 +108,9 @@ class ConversationStore:
             ),
         )
         self.db.commit()
-        _publish_channel_updated("session_created", session.id)
+        _publish_channel_updated(
+            "session_created", session.id, session.state.value
+        )
         # Re-read to pick up the SQL-side ``created_at`` default.
         return self.get_session(session.id) or session
 
@@ -186,7 +198,9 @@ class ConversationStore:
             tuple(params),
         )
         self.db.commit()
-        _publish_channel_updated(f"state.{target.value}", session_id)
+        _publish_channel_updated(
+            f"state.{target.value}", session_id, target.value
+        )
         return self.get_session(session_id)
 
     def set_session_payload(
@@ -283,7 +297,12 @@ class ConversationStore:
                 (session_id,),
             )
         self.db.commit()
-        _publish_channel_updated("turn_added", session_id)
+        parent = self.get_session(session_id)
+        _publish_channel_updated(
+            "turn_added",
+            session_id,
+            parent.state.value if parent else None,
+        )
         # Re-read to pick up the SQL-side ``created_at`` default.
         return self.get_turn(turn.id) or turn
 

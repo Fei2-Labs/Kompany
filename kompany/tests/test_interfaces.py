@@ -526,6 +526,280 @@ def test_classify_ping_error_buckets_invalid_request_as_provider_error():
     assert _classify_ping_error("RateLimitError: 429 quota") == "rate_limited"
 
 
+# ---------------------------------------------------------------------------
+# CEO channel REST surface (06-03-ceo-channel PR3)
+# ---------------------------------------------------------------------------
+
+
+def _directive_result(status="completed", message="done", **kw):
+    """Build a real DirectiveResult for fake engine channel methods."""
+    from kompany.core.directive import Directive, DirectiveResult
+
+    return DirectiveResult(
+        directive=Directive(raw_input=kw.get("raw_input", "")),
+        status=status,
+        message=message,
+        project_id=kw.get("project_id"),
+        approval_id=kw.get("approval_id"),
+        total_ai_cost=kw.get("total_ai_cost", 0.0),
+        agents_used=kw.get("agents_used", []),
+        run_id=kw.get("run_id"),
+        session_id=kw.get("session_id"),
+    )
+
+
+class _ChannelEngine:
+    """Fake engine backed by a real ConversationStore + Database so the
+    channel REST routes exercise real session/turn rows and the ledger
+    cost-reconcile query."""
+
+    def __init__(self, tmp_path):
+        from kompany.state.conversation import ConversationStore
+        from kompany.state.database import Database
+
+        self.db = Database(tmp_path)
+        self.channel = ConversationStore(self.db)
+        # Default directive behaviour for /channel/send + /directive.
+        self._send_result = _directive_result(
+            status="completed", message="dispatched", session_id="s-new", run_id="r1"
+        )
+        self.send_calls = []
+
+    def process_directive(self, text, session_id=None):
+        self.send_calls.append((text, session_id))
+        return self._send_result
+
+    def channel_go(self, session_id):
+        return _directive_result(
+            status="completed", message="executed after GO",
+            session_id=session_id, run_id="r-go", total_ai_cost=0.42,
+        )
+
+    def channel_abandon(self, session_id):
+        return _directive_result(
+            status="abandoned", message="Abandoned by founder.",
+            session_id=session_id, agents_used=["ceo"],
+        )
+
+
+def test_channel_sessions_list_newest_first_and_state_filter(tmp_path, monkeypatch):
+    from kompany.state.models import ConversationSession, SessionStatus
+
+    eng = _ChannelEngine(tmp_path)
+    s1 = eng.channel.create_session(ConversationSession(state=SessionStatus.OPEN))
+    s2 = eng.channel.create_session(ConversationSession(state=SessionStatus.OPEN))
+    eng.channel.update_session_state(s2.id, SessionStatus.ANSWERED)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.get("/channel/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()["sessions"]
+    assert len(sessions) == 2
+    # Newest-first: s2 created after s1.
+    assert sessions[0]["session_id"] == s2.id
+    assert {"state", "route", "clarify_turns", "created_at", "closed_at",
+            "run_id", "directive_id", "project_id", "approval_id"} <= set(sessions[0])
+
+    # State filter narrows to the answered session.
+    resp = client.get("/channel/sessions", params={"state": "answered"})
+    rows = resp.json()["sessions"]
+    assert [r["session_id"] for r in rows] == [s2.id]
+    assert rows[0]["closed_at"] is not None
+
+
+def test_channel_session_detail_returns_ordered_turns(tmp_path, monkeypatch):
+    from kompany.state.models import ConversationSession
+
+    eng = _ChannelEngine(tmp_path)
+    session = eng.channel.create_session(ConversationSession())
+    eng.channel.add_turn(session.id, role="founder", content="build a CRM")
+    eng.channel.add_turn(session.id, role="ceo", content="which segment?",
+                         kind="clarify_question")
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.get(f"/channel/sessions/{session.id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session"]["session_id"] == session.id
+    turns = body["turns"]
+    assert [t["turn_index"] for t in turns] == [0, 1]
+    assert turns[0]["role"] == "founder"
+    assert turns[1]["kind"] == "clarify_question"
+
+
+def test_channel_session_detail_unknown_is_404(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+    resp = client.get("/channel/sessions/nope")
+    assert resp.status_code == 404
+
+
+def test_channel_send_new_session_flattens_result(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post("/channel/send", json={"text": "launch the beta"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert eng.send_calls == [("launch the beta", None)]
+    assert body["status"] == "completed"
+    assert body["session_id"] == "s-new"
+    assert body["run_id"] == "r1"
+    assert {"status", "message", "project_id", "approval_id", "total_ai_cost",
+            "agents_used", "run_id", "session_id"} == set(body)
+
+
+def test_channel_send_continues_clarify_session(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    eng._send_result = _directive_result(
+        status="clarify", message="which platform?",
+        session_id="s-clarify", run_id="r2",
+    )
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post("/channel/send", json={"text": "iOS", "session_id": "s-clarify"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert eng.send_calls == [("iOS", "s-clarify")]
+    assert body["status"] == "clarify"
+    assert body["session_id"] == "s-clarify"
+
+
+def test_channel_send_closed_session_error_surfaces(tmp_path, monkeypatch):
+    """The engine returns a clean failed result for a closed session — the
+    route flattens it (no 500, no exception)."""
+    eng = _ChannelEngine(tmp_path)
+    eng._send_result = _directive_result(
+        status="failed", message="Unknown channel session 'x'.", session_id="x",
+    )
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post("/channel/send", json={"text": "more", "session_id": "x"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"
+
+
+def test_channel_send_llm_failure_returns_graceful_200(tmp_path, monkeypatch):
+    """A provider blow-up in process_directive must NOT 500 — same graceful
+    contract as /directive (shared _process_directive_graceful)."""
+    eng = _ChannelEngine(tmp_path)
+
+    def boom(_text, session_id=None):
+        raise RuntimeError(
+            "LLM unavailable: BadRequestError: invalid_request_error upstream_error"
+        )
+
+    eng.process_directive = boom  # type: ignore[assignment]
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post("/channel/send", json={"text": "go"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["error_code"] == "provider_error"
+    assert body["message"]
+
+
+def test_channel_go_happy_path_flattens(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+    resp = client.post("/channel/sessions/sess-1/go")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["session_id"] == "sess-1"
+    assert body["total_ai_cost"] == 0.42
+
+
+def test_channel_go_failed_path_no_500(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    eng.channel_go = lambda sid: _directive_result(  # type: ignore[assignment]
+        status="failed", message="Session is not awaiting GO.", session_id=sid,
+    )
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+    resp = client.post("/channel/sessions/sess-1/go")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "failed"
+
+
+def test_channel_abandon_flattens(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+    resp = client.post("/channel/sessions/sess-2/abandon")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "abandoned"
+    assert body["session_id"] == "sess-2"
+    assert body["agents_used"] == ["ceo"]
+
+
+def test_channel_run_cost_sums_ledger_rows_by_run_id(tmp_path, monkeypatch):
+    from kompany.state.ledger import Ledger
+
+    eng = _ChannelEngine(tmp_path)
+    ledger = Ledger(eng.db)
+    ledger.record_ai_cost(0.10, "classify", run_id="run-A")
+    ledger.record_ai_cost(0.25, "execute", run_id="run-A")
+    ledger.record_ai_cost(0.99, "execute", run_id="run-B")  # different run
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.get("/channel/runs/run-A/cost")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == "run-A"
+    assert abs(body["total_cost"] - 0.35) < 1e-9
+
+    # Unknown run reconciles to zero, not an error.
+    resp = client.get("/channel/runs/run-zzz/cost")
+    assert resp.status_code == 200
+    assert resp.json()["total_cost"] == 0.0
+
+
+def test_directive_delegates_to_channel_send_path(tmp_path, monkeypatch):
+    """/directive keeps its contract by delegating to the same handler as
+    /channel/send — same flattened keys, session_id passthrough."""
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post("/directive", json={"text": "ship it", "session_id": "s-existing"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert eng.send_calls == [("ship it", "s-existing")]
+    assert {"status", "message", "project_id", "approval_id", "total_ai_cost",
+            "agents_used", "run_id", "session_id"} == set(body)
+
+
+def test_channel_updated_event_reaches_events_stream(tmp_path):
+    """Store-emitted channel.updated flows through the EventHub singleton to
+    the /events SSE generator with session_id + state in the payload."""
+    import asyncio
+
+    from kompany.core.event_hub import get_event_hub, reset_event_hub
+    from kompany.interfaces.api import _sse_event_stream
+    from kompany.state.conversation import ConversationStore
+    from kompany.state.database import Database
+    from kompany.state.models import ConversationSession
+
+    async def run() -> str:
+        reset_event_hub()
+        get_event_hub()
+        gen = _sse_event_stream()
+        chunks: list[bytes] = []
+        chunks.append(await asyncio.wait_for(gen.__anext__(), timeout=0.5))
+        # A live store publishes into the same singleton hub the stream
+        # subscribed to.
+        store = ConversationStore(Database(tmp_path))
+        store.create_session(ConversationSession())
+        chunks.append(await asyncio.wait_for(gen.__anext__(), timeout=0.5))
+        await gen.aclose()
+        return b"".join(chunks).decode()
+
+    text = asyncio.run(run())
+    assert "channel.updated" in text
+    assert "session_id" in text
+    assert "state" in text
+
+
 def test_sdk_init_returns_full_payload(monkeypatch):
     fake_engine = FakeSDKEngine()
     monkeypatch.setattr("kompany.interfaces.sdk.KompanyEngine", lambda config_path=None: fake_engine)
