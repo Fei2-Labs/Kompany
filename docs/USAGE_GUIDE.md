@@ -1,13 +1,13 @@
 # Kompany — Usage Guide
 
-This guide covers everything you need to operate Kompany, from initializing your company to sending directives, running debates, and executing revenue projects.
+This guide covers everything you need to operate Kompany, from initializing your company to talking to the team through the CEO channel, running debates, and executing revenue projects.
 
 ## Table of Contents
 
 1. [Installation](#installation)
 2. [Configuration](#configuration)
 3. [Initializing Your Company](#initializing-your-company)
-4. [Sending Directives](#sending-directives)
+4. [The CEO Channel](#the-ceo-channel)
 5. [Understanding Directive Types](#understanding-directive-types)
 6. [Checking Status](#checking-status)
 7. [Working with Projects](#working-with-projects)
@@ -83,7 +83,7 @@ export KIMI_API_KEY=...            # For Moonshot/Kimi
 kompany --help
 ```
 
-You should see all 8 commands listed: `init`, `directive`, `status`, `projects`, `project`, `debate`, `ledger`, `execute`.
+You should see the available commands, including the core set: `init`, `directive`, `channel`, `status`, `projects`, `project`, `debate`, `ledger`, `execute`.
 
 ---
 
@@ -156,9 +156,9 @@ This creates the SQLite database, sets your starting capital, and records your c
 
 ---
 
-## Sending Directives
+## The CEO Channel
 
-The `directive` command is the primary way to interact with Kompany. Send any natural-language instruction:
+Every founder message goes into the **CEO channel** — the founder's conversation surface with the team, conducted by the CEO. The `directive` command opens or continues a channel session; in the web UI it is the `CHANNEL // CEO` thread above the directive bar. Send any natural-language instruction:
 
 ```bash
 # Acquisition — triggers budget check + revenue project if needed
@@ -174,17 +174,54 @@ kompany directive "Set up a CI/CD pipeline for the main repo"
 kompany directive "What's our current balance?"
 ```
 
+### How the CEO routes each message
+
+The CEO **auto-routes** every message into one of three modes:
+
+- **execute** — clear intent → the directive is dispatched down the pipeline.
+- **clarify** — ambiguous → the CEO asks you a follow-up question instead of guessing. Your reply continues the **same session** (grill-style requirements discovery), capped at 5 clarify turns so it can never loop forever. The conversation converges to a dispatch (or an answer).
+- **answer** — a pure question (e.g. "我们现在余额多少？" / "what's our balance?") → the CEO replies only; no project is created and nothing is dispatched.
+
+The exchange renders as a persistent conversation thread with full cost visibility (estimated cost up front, live cost while executing, final cost on the reply).
+
+### The spend gate (gated GO)
+
+Before an expensive or irreversible action runs, the channel pauses on a **spend gate**:
+
+- `auto` / `ceo` approval tier **and** estimated cost at or under the founder threshold (default **$1**) → runs immediately, cost streams live.
+- `master` tier **or** estimated cost **over** the threshold → the CEO posts a **preview turn** (plan + estimated cost) and pauses. **Nothing executes until you reply GO.** You can also abandon the gated session.
+
+```bash
+# Interactive mode answers clarify questions and GO/abandon prompts inline:
+kompany directive "launch the paid campaign, budget €40" -i
+
+# One-shot mode prints the clarify question or preview + a session id you can
+# continue with --session:
+kompany directive "set up the thing"          # → prints clarify + session id
+kompany directive "the email one" --session <session-id>   # continues it
+```
+
+Gated sessions are parked decisions: they persist server-side and survive an engine restart, so a GO still works after the desktop app relaunches.
+
+### Inspecting channel history
+
+```bash
+kompany channel sessions            # list sessions, newest first
+kompany channel sessions --state clarifying
+kompany channel show <session-id>   # full thread (founder + CEO turns)
+```
+
 **What happens under the hood:**
 
-1. The CEO agent classifies the directive (type, urgency, estimated cost, agents needed, approval tier)
-2. The autonomy gate checks the approval tier
-3. The directive is routed to the appropriate handler
+1. The message opens or continues a CEO-channel session (a closed session rejects further sends — start a new message).
+2. The CEO agent classifies the message (type, route, estimated cost, agents needed, approval tier).
+3. Route detection picks execute / clarify / answer; the autonomy gate + spend gate check the approval tier and cost.
 4. For ACQUISITION: CFO checks budget → shortfall triggers revenue project creation
 5. For STRATEGIC: CEO analysis or full multi-agent debate
 6. For OPERATIONAL: CEO breaks into steps and delegates via KompanyEngine. CoS coordinates cross-functional issues.
 7. For INFORMATIONAL: CFO responds mechanically (no LLM cost)
-8. All AI costs are recorded in the ledger
-9. Result is displayed with cost transparency
+8. All AI costs are recorded in the ledger; cross-links (`approval_id` → INBOX, `project_id` → EPISODES) appear in the channel thread.
+9. The CEO's reply is recorded as a turn with its cost.
 
 ---
 
@@ -369,12 +406,20 @@ The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/init` | Initialize a new company |
-| `POST` | `/directive` | Send a directive |
+| `POST` | `/channel/send` | Send a message into the CEO channel (`text`, optional `session_id`) — canonical |
+| `POST` | `/directive` | Backward-compat alias for `/channel/send` (same handler, same `session_id` passthrough) |
+| `GET` | `/channel/sessions` | List channel sessions, newest first (optional `state`, `limit`) |
+| `GET` | `/channel/sessions/{session_id}` | One session + its ordered turns (the full thread) |
+| `POST` | `/channel/sessions/{session_id}/go` | Founder GO on a spend-gated session |
+| `POST` | `/channel/sessions/{session_id}/abandon` | Abandon a session without executing |
+| `GET` | `/channel/runs/{run_id}/cost` | Authoritative per-run AI cost (reload-restore reconcile) |
 | `GET` | `/status` | Get company status |
 | `GET` | `/projects` | List active projects |
 | `GET` | `/projects/{project_id}` | Get a specific project |
 | `GET` | `/ledger?limit=10` | Get recent ledger entries |
 | `POST` | `/projects/{project_id}/execute` | Execute a project's tasks |
+
+A `/channel/send` (or `/directive`) response carries a `status` that may be `completed`, `clarify` (the CEO asks back — re-POST with the returned `session_id`), `gated` (spend gate — call `/go` or `/abandon`), `answered`, `abandoned`, `suspended`, or `failed`, plus `session_id` and `run_id`.
 
 ### Examples
 
@@ -384,10 +429,18 @@ curl -X POST http://localhost:8000/init \
   -H "Content-Type: application/json" \
   -d '{"name": "Acme", "capital": 50, "goal": "AI tools", "time_horizon": "6 months", "exclusions": "gambling"}'
 
-# Send a directive
-curl -X POST http://localhost:8000/directive \
+# Send a message into the CEO channel
+curl -X POST http://localhost:8000/channel/send \
   -H "Content-Type: application/json" \
   -d '{"text": "Buy a Mac Studio M4 128GB, budget €50"}'
+
+# Continue a clarify session (re-use the returned session_id)
+curl -X POST http://localhost:8000/channel/send \
+  -H "Content-Type: application/json" \
+  -d '{"text": "the M4 Max, 128GB", "session_id": "abc12345"}'
+
+# GO on a spend-gated session
+curl -X POST http://localhost:8000/channel/sessions/abc12345/go
 
 # Check status
 curl http://localhost:8000/status
@@ -413,7 +466,11 @@ python -m kompany.interfaces.mcp_server
 | Tool | Parameters | Description |
 |---|---|---|
 | `kompany_init` | `name`\*, `capital`, `goal`\*, `time_horizon`, `exclusions` | Initialize a new company |
-| `kompany_directive` | `text`\* | Send a natural language directive |
+| `kompany_directive` | `text`\*, `session_id` | Send a message into the CEO channel (pass `session_id` to continue a clarify session) |
+| `kompany_channel_sessions` | `state`, `limit` | List channel sessions, newest first |
+| `kompany_channel_session` | `session_id`\* | One session + its ordered turns (full thread) |
+| `kompany_channel_go` | `session_id`\* | Founder GO on a spend-gated session |
+| `kompany_channel_abandon` | `session_id`\* | Abandon a session without executing |
 | `kompany_status` | *(none)* | Get company status |
 | `kompany_projects` | *(none)* | List active projects |
 | `kompany_project` | `project_id`\* | Get project details |
@@ -449,10 +506,22 @@ from kompany import Kompany
 k = Kompany()
 k.init(name="Acme", capital=50, goal="AI tools", time_horizon="6 months", exclusions="gambling")
 
-# Send a directive
+# Send a message into the CEO channel
 result = k.directive("Buy a Mac Studio M4 128GB, budget €50")
 print(result["message"])
 print(f"AI cost: ${result['total_ai_cost']:.2f}")
+
+# The channel namespace mirrors the REST /channel/* surface:
+result = k.channel.send("set up the thing")
+if result["status"] == "clarify":
+    # The CEO asked a question — continue the same session.
+    result = k.channel.send("the email one", session_id=result["session_id"])
+if result["status"] == "gated":
+    # Spend gate — review the plan + estimate, then GO (or abandon).
+    result = k.channel.go(result["session_id"])
+for s in k.channel.sessions():          # list sessions, newest first
+    print(s["session_id"], s["state"])
+thread = k.channel.session(result["session_id"])   # full thread
 
 # Check balance
 print(f"Balance: €{k.balance():.2f}")
@@ -482,7 +551,12 @@ result = k.execute_project("abc12345")
 |---|---|---|
 | `Kompany(config_path=None)` | — | Constructor |
 | `init(name, capital=0.0, goal="", time_horizon="", exclusions="")` | `None` | Initialize a new company |
-| `directive(text)` | `dict` | Send a directive, get the result |
+| `directive(text, session_id=None)` | `dict` | Send a message into the CEO channel, get the result |
+| `channel.send(text, session_id=None)` | `dict` | Send a message (opens/continues a session) |
+| `channel.go(session_id)` | `dict` | Founder GO on a spend-gated session |
+| `channel.abandon(session_id)` | `dict` | Abandon a session without executing |
+| `channel.sessions(state=None, limit=50)` | `list[dict]` | List channel sessions, newest first |
+| `channel.session(session_id)` | `dict \| None` | One session + its turns (full thread) |
 | `status()` | `dict` | Company status |
 | `projects()` | `list[dict]` | All active projects |
 | `project(project_id)` | `dict \| None` | A specific project |
