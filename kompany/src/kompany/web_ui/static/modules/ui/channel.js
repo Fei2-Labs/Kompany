@@ -55,6 +55,22 @@ function isOptimisticHot(sid) {
 const _progress = new Map();
 let _progressSeq = 0;
 
+// Optimistic founder turns rendered before the server's session_id is known.
+// A fresh question opens a NEW session, so onSubmit appends the founder bubble
+// with sessionId=null (no data-session) and only back-fills data-session once
+// the POST returns. A channel.updated SSE for that session can fire on the
+// server BEFORE the POST response lands — at that moment the optimistic bubble
+// has no data-session, so the old reconcile couldn't see it and re-appended the
+// founder turn from the server snapshot, duplicating it (PR7 Part B).
+//
+// We track each optimistic founder element here so reconcile can find and drop
+// it by session even when data-session hasn't been written yet. Keyed by a
+// client turn id; ``sessionId`` is back-filled the moment we learn it.
+// ``content`` lets us deterministically claim the right optimistic bubble when
+// multiple brand-new sessions are posted before any POST returns.
+const _pendingFounder = new Map(); // clientId -> { el, sessionId|null, content }
+let _founderSeq = 0;
+
 function escapeHTML(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -317,6 +333,17 @@ async function onSubmit() {
   // turn we just rendered (a clarify reply carries data-session immediately).
   if (sessionId) markOptimistic(sessionId);
   const founderEl = appendTurn({ role: "founder", kind: "message", content: text, sessionId });
+  // Register the optimistic founder turn so a channel.updated reconcile can
+  // dedup it even before the server session_id is back-filled onto data-session.
+  const founderClientId = `f${++_founderSeq}`;
+  if (founderEl) {
+    founderEl.setAttribute("data-client-turn", founderClientId);
+    _pendingFounder.set(founderClientId, {
+      el: founderEl,
+      sessionId: sessionId || null,
+      content: text,
+    });
+  }
   _input.value = "";
   setStatus("sending…", "busy");
 
@@ -331,11 +358,19 @@ async function onSubmit() {
     // founder turn so channel.updated can match (and not clobber) it.
     if (founderEl && result.session_id) {
       founderEl.setAttribute("data-session", result.session_id);
+      const pending = _pendingFounder.get(founderClientId);
+      if (pending) pending.sessionId = result.session_id;
     }
     attachRunToProgress(progressId, result.run_id, result.session_id);
     await applyResult(result, progressId);
+    // The optimistic founder bubble is now the authoritative one (back-filled
+    // with data-session); drop its pending record so a later reconcile matches
+    // it via data-session, not the unclaimed-founder fallback.
+    _pendingFounder.delete(founderClientId);
     setStatus("", "");
   } catch (err) {
+    _pendingFounder.delete(founderClientId);
+    if (founderEl) founderEl.remove();
     resolveProgress(progressId, {
       role: "ceo", kind: "final", content: `error: ${err.message}`,
     });
@@ -587,13 +622,47 @@ async function onChannelUpdated(data) {
   // rendered optimistically for THIS session are removed so we don't
   // double-render.
   const existing = _threadEl
-    ? _threadEl.querySelectorAll(`.channel-turn[data-session="${CSS.escape(sid)}"]`)
+    ? Array.from(_threadEl.querySelectorAll(`.channel-turn[data-session="${CSS.escape(sid)}"]`))
     : [];
+  // Fold in any optimistic founder bubble for this session that does NOT yet
+  // carry data-session (the POST hasn't back-filled it). Without this the
+  // founder turn would survive removal and the server's copy would be appended
+  // alongside it — the duplicate "YOU" turn this fix targets.
+  const existingSet = new Set(existing);
+  // Unclaimed optimistic founder bubbles (sessionId still null because the POST
+  // hasn't returned yet). Match them deterministically against the server's
+  // founder turn content so overlapping new-session sends still dedup cleanly.
+  const founderServerText = (detail.turns || []).find((t) => t.role === "founder")?.content || null;
+  for (const [cid, pending] of _pendingFounder.entries()) {
+    if (!pending.el || !pending.el.isConnected) {
+      _pendingFounder.delete(cid);
+      continue;
+    }
+    if (pending.sessionId === sid && !existingSet.has(pending.el)) {
+      existing.push(pending.el);
+      existingSet.add(pending.el);
+      continue;
+    }
+    if (
+      pending.sessionId == null &&
+      founderServerText != null &&
+      pending.content === founderServerText &&
+      !existingSet.has(pending.el)
+    ) {
+      pending.sessionId = sid;
+      existing.push(pending.el);
+      existingSet.add(pending.el);
+    }
+  }
   // Only reconcile when the server has at least as many turns as we show
   // (avoids clobbering an in-flight render with a thinner intermediate
   // server snapshot).
   if ((detail.turns || []).length < existing.length) return;
-  for (const el of existing) el.remove();
+  for (const el of existing) {
+    const cid = el.getAttribute("data-client-turn");
+    if (cid) _pendingFounder.delete(cid);
+    el.remove();
+  }
   for (const t of detail.turns || []) {
     appendTurn({
       role: t.role, kind: t.kind, content: t.content, cost: t.cost,

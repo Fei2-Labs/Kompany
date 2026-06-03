@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from kompany.agents.registry import AgentRegistry
 from kompany.config.settings import KompanySettings
+from kompany.core.answer_context import compose_answer_context
 from kompany.core.autonomy import AutonomyGate
 from kompany.core.directive import (
     Directive,
@@ -2486,12 +2487,13 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             # innocuous default when no targets are set. Session context is
             # the prior turns of THIS session only (Decision 2).
             clarify_capped = self.channel.at_clarify_cap(session_id)
+            session_context = self._compose_session_context(session_id) or None
             classification = ceo.classify(
                 raw_input,
                 directive_id=directive.id,
                 targets_summary=self._compose_targets_summary(),
                 glossary_summary=self._compose_glossary_summary(),
-                session_context=self._compose_session_context(session_id) or None,
+                session_context=session_context,
                 clarify_capped=clarify_capped,
             )
             self.audit.record(
@@ -2523,7 +2525,12 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 )
             if route == "answer":
                 return self._handle_answer(
-                    directive, classification, ceo, session_id, start_time
+                    directive,
+                    classification,
+                    ceo,
+                    session_id,
+                    start_time,
+                    session_context=session_context,
                 )
 
             # ----- Threshold spend gate (PR2, Decision 7) -----
@@ -2707,26 +2714,57 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         ceo,
         session_id: str,
         start_time: float,
+        session_context: str | None = None,
     ) -> DirectiveResult:
-        """Answer a pure question — reply only, no project/dispatch.
+        """Answer a pure question — a real CEO reply, no project/dispatch.
 
-        Reuses the existing ``_handle_informational`` handler (canned company
-        financials/projects) for the answer body, then records the CEO's
-        final turn and closes the session as ``answered``. No project is
-        created and no approval is requested.
+        The conductor reads the founder's actual question and answers it,
+        grounded in a bounded snapshot of real company state (financials +
+        active projects/tasks + staff activity, see
+        :meth:`_compose_answer_context`). This is a freeform LLM call
+        (:meth:`CEOAgent.answer`) — NOT the old canned financials template.
+        ``session_context`` carries the prior turns of THIS session so
+        follow-ups stay coherent; it is composed once at the call site to
+        avoid a second LLM spend. The real call cost (``run_total``) is
+        recorded on the final turn (cost-as-expense). No project is created
+        and no approval is requested; the session closes ``answered``.
         """
         directive.directive_type = DirectiveType.INFORMATIONAL
         self.audit.record(
             "directive.routed",
-            "Routed directive to answer (informational)",
+            "Routed directive to answer (CEO reply)",
             detail={"route": "answer"},
             directive_id=directive.id,
         )
-        result = self._handle_informational(directive, classification, ceo)
-        result.session_id = session_id
-        # _handle_informational hardcodes total_ai_cost=0; surface the real
-        # classify cost so the LEDGER chip is honest (cost-as-expense).
-        result.total_ai_cost = self.cost_tracker.run_total()
+        # The bounded real-state snapshot reuses CFO summary + projects +
+        # agent_status; include CFO in agents_used only when that summary was
+        # actually available to the CEO.
+        company_context, used_cfo = self._compose_answer_context()
+        resp = ceo.answer(
+            directive.raw_input,
+            company_context,
+            session_context=session_context,
+            directive_id=directive.id,
+        )
+        answer_text = (resp.text or "").strip() or (
+            "I don't have enough information to answer that right now."
+        )
+        # Surface the REAL run cost (the answer LLM call hit the ledger via
+        # base.call) so the LEDGER chip is honest (cost-as-expense).
+        total_cost = self.cost_tracker.run_total()
+        agents_used = ["ceo"]
+        if used_cfo:
+            agents_used.append("cfo")
+
+        directive.status = DirectiveStatus.COMPLETED
+        result = DirectiveResult(
+            directive=directive,
+            status="completed",
+            message=answer_text,
+            session_id=session_id,
+            total_ai_cost=total_cost,
+            agents_used=agents_used,
+        )
         self.channel.add_turn(
             session_id,
             role="ceo",
@@ -3795,6 +3833,10 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         except Exception:  # pragma: no cover — never let glossary kill prompts
             return ""
         return glossary.compose_summary()
+
+    def _compose_answer_context(self) -> tuple[str, bool]:
+        """Bounded real-state snapshot for the CEO ``answer`` route (PR7)."""
+        return compose_answer_context(self)
 
     # ------------------------------------------------------------------
     # Company glossary (glossary-and-drift-detection task 05-19)

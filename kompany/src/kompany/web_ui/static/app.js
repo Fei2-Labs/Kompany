@@ -10,7 +10,7 @@ import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
 import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=5";
-import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=2";
+import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=4";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";
 import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js?v=2";

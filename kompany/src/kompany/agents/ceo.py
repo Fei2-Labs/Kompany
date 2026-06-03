@@ -168,6 +168,52 @@ class CEOAgent(BaseAgent):
         )
         return resp.parsed
 
+    def answer(
+        self,
+        question: str,
+        company_context: str,
+        session_context: str | None = None,
+        directive_id: str | None = None,
+    ) -> "LLMResponse":  # noqa: F821 — runtime type from base.call
+        """Answer the founder's question grounded in real company state.
+
+        CEO-channel ``answer`` route (06-03-ceo-channel PR7). Unlike
+        :meth:`classify` this is a freeform :meth:`call` — the conductor
+        actually reads the founder's question and replies, grounded ONLY in
+        ``company_context`` (a bounded snapshot of financials / active
+        projects+tasks / staff activity assembled by the engine). It must not
+        invent numbers; if the context lacks the answer it says so plainly.
+
+        ``session_context`` is the prior turns of THIS session so follow-up
+        questions in the same conversation stay coherent. The freeform call
+        returns an :class:`~kompany.llm.client.LLMResponse` whose ``.text``
+        is the reply and ``.cost_usd`` feeds the ledger (cost-as-expense).
+        """
+        context_block = (
+            f"Conversation so far (this session only):\n{session_context}\n\n"
+            if session_context
+            else ""
+        )
+        prompt = (
+            f"{context_block}"
+            "The Master (founder) has asked you a question. Answer it directly "
+            "and concisely as the conductor of the company.\n\n"
+            f'Question:\n"{question}"\n\n'
+            "Company context (the ONLY source of truth — do not invent numbers, "
+            "names, or facts beyond what is here):\n"
+            "----------------------------------------\n"
+            f"{company_context}\n"
+            "----------------------------------------\n\n"
+            "Answer the founder's actual question using this context. Be factual "
+            "and brief. If the context does not contain what is needed to answer, "
+            "say so plainly rather than guessing."
+        )
+        return self.call(
+            prompt=prompt,
+            directive_id=directive_id,
+            action_type="ceo.answer",
+        )
+
     def create_revenue_plan(
         self,
         original_directive: str,

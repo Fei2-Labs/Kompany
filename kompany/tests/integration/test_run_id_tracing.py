@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -269,6 +270,9 @@ def test_trace_run_reconstructs_directive_chain(tmp_path):
                 approval_tier="auto",
             )
 
+        def answer(self, question, company_context, session_context=None, directive_id=None):
+            return SimpleNamespace(text=f"ANSWER :: {question}")
+
     original_registry = engine.registry
 
     class FakeRegistry:
@@ -343,6 +347,9 @@ def test_distinct_directives_get_distinct_run_ids(tmp_path):
                 primary_squad="strategy",
                 approval_tier="auto",
             )
+
+        def answer(self, question, company_context, session_context=None, directive_id=None):
+            return SimpleNamespace(text=f"ANSWER :: {question}")
 
     original_registry = engine.registry
 

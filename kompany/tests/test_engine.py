@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from kompany.core.engine import KompanyEngine
 from kompany.state.models import LedgerCategory
@@ -176,6 +177,9 @@ def test_process_directive_writes_audit_events_and_status(engine):
                 approval_tier="auto",
             )
 
+        def answer(self, question, company_context, session_context=None, directive_id=None):
+            return SimpleNamespace(text=f"ANSWER :: {question}")
+
     original_registry = engine.registry
 
     class FakeRegistry:
@@ -214,6 +218,9 @@ def test_process_directive_populates_run_id(engine):
                 primary_squad="strategy",
                 approval_tier="auto",
             )
+
+        def answer(self, question, company_context, session_context=None, directive_id=None):
+            return SimpleNamespace(text=f"ANSWER :: {question}")
 
     original_registry = engine.registry
 

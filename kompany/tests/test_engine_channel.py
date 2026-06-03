@@ -120,6 +120,30 @@ def _install_ceo(engine, classifications):
             self.last_capped = clarify_capped
             return queue.pop(0)
 
+        def answer(self, question, company_context, session_context=None,
+                   directive_id=None):
+            # Echo a marker incorporating the founder's actual question so a
+            # test can prove the reply is question-driven (not a canned
+            # template). Capture the context the engine assembled so a test
+            # can assert it carries real project/task + staff sections.
+            self.answer_question = question
+            self.answer_company_context = company_context
+            self.answer_session_context = session_context
+            # Book a real run cost so the engine's run_total() (LEDGER) reflects
+            # the spend, mirroring how base.call would record via the tracker.
+            engine.cost_tracker.record(
+                "claude-sonnet-4-20250514", 800, 200, "ceo.answer",
+                directive_id=directive_id,
+            )
+            from kompany.llm.client import LLMResponse
+            return LLMResponse(
+                text=f"ANSWER_MARKER :: {question}",
+                input_tokens=800,
+                output_tokens=200,
+                cost_usd=engine.cost_tracker.run_total(),
+                model="fake",
+            )
+
     fake = FakeCEO()
     original = engine.registry
 
@@ -138,7 +162,7 @@ def _install_ceo(engine, classifications):
 # ----------------------------------------------------------------------
 
 def test_process_directive_no_session_opens_one(engine):
-    _install_ceo(engine, [DirectiveClassification(
+    fake = _install_ceo(engine, [DirectiveClassification(
         directive_type="informational",
         reasoning="status",
         primary_squad="strategy",
@@ -152,6 +176,9 @@ def test_process_directive_no_session_opens_one(engine):
     assert result.session_id is not None
     session = engine.channel.get_session(result.session_id)
     assert session.state == SessionStatus.ANSWERED
+    # The reply is CEO-generated and driven by the founder's actual question.
+    assert result.message == "ANSWER_MARKER :: What's our balance?"
+    assert fake.answer_question == "What's our balance?"
 
 
 # ----------------------------------------------------------------------
@@ -178,6 +205,65 @@ def test_answer_flow_creates_no_project(engine):
     # CEO final turn recorded.
     kinds = [t.kind for t in engine.channel.session_turns(result.session_id)]
     assert kinds == ["message", "final"]
+
+
+def test_answer_is_question_driven_not_canned(engine):
+    """PR7: the answer route is a real CEO reply, NOT the canned financials.
+
+    Asserts (1) the reply is generated from the founder's question, (2) the
+    old canned company-financials template is NOT what gets returned, (3) the
+    context handed to CEO.answer() carries the active-project/task and staff
+    sections, and (4) the real run cost + agents_used are recorded.
+    """
+    # Seed real state so the assembled context has projects/tasks + staff.
+    from kompany.state.models import Project, ProjectStatus, Task, TaskStatus
+    project = Project(
+        name="Launch landing page", type="operational",
+        status=ProjectStatus.ACTIVE, target_amount=100.0, funded_amount=10.0,
+        assigned_agents=["cmo"],
+    )
+    engine.projects.create(project)
+    engine.projects.create_task(Task(
+        project_id=project.id, title="Draft hero copy",
+        status=TaskStatus.ACTIVE, assigned_agent="cmo",
+    ))
+    engine.agent_status.set("cmo", "working", "Draft hero copy")
+
+    fake = _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="team status query",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )])
+
+    question = "现在团队正在进行的任务有哪些"
+    result = engine.process_directive(question)
+
+    # (1) reply is generated from the founder's actual question.
+    assert result.message == f"ANSWER_MARKER :: {question}"
+    assert fake.answer_question == question
+
+    # (2) the old canned financials template is NOT returned.
+    assert "Total income:" not in result.message
+    assert "Total AI costs:" not in result.message
+
+    # (3) the context passed to answer() carries real sections.
+    ctx = fake.answer_company_context
+    assert "ACTIVE PROJECTS:" in ctx
+    assert "Launch landing page" in ctx
+    assert "Draft hero copy" in ctx
+    assert "STAFF ACTIVITY:" in ctx
+    assert "cmo" in ctx
+    assert "FINANCIALS:" in ctx
+
+    # (4) real cost recorded + agents_used reflects the CEO (and CFO summary).
+    assert result.total_ai_cost > 0
+    assert result.agents_used == ["ceo", "cfo"]
+    # The persisted final turn carries the same real cost.
+    final = engine.channel.session_turns(result.session_id)[-1]
+    assert final.kind == "final"
+    assert final.cost == result.total_ai_cost
 
 
 # ----------------------------------------------------------------------
