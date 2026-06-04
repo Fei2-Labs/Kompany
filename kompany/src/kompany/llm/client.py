@@ -350,8 +350,19 @@ class LLMClient:
             # Fast failure (timeout never tripped).
             first_error = exc
         else:
-            # Fast success on first try — done.
-            return resp
+            # Fast success on first try — record cost/audit like every
+            # other success exit (slow-success and retry-success already
+            # do). Without this, the common path books $0 forever: no
+            # ledger entry, no ``llm.call`` audit, no ``llm.spend`` SSE.
+            return self._record_success(
+                resp,
+                provider=provider,
+                model=model,
+                prompt=prompt,
+                agent_name=agent_name,
+                directive_id=directive_id,
+                action_type=action_type,
+            )
 
         # Provider error handler runs only on real exceptions.
         self._handle_provider_error(

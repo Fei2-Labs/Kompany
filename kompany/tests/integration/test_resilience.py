@@ -152,6 +152,41 @@ def test_429_then_success_writes_silent_and_recovered(tmp_path):
 
 
 # ----------------------------------------------------------------------
+# Case 1b — fast success on the first try (the common path) must record
+# cost exactly like the slow/retry success exits. Regression for the bug
+# where the watchdog fast path returned the raw response without
+# ``_record_success`` — every call booked $0, no ledger row, no
+# ``llm.call`` audit, no ``llm.spend`` SSE.
+# ----------------------------------------------------------------------
+
+def test_fast_success_records_cost_and_audit(tmp_path):
+    stack = _make_stack(tmp_path)
+
+    stack["client"]._call_anthropic = lambda *_a, **_k: _ok_response()
+    with run_scope():
+        resp = stack["client"].call(
+            model="claude-sonnet-4-20250514",
+            system="s",
+            prompt="p",
+            agent_name="ceo",
+            task_id="t1",
+            project_id="p1",
+        )
+
+    assert resp.cost_usd > 0
+    ai_rows = stack["db"].execute(
+        "SELECT COUNT(*) c FROM ledger WHERE category = 'ai_cost'"
+    ).fetchone()
+    assert ai_rows["c"] == 1
+    llm_calls = stack["db"].execute(
+        "SELECT COUNT(*) c FROM audit_log WHERE event_type = 'llm.call'"
+    ).fetchone()
+    assert llm_calls["c"] == 1
+    # No health noise on the clean path.
+    assert stack["health"].list() == []
+
+
+# ----------------------------------------------------------------------
 # Case 2 — network down x2
 # ----------------------------------------------------------------------
 
