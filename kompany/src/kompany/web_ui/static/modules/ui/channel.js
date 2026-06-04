@@ -615,6 +615,13 @@ async function onChannelUpdated(data) {
   if (isOptimisticHot(sid)) return;
   for (const entry of _progress.values()) {
     if (entry.sessionId && entry.sessionId === sid) return;
+    // A NEW-session send is mid-flight: its session id is unknown until the
+    // POST returns, so the optimistic guard above can't match. This updated
+    // event is plausibly that session's server-side write — if we reconcile
+    // now, the POST resolution appends the same CEO final again (duplicate
+    // reply). Skip; the POST result owns rendering, and any genuinely
+    // unrelated session repaints on its next channel.updated.
+    if (entry.sessionId == null) return;
   }
 
   // Replace any existing turns for this session in place: remove this

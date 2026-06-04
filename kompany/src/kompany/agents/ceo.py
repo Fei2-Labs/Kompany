@@ -212,7 +212,13 @@ class CEOAgent(BaseAgent):
             "- If active work count is zero, say that plainly — but do NOT imply the company has done nothing. When relevant, also mention RECENT COMPLETED WORK and the current mission/targets.\n"
             "- If mission/targets are present, do NOT imply they are missing or lost.\n"
             "- If the founder asks how to change or re-specify targets, point to the exact path shown in the context. If targets are missing, say they should be set there; if already present, say they can be revised there.\n"
-            "- Prefer the authoritative targets summary over any empty goal/time_horizon fields elsewhere."
+            "- Prefer the authoritative targets summary over any empty goal/time_horizon fields elsewhere.\n\n"
+            "Output contract (STRICT — the founder reads results, not essays):\n"
+            "- First line IS the answer or proposal. No preamble, no headers, no 'CEO Analysis:' banner.\n"
+            "- Hard cap ~120 words. Bullets over prose.\n"
+            "- NEVER explain your reasoning, the company's situation, or why the plan is right. The founder sees the dashboard; justification belongs in internal logs, not the reply.\n"
+            "- If the founder asks what to do next: reply as the conductor delivering the team's AGREED, FINAL proposal — (1) the single recommended move, (2) concrete steps each with owner agent + cost + deadline, (3) exactly what you need from the founder (approve / connect account / decide). Nothing else.\n"
+            "- Never restate balance/targets the founder can already see unless directly asked."
         )
         return self.call(
             prompt=prompt,
