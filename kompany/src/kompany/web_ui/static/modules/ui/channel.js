@@ -710,8 +710,24 @@ export function initChannel() {
   const head = _root.querySelector(".channel-head");
   if (fab && head) head.insertBefore(fab, head.querySelector(".channel-toggle"));
 
-  _root.querySelector(".channel-toggle").addEventListener("click", toggleExpanded);
-  _summaryEl.addEventListener("click", () => { if (!_expanded) setExpanded(true); });
+  // The whole head row toggles — clicking the summary, the empty strip or
+  // [ collapse ▾ ] all expand/collapse. [ LOG ] keeps its own handler
+  // (timeline modal) and must not also toggle the panel.
+  head.addEventListener("click", (e) => {
+    if (e.target.closest("#timeline-fab")) return;
+    toggleExpanded();
+  });
+
+  // Click outside the panel collapses it. The directive bar stays excluded
+  // (clicking the input to type a follow-up must not close the thread), as
+  // does the timeline modal (it floats above the panel).
+  document.addEventListener("click", (e) => {
+    if (!_expanded) return;
+    if (_root.contains(e.target)) return;
+    if (bar && bar.contains(e.target)) return;
+    if (e.target.closest(".timeline-modal-backdrop")) return;
+    setExpanded(false);
+  });
 
   // Input owns submission (replaces directive.js on the dashboard).
   _input.addEventListener("keydown", (e) => {
