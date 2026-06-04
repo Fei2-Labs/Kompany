@@ -20,11 +20,20 @@ osascript -e 'tell application "Kompany" to quit' 2>/dev/null || true
 pkill -f "kompany-server-aarch64" 2>/dev/null || true
 sleep 2
 
+# Detach any stray DMG mounts (e.g. a manually opened installer). If one is
+# left mounted, LaunchServices may resolve "Kompany" to the /Volumes copy and
+# silently launch a stale build instead of /Applications.
+for vol in /Volumes/Kompany*; do
+  [ -d "$vol" ] && hdiutil detach "$vol" -quiet 2>/dev/null || true
+done
+
 MNT="$(mktemp -d /tmp/kompany-mnt.XXXX)"
 hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
 rm -rf "/Applications/Kompany.app"
 ditto "$MNT/Kompany.app" "/Applications/Kompany.app"
 hdiutil detach "$MNT" -quiet
 echo "installed → /Applications/Kompany.app"
-open -a "Kompany"
+# Explicit path — `open -a Kompany` resolves by name and can pick a
+# DMG-volume copy if one is mounted.
+open "/Applications/Kompany.app"
 echo "launched"
