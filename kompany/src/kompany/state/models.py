@@ -167,11 +167,13 @@ class SessionStatus(str, Enum):
     DISPATCHED = "dispatched"      # terminal — founder intent executed
     ANSWERED = "answered"          # terminal — pure question answered
     ABANDONED = "abandoned"        # terminal — founder/CEO gave up
-    GATED = "gated"                # reserved for PR2 threshold gate
+    GATED = "gated"                # non-terminal — spend-gate pause, resumes on GO
+    PROPOSED = "proposed"          # non-terminal — CEO answer contained a proposal,
+                                   # awaiting founder GO to execute it
 
 
 # Terminal session statuses — a closed session rejects further sends.
-# ``gated`` is intentionally NOT terminal (PR2 resumes it on founder GO).
+# ``gated`` and ``proposed`` are intentionally NOT terminal (both resume on GO).
 SESSION_TERMINAL_STATUSES: frozenset[SessionStatus] = frozenset({
     SessionStatus.DISPATCHED,
     SessionStatus.ANSWERED,

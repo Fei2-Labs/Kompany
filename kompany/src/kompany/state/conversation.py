@@ -319,6 +319,24 @@ class ConversationStore:
         ).fetchall()
         return [self._row_to_turn(r) for r in rows]
 
+    def recent_turns(self, limit: int = 6) -> list[ConversationTurn]:
+        """Return the most recent turns across ALL sessions, oldest-first.
+
+        Used to inject cross-session context into classify and answer prompts
+        so short follow-ups ("批准" / "继续" / "第二个") are understood even
+        when a new session is opened.  Only ``message`` and ``final`` kinds are
+        included (skips progress_summary / clarify_question / preview noise).
+        """
+        rows = self.db.execute(
+            "SELECT * FROM channel_turns "
+            "WHERE kind IN ('message', 'final') "
+            "ORDER BY created_at DESC, rowid DESC "
+            "LIMIT ?",
+            (limit,),
+        ).fetchall()
+        # Reverse so the result is oldest-first (natural reading order).
+        return [self._row_to_turn(r) for r in reversed(rows)]
+
     def get_turn(self, turn_id: str) -> ConversationTurn | None:
         row = self.db.execute(
             "SELECT * FROM channel_turns WHERE id = ?",
@@ -346,9 +364,10 @@ class ConversationStore:
         """Validate ``current -> target`` against the session state machine.
 
         Legal moves:
-        * ``open``       -> clarifying, dispatched, answered, abandoned, gated
-        * ``clarifying`` -> clarifying, dispatched, answered, abandoned, gated
-        * ``gated``      -> dispatched, abandoned (PR2 resume / give-up)
+        * ``open``       -> clarifying, dispatched, answered, abandoned, gated, proposed
+        * ``clarifying`` -> clarifying, dispatched, answered, abandoned, gated, proposed
+        * ``gated``      -> dispatched, abandoned  (spend-gate GO / give-up)
+        * ``proposed``   -> dispatched, abandoned  (proposal GO / give-up)
         * terminal (dispatched / answered / abandoned) -> nothing
         """
         if current in SESSION_TERMINAL_STATUSES:
@@ -362,6 +381,14 @@ class ConversationStore:
         ):
             raise IllegalSessionTransition(
                 f"gated session can only resolve to dispatched/abandoned, "
+                f"not {target.value!r}"
+            )
+        if current == SessionStatus.PROPOSED and target not in (
+            SessionStatus.DISPATCHED,
+            SessionStatus.ABANDONED,
+        ):
+            raise IllegalSessionTransition(
+                f"proposed session can only resolve to dispatched/abandoned, "
                 f"not {target.value!r}"
             )
 
