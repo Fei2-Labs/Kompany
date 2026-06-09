@@ -177,6 +177,17 @@ function turnHTML(turn) {
     }
   }
 
+  // A proposed final turn (CEO answer with an actionable proposal) shows GO/
+  // abandon while the session is still PROPOSED (non-terminal). Once resolved
+  // (dispatched/abandoned) the buttons are hidden — the turn stays in the
+  // thread as a plain final reply.
+  if (kind === "final" && turn.sessionState === "proposed") {
+    extra += `<div class="channel-gate-actions" data-gate-session="${escapeHTML(turn.sessionId || "")}">
+      <button type="button" class="key channel-go">[ GO ]</button>
+      <button type="button" class="key danger channel-abandon">[ abandon ]</button>
+    </div>`;
+  }
+
   const kindCls = `kind-${kind}`;
   const sid = turn.sessionId ? ` data-session="${escapeHTML(turn.sessionId)}"` : "";
   return `<div class="channel-turn role-${role} ${kindCls}"${sid}>
@@ -410,6 +421,31 @@ async function applyResult(result, progressId) {
     return;
   }
 
+  if (status === "proposed") {
+    // CEO answer contained an actionable proposal. Render as a final turn
+    // with GO/abandon buttons (sessionState="proposed" triggers them in
+    // turnHTML). The session is non-terminal — GO executes the proposal.
+    let cost = result.total_ai_cost;
+    if (result.run_id) {
+      try {
+        const c = await api.channelRunCost(result.run_id);
+        if (c && typeof c.total_cost === "number") cost = c.total_cost;
+      } catch (_) {}
+    }
+    resolveProgress(progressId, {
+      role: "ceo", kind: "final", content: result.message, sessionId: sid,
+      cost, agents: result.agents_used || [],
+      projectId: result.project_id, approvalId: result.approval_id,
+      sessionState: "proposed",
+    });
+    // GO button drives execution — the input bar starts fresh next send.
+    _activeReplyTarget = null;
+    if (_input) _input.placeholder = "type a directive and press enter…";
+    setSummary(`CEO proposal ready — [ GO ] to execute.`, "is-gated");
+    if (sid) _sessions.set(sid, { ...(_sessions.get(sid) || {}), state: "proposed" });
+    return;
+  }
+
   // Any execute/answer terminal status -> final turn. Reconcile cost from
   // the authoritative per-run endpoint when available (covers cost streamed
   // before run_id was known / events missed during the POST).
@@ -562,7 +598,7 @@ async function restore() {
   clearThread();
   if (!turns.length) { _threadEl.innerHTML = emptyHintHTML(); }
   let lastReply = "";
-  let activeClarify = null, activeGate = null;
+  let activeClarify = null, activeGate = null, activeProposal = null;
   for (const t of turns) {
     const s = t._session || {};
     appendTurn({
@@ -573,6 +609,7 @@ async function restore() {
     if (t.role === "ceo") lastReply = t.content || lastReply;
     if (t.kind === "clarify_question" && s.state === "clarifying") activeClarify = s.session_id;
     if (t.kind === "preview" && s.state === "gated") activeGate = s.session_id;
+    if (t.kind === "final" && s.state === "proposed") activeProposal = s.session_id;
   }
 
   // Resume an in-flight session: re-arm reply routing + reconcile its cost.
@@ -582,6 +619,8 @@ async function restore() {
     setSummary(lastReply ? `CEO asks: ${lastReply}` : "CEO is waiting on your reply.", "is-clarify");
   } else if (activeGate) {
     setSummary("CEO needs approval to spend — [ GO ] to run.", "is-gated");
+  } else if (activeProposal) {
+    setSummary("CEO proposal ready — [ GO ] to execute.", "is-gated");
   } else {
     setSummary(lastReply || "no recent activity — click to open the channel.", "");
   }

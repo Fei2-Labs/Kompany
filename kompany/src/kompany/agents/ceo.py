@@ -7,6 +7,32 @@ from pydantic import BaseModel, Field
 from kompany.agents.base import BaseAgent
 
 
+class AnswerResponse(BaseModel):
+    """Structured output from :meth:`CEOAgent.answer`.
+
+    ``has_proposal`` signals that the reply contains an actionable proposal the
+    founder can execute by clicking GO. When true, ``proposal_directive`` holds
+    the imperative directive text the engine will classify → execute on GO
+    (e.g. "Launch a 72-hour presale sprint targeting the 10 warmest prospects").
+    """
+    text: str = Field(description="The answer / proposal shown to the founder. ~120 words max.")
+    has_proposal: bool = Field(
+        default=False,
+        description=(
+            "True when the reply contains a concrete, actionable proposal the founder can "
+            "approve by clicking GO. False for pure informational answers (status, balance, etc.)."
+        ),
+    )
+    proposal_directive: str = Field(
+        default="",
+        description=(
+            "Imperative directive text to execute when the founder clicks GO. "
+            "Required when has_proposal=true; empty string otherwise. "
+            "Must be self-contained — the engine runs classify → execute on this text."
+        ),
+    )
+
+
 class DirectiveClassification(BaseModel):
     """CEO's classification of a raw directive."""
     directive_type: str = Field(description="acquisition|strategic|operational|informational")
@@ -97,6 +123,7 @@ class CEOAgent(BaseAgent):
         targets_summary: str | None = None,
         glossary_summary: str | None = None,
         session_context: str | None = None,
+        recent_context: str | None = None,
         clarify_capped: bool = False,
     ) -> DirectiveClassification:
         """Classify a raw directive from the Master.
@@ -119,12 +146,18 @@ class CEOAgent(BaseAgent):
         target_block = (
             f"{targets_summary}\n\n" if targets_summary else ""
         )
-        # CEO-channel session context: when continuing a conversation, inject
-        # the prior turns of THIS session only (session-scoped per Decision 2)
-        # so a clarify reply is judged against the question that was asked.
+        context_parts_classify = []
+        if recent_context:
+            context_parts_classify.append(
+                f"Recent conversation history (across sessions):\n{recent_context}"
+            )
+        if session_context:
+            context_parts_classify.append(
+                f"Conversation so far (this session only):\n{session_context}"
+            )
         context_block = (
-            f"Conversation so far (this session only):\n{session_context}\n\n"
-            if session_context
+            ("\n\n".join(context_parts_classify) + "\n\n")
+            if context_parts_classify
             else ""
         )
         # Routing guidance. At the clarify cap the conductor may no longer ask
@@ -173,27 +206,30 @@ class CEOAgent(BaseAgent):
         question: str,
         company_context: str,
         session_context: str | None = None,
+        recent_context: str | None = None,
         directive_id: str | None = None,
-    ) -> "LLMResponse":  # noqa: F821 — runtime type from base.call
+    ) -> "LLMResponse":  # noqa: F821 — runtime type from base.call_structured
         """Answer the founder's question grounded in real company state.
 
-        CEO-channel ``answer`` route (06-03-ceo-channel PR7). Unlike
-        :meth:`classify` this is a freeform :meth:`call` — the conductor
-        actually reads the founder's question and replies, grounded ONLY in
-        ``company_context`` (a bounded snapshot of financials / active
-        projects+tasks / staff activity assembled by the engine). It must not
-        invent numbers; if the context lacks the answer it says so plainly.
+        Returns a structured :class:`AnswerResponse` via ``call_structured``.
+        ``resp.parsed`` is the validated ``AnswerResponse``; ``resp.text`` is
+        the raw JSON (not shown to the founder — callers use ``parsed.text``).
 
-        ``session_context`` is the prior turns of THIS session so follow-up
-        questions in the same conversation stay coherent. The freeform call
-        returns an :class:`~kompany.llm.client.LLMResponse` whose ``.text``
-        is the reply and ``.cost_usd`` feeds the ledger (cost-as-expense).
+        ``session_context`` — prior turns of THIS session (within-session coherence).
+        ``recent_context``  — last N turns across ALL sessions (cross-session context
+        so short follow-ups like "批准" / "继续" are understood in new sessions).
         """
-        context_block = (
-            f"Conversation so far (this session only):\n{session_context}\n\n"
-            if session_context
-            else ""
-        )
+        context_parts = []
+        if recent_context:
+            context_parts.append(
+                f"Recent conversation history (across sessions):\n{recent_context}"
+            )
+        if session_context:
+            context_parts.append(
+                f"Conversation so far (this session):\n{session_context}"
+            )
+        context_block = ("\n\n".join(context_parts) + "\n\n") if context_parts else ""
+
         prompt = (
             f"{context_block}"
             "The Master (founder) has asked you a question. Answer it directly "
@@ -214,14 +250,15 @@ class CEOAgent(BaseAgent):
             "- If the founder asks how to change or re-specify targets, point to the exact path shown in the context. If targets are missing, say they should be set there; if already present, say they can be revised there.\n"
             "- Prefer the authoritative targets summary over any empty goal/time_horizon fields elsewhere.\n\n"
             "Output contract (STRICT — the founder reads results, not essays):\n"
-            "- First line IS the answer or proposal. No preamble, no headers, no 'CEO Analysis:' banner.\n"
-            "- Hard cap ~120 words. Bullets over prose.\n"
-            "- NEVER explain your reasoning, the company's situation, or why the plan is right. The founder sees the dashboard; justification belongs in internal logs, not the reply.\n"
-            "- If the founder asks what to do next: reply as the conductor delivering the team's AGREED, FINAL proposal — (1) the single recommended move, (2) concrete steps each with owner agent + cost + deadline, (3) exactly what you need from the founder (approve / connect account / decide). Nothing else.\n"
-            "- Never restate balance/targets the founder can already see unless directly asked."
+            "- ``text``: first line IS the answer or proposal. No preamble, no headers, no 'CEO Analysis:' banner. Hard cap ~120 words. Bullets over prose. NEVER explain reasoning.\n"
+            "- If the founder asks what to do next: text = team's AGREED, FINAL proposal — (1) single recommended move, (2) steps with owner agent + cost + deadline, (3) what the founder must approve/connect/decide.\n"
+            "- Never restate balance/targets the founder can already see unless directly asked.\n"
+            "- ``has_proposal``: true ONLY when your reply contains a concrete, actionable proposal the founder could approve and execute (creates projects / dispatches agents). False for pure info (status, balance, timeline queries).\n"
+            "- ``proposal_directive``: when has_proposal=true, write a short imperative directive the engine will classify and execute on GO (e.g. 'Launch presale sprint: CRO targets 10 warm prospects in 24h, CMO rewrites offer copy, CPO defines MVP deliverable'). Empty string when has_proposal=false."
         )
-        return self.call(
+        return self.call_structured(
             prompt=prompt,
+            output_schema=AnswerResponse,
             directive_id=directive_id,
             action_type="ceo.answer",
         )

@@ -118,13 +118,14 @@ def _install_ceo(engine, classifications):
     class FakeCEO:
         def classify(self, raw_input, directive_id=None, targets_summary=None,
                      glossary_summary=None, session_context=None,
-                     clarify_capped=False):
+                     recent_context=None, clarify_capped=False):
             self.last_context = session_context
+            self.last_recent_context = recent_context
             self.last_capped = clarify_capped
             return queue.pop(0)
 
         def answer(self, question, company_context, session_context=None,
-                   directive_id=None):
+                   recent_context=None, directive_id=None):
             # Echo a marker incorporating the founder's actual question so a
             # test can prove the reply is question-driven (not a canned
             # template). Capture the context the engine assembled so a test
@@ -132,20 +133,28 @@ def _install_ceo(engine, classifications):
             self.answer_question = question
             self.answer_company_context = company_context
             self.answer_session_context = session_context
+            self.answer_recent_context = recent_context
             # Book a real run cost so the engine's run_total() (LEDGER) reflects
             # the spend, mirroring how base.call would record via the tracker.
             engine.cost_tracker.record(
                 "claude-sonnet-4-20250514", 800, 200, "ceo.answer",
                 directive_id=directive_id,
             )
+            from kompany.agents.ceo import AnswerResponse
             from kompany.llm.client import LLMResponse
-            return LLMResponse(
+            resp = LLMResponse(
                 text=f"ANSWER_MARKER :: {question}",
                 input_tokens=800,
                 output_tokens=200,
                 cost_usd=engine.cost_tracker.run_total(),
                 model="fake",
             )
+            resp.parsed = AnswerResponse(
+                text=f"ANSWER_MARKER :: {question}",
+                has_proposal=False,
+                proposal_directive="",
+            )
+            return resp
 
     fake = FakeCEO()
     original = engine.registry

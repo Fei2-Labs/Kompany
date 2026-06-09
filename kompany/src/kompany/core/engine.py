@@ -2402,6 +2402,20 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             lines.append(f"{who}: {turn.content}")
         return "\n".join(lines)
 
+    def _compose_recent_context(self, limit: int = 6) -> str:
+        """Render last N turns across ALL sessions for cross-session context.
+
+        Decision 3 (Option B): inject into classify + answer so short
+        follow-ups ("批准" / "继续" / "第二个") are understood in new sessions.
+        Only ``message`` / ``final`` turns (noise kinds excluded by
+        :meth:`ConversationStore.recent_turns`). Empty string when no history.
+        """
+        lines: list[str] = []
+        for turn in self.channel.recent_turns(limit):
+            who = "Founder" if turn.role == "founder" else "CEO"
+            lines.append(f"{who}: {turn.content}")
+        return "\n".join(lines)
+
     def _process_directive_inner(
         self,
         raw_input: str,
@@ -2488,12 +2502,14 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             # the prior turns of THIS session only (Decision 2).
             clarify_capped = self.channel.at_clarify_cap(session_id)
             session_context = self._compose_session_context(session_id) or None
+            recent_context = self._compose_recent_context() or None
             classification = ceo.classify(
                 raw_input,
                 directive_id=directive.id,
                 targets_summary=self._compose_targets_summary(),
                 glossary_summary=self._compose_glossary_summary(),
                 session_context=session_context,
+                recent_context=recent_context,
                 clarify_capped=clarify_capped,
             )
             self.audit.record(
@@ -2531,6 +2547,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     session_id,
                     start_time,
                     session_context=session_context,
+                    recent_context=recent_context,
                 )
 
             # ----- Threshold spend gate (PR2, Decision 7) -----
@@ -2715,19 +2732,18 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         session_id: str,
         start_time: float,
         session_context: str | None = None,
+        recent_context: str | None = None,
     ) -> DirectiveResult:
         """Answer a pure question — a real CEO reply, no project/dispatch.
 
-        The conductor reads the founder's actual question and answers it,
-        grounded in a bounded snapshot of real company state (financials +
-        active projects/tasks + staff activity, see
-        :meth:`_compose_answer_context`). This is a freeform LLM call
-        (:meth:`CEOAgent.answer`) — NOT the old canned financials template.
-        ``session_context`` carries the prior turns of THIS session so
-        follow-ups stay coherent; it is composed once at the call site to
-        avoid a second LLM spend. The real call cost (``run_total``) is
-        recorded on the final turn (cost-as-expense). No project is created
-        and no approval is requested; the session closes ``answered``.
+        Returns ``status="proposed"`` when the CEO's reply contains an
+        actionable proposal (``has_proposal=true``) — session enters
+        ``PROPOSED`` (non-terminal) and the founder can click GO to execute.
+        Returns ``status="completed"`` for pure informational answers —
+        session closes ``ANSWERED`` (terminal, existing behaviour).
+
+        ``recent_context`` — last N turns across ALL sessions injected for
+        cross-session coherence (Decision 3, PR2).
         """
         directive.directive_type = DirectiveType.INFORMATIONAL
         self.audit.record(
@@ -2736,49 +2752,77 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             detail={"route": "answer"},
             directive_id=directive.id,
         )
-        # The bounded real-state snapshot reuses CFO summary + projects +
-        # agent_status; include CFO in agents_used only when that summary was
-        # actually available to the CEO.
         company_context, used_cfo = self._compose_answer_context()
         resp = ceo.answer(
             directive.raw_input,
             company_context,
             session_context=session_context,
+            recent_context=recent_context,
             directive_id=directive.id,
         )
-        answer_text = (resp.text or "").strip() or (
+        parsed = resp.parsed  # AnswerResponse
+        answer_text = (parsed.text or "").strip() or (
             "I don't have enough information to answer that right now."
         )
-        # Surface the REAL run cost (the answer LLM call hit the ledger via
-        # base.call) so the LEDGER chip is honest (cost-as-expense).
         total_cost = self.cost_tracker.run_total()
         agents_used = ["ceo"]
         if used_cfo:
             agents_used.append("cfo")
 
         directive.status = DirectiveStatus.COMPLETED
-        result = DirectiveResult(
-            directive=directive,
-            status="completed",
-            message=answer_text,
-            session_id=session_id,
-            total_ai_cost=total_cost,
-            agents_used=agents_used,
-        )
-        self.channel.add_turn(
-            session_id,
-            role="ceo",
-            content=result.message,
-            kind="final",
-            cost=result.total_ai_cost,
-            directive_id=directive.id,
-        )
-        self.channel.update_session_state(
-            session_id,
-            SessionStatus.ANSWERED,
-            route="answer",
-            directive_id=directive.id,
-        )
+        has_proposal = bool(parsed.has_proposal and parsed.proposal_directive)
+
+        if has_proposal:
+            # CEO returned a concrete proposal — park the session so the
+            # founder can approve by clicking GO.
+            self._stash_proposal_directive(session_id, parsed.proposal_directive)
+            result = DirectiveResult(
+                directive=directive,
+                status="proposed",
+                message=answer_text,
+                session_id=session_id,
+                total_ai_cost=total_cost,
+                agents_used=agents_used,
+            )
+            self.channel.add_turn(
+                session_id,
+                role="ceo",
+                content=result.message,
+                kind="final",
+                cost=result.total_ai_cost,
+                directive_id=directive.id,
+            )
+            self.channel.update_session_state(
+                session_id,
+                SessionStatus.PROPOSED,
+                route="answer",
+                directive_id=directive.id,
+            )
+        else:
+            # Pure informational answer — close session as ANSWERED (terminal).
+            result = DirectiveResult(
+                directive=directive,
+                status="completed",
+                message=answer_text,
+                session_id=session_id,
+                total_ai_cost=total_cost,
+                agents_used=agents_used,
+            )
+            self.channel.add_turn(
+                session_id,
+                role="ceo",
+                content=result.message,
+                kind="final",
+                cost=result.total_ai_cost,
+                directive_id=directive.id,
+            )
+            self.channel.update_session_state(
+                session_id,
+                SessionStatus.ANSWERED,
+                route="answer",
+                directive_id=directive.id,
+            )
+
         self.journal.log(Decision(
             directive_id=directive.id,
             directive_type="informational",
@@ -2798,7 +2842,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         self.audit.record(
             "directive.completed",
             "Completed directive processing (answer)",
-            detail={"status": result.status},
+            detail={"status": result.status, "has_proposal": has_proposal},
             directive_id=directive.id,
         )
         return result
@@ -2925,6 +2969,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
     # that may sit for hours/days, and the desktop app restarts the engine
     # routinely; a GO must still work against a brand-new engine instance.
     _GATED_PAYLOAD_KEY = "gated_directive"
+    _PROPOSED_PAYLOAD_KEY = "proposed_directive"
 
     # In-memory cache of held (gated) directives keyed by session_id, used for
     # the common same-process GO. The session-row payload mirrors it so GO
@@ -3001,16 +3046,145 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         except Exception:  # pragma: no cover — best-effort cleanup
             pass
 
+    def _stash_proposal_directive(
+        self,
+        session_id: str,
+        proposal_text: str,
+    ) -> None:
+        """Persist the CEO's proposal directive text so GO survives a restart."""
+        try:
+            session = self.channel.get_session(session_id)
+            payload = dict(session.payload) if session else {}
+            payload[self._PROPOSED_PAYLOAD_KEY] = {"proposal_directive": proposal_text}
+            self.channel.set_session_payload(session_id, payload)
+        except Exception:  # pragma: no cover — best-effort persistence
+            pass
+
+    def _pop_proposal_directive(self, session_id: str) -> str | None:
+        """Return and clear the stashed proposal_directive text, or None."""
+        session = self.channel.get_session(session_id)
+        if session is None:
+            return None
+        snapshot = (session.payload or {}).get(self._PROPOSED_PAYLOAD_KEY)
+        if not snapshot:
+            return None
+        # Clear from payload immediately — can't be replayed after one GO.
+        try:
+            payload = dict(session.payload)
+            payload.pop(self._PROPOSED_PAYLOAD_KEY, None)
+            self.channel.set_session_payload(session_id, payload)
+        except Exception:  # pragma: no cover
+            pass
+        return snapshot.get("proposal_directive")
+
+    def _dispatch_proposed(
+        self,
+        session_id: str,
+        proposal_directive: str,
+    ) -> DirectiveResult:
+        """Classify + execute a proposal directive after founder GO.
+
+        Unlike :meth:`_dispatch_gated` (which replays a persisted
+        classification), PROPOSED re-classifies the proposal text with 1
+        fresh LLM call — the proposal wording may be more specific than the
+        original question, so a fresh classify is intentional (PRD Decision 1).
+        """
+        state = self.get_company_state()
+        ceo = self.registry.get("ceo", company_state=state)
+        directive = Directive(raw_input=proposal_directive)
+        start_time = time.time()
+        try:
+            self.agent_status.set("ceo", "thinking", "classifying proposal on GO")
+            classification = ceo.classify(
+                proposal_directive,
+                directive_id=directive.id,
+                targets_summary=self._compose_targets_summary(),
+                glossary_summary=self._compose_glossary_summary(),
+            )
+            self.audit.record(
+                "directive.classified",
+                "CEO classified proposal directive on GO",
+                detail=classification.model_dump(),
+                agent_role="ceo",
+                directive_id=directive.id,
+            )
+            directive.directive_type = DirectiveType(classification.directive_type)
+            directive.assigned_squad = classification.primary_squad
+            directive.assigned_agents = classification.agents_needed
+            directive.requires_approval = classification.approval_tier
+            directive.budget_required = classification.estimated_cost_eur
+            directive.budget_available = self.ledger.get_balance()
+
+            handler = {
+                DirectiveType.ACQUISITION: self._handle_acquisition,
+                DirectiveType.STRATEGIC: self._handle_strategic,
+                DirectiveType.OPERATIONAL: self._handle_operational,
+                DirectiveType.INFORMATIONAL: self._handle_informational,
+            }.get(directive.directive_type, self._handle_operational)
+            self.audit.record(
+                "directive.routed",
+                "Routed proposed directive to handler after GO",
+                detail={"directive_type": directive.directive_type.value},
+                directive_id=directive.id,
+            )
+            result = handler(directive, classification, ceo)
+            result.session_id = session_id
+            self.channel.add_turn(
+                session_id,
+                role="ceo",
+                content=result.message,
+                kind="final",
+                cost=result.total_ai_cost,
+                directive_id=directive.id,
+            )
+            self.channel.update_session_state(
+                session_id,
+                SessionStatus.DISPATCHED,
+                route="execute",
+                directive_id=directive.id,
+                project_id=result.project_id,
+                approval_id=result.approval_id,
+            )
+            self.journal.log(Decision(
+                directive_id=directive.id,
+                directive_type=directive.directive_type.value if directive.directive_type else "unknown",
+                raw_input=directive.raw_input,
+                classification=classification.model_dump() if classification else {},
+                result={"status": result.status, "message": result.message[:500]},
+                agents_involved=result.agents_used,
+                total_ai_cost=result.total_ai_cost,
+                duration_seconds=time.time() - start_time,
+            ))
+            self.audit.record(
+                "directive.completed",
+                "Completed proposed directive after GO",
+                detail={"status": result.status},
+                directive_id=directive.id,
+            )
+            return result
+        except Exception as exc:
+            self.audit.record(
+                "directive.failed",
+                "Proposed directive execution failed after GO",
+                detail={"error": str(exc)},
+                directive_id=directive.id,
+            )
+            return self._channel_action_error(
+                session_id,
+                f"Execution failed after GO: {exc}. Reply GO to retry.",
+            )
+        finally:
+            self.agent_status.set("ceo", "idle")
+
     def channel_go(self, session_id: str) -> DirectiveResult:
-        """Execute a gated session's held directive on founder GO.
+        """Execute a gated or proposed session's held directive on founder GO.
 
-        Re-runs the stored directive through the execute pipeline using the
-        persisted classification snapshot — NO re-classify, so no double LLM
-        spend. The session moves to ``dispatched`` and the CEO's final turn
-        records the ACTUAL run cost (LEDGER), not the earlier estimate.
+        GATED: replays the persisted classification snapshot — no re-classify.
+        PROPOSED: re-classifies the stashed proposal directive text (1 LLM
+        call per PRD Decision 1), then executes.
 
-        A GO on a non-gated / closed / unknown session returns a clear error
-        result (no exception leaks — per error-handling spec).
+        A GO on a non-gated/proposed / closed / unknown session returns a clear
+        error result (no exception leaks — per error-handling spec).
         """
         with run_scope():
             session = self.channel.get_session(session_id)
@@ -3018,6 +3192,14 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 return self._channel_action_error(
                     session_id, f"Unknown channel session {session_id!r}."
                 )
+            if session.state == SessionStatus.PROPOSED:
+                proposal_text = self._pop_proposal_directive(session_id)
+                if not proposal_text:
+                    return self._channel_action_error(
+                        session_id,
+                        "No held proposal for this session; cannot GO.",
+                    )
+                return self._dispatch_proposed(session_id, proposal_text)
             if session.state != SessionStatus.GATED:
                 return self._channel_action_error(
                     session_id,
