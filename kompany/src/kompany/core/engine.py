@@ -2484,6 +2484,22 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 )
         session_id = session.id
 
+        # One-shot GO/abandon replies on a paused session. The gate's CLI
+        # hint tells the founder to continue with
+        # ``kompany directive "GO" --session <id>``; without this branch the
+        # literal text "GO" would be re-classified as a fresh directive and
+        # the session would gate again forever. Mirrors the token sets the
+        # interactive prompt accepts.
+        if session_id is not None and session.state in (
+            SessionStatus.GATED,
+            SessionStatus.PROPOSED,
+        ):
+            reply = raw_input.strip().lower()
+            if reply in {"go", "g", "yes", "y"}:
+                return self.channel_go(session_id)
+            if reply in {"abandon", "a", "no", "n"}:
+                return self.channel_abandon(session_id)
+
         rt = self.runtime.get()
         if rt["state"] == "suspended":
             self.audit.record(
