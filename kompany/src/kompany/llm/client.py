@@ -14,6 +14,10 @@ from pydantic import BaseModel
 
 from kompany.core.run_context import current_run_id
 from kompany.core.watchdog import LLMUnavailable
+from kompany.llm.claude_code import (
+    DEFAULT_TIMEOUT_SECONDS as CLAUDE_CODE_DEFAULT_TIMEOUT,
+    run_claude_code,
+)
 from kompany.llm.cost_tracker import CostTracker
 from kompany.llm.models import estimate_cost
 from kompany.llm.providers import Provider, PROVIDER_BASE_URLS, detect_provider
@@ -128,7 +132,12 @@ class LLMClient:
         """Determine which provider to use for a model.
 
         Resolution order:
-          1. If the operator wired a custom OpenAI-compatible endpoint
+          1. ``claude-code:*`` model ids always route to the local
+             ``claude`` CLI. The prefix is an explicit operator choice
+             ("use my Claude subscription, not an API endpoint"), so it
+             wins even over a configured custom base_url — a custom
+             OpenAI-compatible proxy can't serve a CLI-only id anyway.
+          2. If the operator wired a custom OpenAI-compatible endpoint
              (``custom_base_url`` set), route through it regardless of
              the model name AND regardless of whether custom_api_key
              is currently loaded on the in-memory settings. Custom
@@ -139,12 +148,14 @@ class LLMClient:
              OpenAI SDK will surface a clear 401 against the right
              endpoint — that's a fixable user-side issue, not a reason
              to silently misroute to api.openai.com.
-          2. Otherwise, infer from the model name prefix.
-          3. Final fallback: Anthropic.
+          3. Otherwise, infer from the model name prefix.
+          4. Final fallback: Anthropic.
         """
+        detected = detect_provider(model)
+        if detected == Provider.CLAUDE_CODE:
+            return detected
         if self.settings.custom_base_url:
             return Provider.CUSTOM
-        detected = detect_provider(model)
         if detected is not None:
             return detected
         return Provider.ANTHROPIC
@@ -578,6 +589,8 @@ class LLMClient:
         decide when to call it (only after a real failure, not after a
         soft timeout).
         """
+        if provider == Provider.CLAUDE_CODE:
+            return self._call_claude_code(model, system, prompt, max_tokens)
         if provider == Provider.ANTHROPIC:
             return self._call_anthropic(model, system, prompt, max_tokens)
         return self._call_openai_compatible(
@@ -654,6 +667,28 @@ class LLMClient:
             text=response.content[0].text,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
+            cost_usd=0.0,
+            model=model,
+        )
+
+    def _call_claude_code(
+        self, model: str, system: str, prompt: str, max_tokens: int
+    ) -> LLMResponse:
+        """Call the locally installed ``claude`` CLI in headless mode.
+
+        Subprocess mechanics live in :mod:`kompany.llm.claude_code`.
+        ``max_tokens`` is accepted for signature parity with the other
+        providers but not forwarded — the CLI's print mode has no
+        max-tokens knob.
+        """
+        timeout = self.silent_timeout_seconds or CLAUDE_CODE_DEFAULT_TIMEOUT
+        text, input_tokens, output_tokens = run_claude_code(
+            model, system, prompt, timeout
+        )
+        return LLMResponse(
+            text=text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             cost_usd=0.0,
             model=model,
         )

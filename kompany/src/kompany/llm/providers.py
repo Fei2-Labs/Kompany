@@ -9,6 +9,7 @@ class Provider(str, Enum):
     """Supported LLM providers."""
 
     ANTHROPIC = "anthropic"
+    CLAUDE_CODE = "claude_code"
     OPENAI = "openai"
     GEMINI = "gemini"
     GLM = "glm"
@@ -24,8 +25,10 @@ PROVIDER_BASE_URLS: dict[Provider, str] = {
     Provider.KIMI: "https://api.moonshot.cn/v1",
 }
 
-# Prefix-based auto-detection: (prefix, provider)
+# Prefix-based auto-detection: (prefix, provider). Order matters — first
+# match wins, so "claude-code" must precede the broader "claude-" prefix.
 _MODEL_PREFIX_MAP: list[tuple[str, Provider]] = [
+    ("claude-code", Provider.CLAUDE_CODE),
     ("claude-", Provider.ANTHROPIC),
     ("gpt-", Provider.OPENAI),
     ("o1", Provider.OPENAI),

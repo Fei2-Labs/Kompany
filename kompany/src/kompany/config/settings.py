@@ -74,6 +74,11 @@ class KompanySettings(BaseSettings):
         """Return the API key for a given provider name."""
         return {
             "anthropic": self.anthropic_api_key,
+            # The claude-code provider shells out to the local `claude`
+            # CLI, which carries its own subscription auth. The sentinel
+            # keeps empty-key validation paths green without implying a
+            # real credential exists.
+            "claude_code": "no-key-required",
             "openai": self.openai_api_key,
             "gemini": self.gemini_api_key,
             "glm": self.glm_api_key,

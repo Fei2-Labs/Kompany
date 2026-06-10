@@ -17,6 +17,14 @@ PRICING: dict[str, ModelPricing] = {
     "claude-opus-4-20250514": ModelPricing(15.0, 75.0),
     "claude-sonnet-4-20250514": ModelPricing(3.0, 15.0),
     "claude-haiku-4-20250414": ModelPricing(0.80, 4.0),
+    # claude-code CLI (subscription auth). The CLI reports its own
+    # total_cost_usd, but ledger estimates go through this table like
+    # every other provider — use the API-equivalent rate per tier alias
+    # so opus calls aren't silently billed at the Sonnet-tier
+    # "claude-" prefix fallback.
+    "claude-code:opus": ModelPricing(15.0, 75.0),
+    "claude-code:sonnet": ModelPricing(3.0, 15.0),
+    "claude-code:haiku": ModelPricing(0.80, 4.0),
     # OpenAI
     "gpt-4o": ModelPricing(2.50, 10.0),
     "gpt-4o-mini": ModelPricing(0.15, 0.60),

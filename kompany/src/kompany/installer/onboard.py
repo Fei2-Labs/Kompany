@@ -383,6 +383,50 @@ def _ping_llm(
     return True, "ok"
 
 
+def _ping_claude_code(timeout: float = 120.0) -> str | None:
+    """Probe the local ``claude`` CLI for the claude_code provider.
+
+    No SDK and no API key — the CLI carries the founder's subscription
+    auth. First a PATH lookup, then a minimal headless round-trip so
+    subscription auth problems surface at onboarding instead of at the
+    first directive dispatch.
+
+    Returns ``None`` on success, otherwise a human-readable failure
+    detail string (the same shape as the detail half of
+    :func:`_ping_llm`).
+    """
+    import json
+    import shutil
+    import subprocess
+
+    if shutil.which("claude") is None:
+        return (
+            "claude CLI not found on PATH — install Claude Code "
+            "first, or pick an API-key provider"
+        )
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", "ping", "--output-format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if proc.returncode != 0:
+            stderr_tail = (proc.stderr or "").strip()[-500:]
+            return (
+                f"claude CLI exited {proc.returncode}: "
+                f"{stderr_tail or '(no stderr)'}"
+            )
+        json.loads(proc.stdout)  # must be valid JSON
+        return None
+    except subprocess.TimeoutExpired:
+        return f"claude CLI timed out after {timeout:.0f}s"
+    except json.JSONDecodeError as exc:
+        return f"claude CLI returned non-JSON output: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return f"{type(exc).__name__}: {exc}"
+
+
 _CUSTOM_MODEL_PRIORITY: tuple[str, ...] = (
     "gpt-5",
     "gpt-4.1",
