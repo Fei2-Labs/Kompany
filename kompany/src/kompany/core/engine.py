@@ -281,6 +281,22 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             self.settings.model_apex = picked
             self.settings.model_primary = picked
             self.settings.model_economy = picked
+        for attr, key in [
+            ("company_name", "company_name"),
+            ("company_goal", "company_goal"),
+            ("company_stage", "company_stage"),
+            ("company_time_horizon", "company_time_horizon"),
+            ("company_exclusions", "company_exclusions"),
+        ]:
+            if not getattr(self.settings, attr, ""):
+                try:
+                    row = self.db.execute(
+                        "SELECT value FROM company_config WHERE key = ?", (key,)
+                    ).fetchone()
+                except Exception:  # noqa: BLE001
+                    row = None
+                if row and row["value"]:
+                    setattr(self.settings, attr, row["value"])
 
     def get_company_state(self) -> dict:
         """Get current company state for agent context."""
@@ -320,6 +336,21 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         self.settings.company_stage = "solo"
         self.settings.company_time_horizon = time_horizon
         self.settings.company_exclusions = exclusions
+        for key, value in [
+            ("company_name", name),
+            ("company_goal", goal),
+            ("company_stage", "solo"),
+            ("company_time_horizon", time_horizon),
+            ("company_exclusions", exclusions),
+        ]:
+            self.db.execute(
+                """INSERT INTO company_config (key, value, updated_at)
+                   VALUES (?, ?, datetime('now'))
+                   ON CONFLICT(key) DO UPDATE SET
+                     value = excluded.value, updated_at = excluded.updated_at""",
+                (key, value),
+            )
+        self.db.commit()
         # Record initial capital
         if capital > 0:
             self.ledger.record(
