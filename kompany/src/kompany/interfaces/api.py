@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kompany.core.engine import KompanyEngine
 from kompany.core.event_hub import get_event_hub
+from kompany.interfaces.mcp_bridge import router as mcp_bridge_router
 from kompany.interfaces.web import render_dashboard
 from kompany.remote import request_from_telegram_update
 
@@ -26,6 +27,7 @@ app = FastAPI(
     description="Autonomous business operating system for solo founders.",
     version="0.1.0",
 )
+app.include_router(mcp_bridge_router)
 
 _engine: KompanyEngine | None = None
 
@@ -626,6 +628,7 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
         PROVIDER_VAULT_KEYS,
         _list_custom_models,
         _pick_latest_custom_model,
+        _ping_claude_code,
         _ping_llm,
         _ping_model_for_provider,
     )
@@ -647,6 +650,55 @@ def onboarding_ping(req: PingRequest) -> PingResponse:
             # provider so a custom endpoint override works for any one.
             setattr(settings, "custom_base_url", req.base_url)
         return settings
+
+    # claude_code provider: no SDK, no API key. Probe the local `claude`
+    # CLI via installer.onboard._ping_claude_code (PATH lookup + minimal
+    # headless round-trip) so subscription auth problems surface here
+    # instead of at first directive dispatch. Response shape matches
+    # every other provider.
+    if req.provider == "claude_code":
+        ping_model = "claude-code:sonnet"
+        if os.environ.get("KOMPANY_TEST_MODE", "") == "1":
+            log.info("ping ok (test mode): provider=claude_code")
+            return PingResponse(
+                ok=True,
+                model=ping_model,
+                model_tested=ping_model,
+                available_models=None,
+                pricing=None,
+                error_code=None,
+                error_message=None,
+            )
+        detail = _ping_claude_code()
+        if detail is not None:
+            log.warning("ping failed: provider=claude_code detail=%s", detail)
+            # A missing binary never reached the model — classify it as
+            # provider_error explicitly (the generic classifier has no
+            # marker for it) and leave model_tested unset.
+            not_found = "not found on PATH" in detail
+            return PingResponse(
+                ok=False,
+                model=None,
+                model_tested=None if not_found else ping_model,
+                available_models=None,
+                pricing=None,
+                error_code=(
+                    "provider_error"
+                    if not_found
+                    else _classify_ping_error(detail)
+                ),
+                error_message=detail,
+            )
+        log.info("ping ok: provider=claude_code model=%s", ping_model)
+        return PingResponse(
+            ok=True,
+            model=ping_model,
+            model_tested=ping_model,
+            available_models=None,
+            pricing=None,
+            error_code=None,
+            error_message=None,
+        )
 
     # For custom provider: discover models first so failures surface as
     # classified errors and the model used for the ping is recorded +

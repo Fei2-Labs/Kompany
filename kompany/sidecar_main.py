@@ -71,10 +71,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir:
         os.environ["KOMPANY_DATA_DIR"] = str(Path(args.data_dir).expanduser())
 
-    # Defer the uvicorn import until after env wiring so any settings
-    # loader inside the FastAPI app picks up the override on first
+    # Defer the imports until after env wiring so any settings loader
+    # inside the FastAPI app (and the discovery-file data_dir
+    # resolution) picks up the KOMPANY_DATA_DIR override on first
     # access.
+    import threading
+    import time
+
     import uvicorn
+
+    from kompany.interfaces.mcp_proxy import (
+        remove_discovery_file,
+        write_discovery_file,
+    )
 
     config = uvicorn.Config(
         "kompany.interfaces.api:app",
@@ -88,6 +97,29 @@ def main(argv: list[str] | None = None) -> int:
         loop="asyncio",
     )
     server = uvicorn.Server(config)
+
+    # MCP sidecar discovery (task 06-10-mcp-sidecar-proxy): once uvicorn
+    # reports started, publish <data_dir>/server.json so kompany-mcp
+    # proxies tool calls into this process instead of constructing a
+    # second engine. A watcher thread is required because uvicorn binds
+    # the socket *after* the app's startup event fires, and with
+    # ``--port 0`` only the bound socket knows the real port.
+    def _publish_discovery() -> None:  # pragma: no cover — real-boot seam
+        while not server.started:
+            if server.should_exit:
+                return
+            time.sleep(0.05)
+        try:
+            port = server.servers[0].sockets[0].getsockname()[1]
+        except (AttributeError, IndexError, OSError):
+            port = args.port
+        write_discovery_file(port)
+
+    threading.Thread(
+        target=_publish_discovery,
+        name="kompany-discovery",
+        daemon=True,
+    ).start()
 
     # Run the server in the current thread and drop the ready-file
     # right after startup. Uvicorn's startup hook is the cleanest seam
@@ -105,7 +137,12 @@ def main(argv: list[str] | None = None) -> int:
         async def _signal_ready() -> None:  # pragma: no cover — exercised in real boot
             _write_ready_file(Path(args.ready_file), args.port)
 
-    server.run()
+    try:
+        server.run()
+    finally:
+        # Best-effort: a crash leaves a stale server.json behind, which
+        # readers detect via the health probe + pid check anyway.
+        remove_discovery_file()
     return 0
 
 
