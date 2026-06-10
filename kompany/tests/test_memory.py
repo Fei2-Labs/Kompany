@@ -120,3 +120,87 @@ def test_memories_isolated_per_agent():
     assert mem.count("ceo") == 1
     assert mem.count("cfo") == 1
     assert mem.recall("ceo")[0]["content"] == "CEO memory"
+
+
+def test_recall_without_query_preserves_recency_order():
+    mem = _make_memory()
+    for i in range(3):
+        mem.remember("ceo", f"Learning {i}")
+    results = mem.recall("ceo")
+    assert [r["content"] for r in results] == [
+        "Learning 2", "Learning 1", "Learning 0",
+    ]
+
+
+def test_recall_returns_score():
+    mem = _make_memory()
+    mem.remember("ceo", "Fresh memory")
+    result = mem.recall("ceo")[0]
+    # Fresh row: recency bonus only (no query, no accesses, no confidence).
+    assert result["score"] == 2.0
+
+
+def test_recall_query_ranks_keyword_match_above_recent():
+    mem = _make_memory()
+    mem.remember("cmo", "Gumroad tags drive Discover traffic")
+    mem.remember("cmo", "Slack emoji poll results")
+    mem.remember("cmo", "Lunch order preferences")
+    results = mem.recall("cmo", query="improve gumroad discover ranking")
+    assert results[0]["content"] == "Gumroad tags drive Discover traffic"
+    assert results[0]["score"] > results[1]["score"]
+
+
+def test_recall_track_access_bumps_count():
+    mem = _make_memory()
+    mid = mem.remember("cto", "Deploy needs migration step")
+    mem.recall("cto", track_access=True)
+    mem.recall("cto", track_access=True)
+    row = mem.db.execute(
+        "SELECT access_count, last_accessed_at FROM agent_memories WHERE id = ?",
+        (mid,),
+    ).fetchone()
+    assert row["access_count"] == 2
+    assert row["last_accessed_at"] is not None
+
+
+def test_recall_without_track_access_leaves_stats_untouched():
+    mem = _make_memory()
+    mid = mem.remember("cto", "Browse me")
+    mem.recall("cto")
+    row = mem.db.execute(
+        "SELECT access_count FROM agent_memories WHERE id = ?", (mid,)
+    ).fetchone()
+    assert row["access_count"] == 0
+
+
+def test_recall_frequently_accessed_outranks_newer():
+    mem = _make_memory()
+    old_id = mem.remember("ceo", "Battle-tested pattern")
+    # Simulate heavy historical usage.
+    mem.db.execute(
+        "UPDATE agent_memories SET access_count = 20 WHERE id = ?", (old_id,)
+    )
+    mem.db.commit()
+    mem.remember("ceo", "Brand new note")
+    results = mem.recall("ceo")
+    assert results[0]["content"] == "Battle-tested pattern"
+
+
+def test_recall_confidence_boosts_distilled_patterns():
+    mem = _make_memory()
+    mem.remember("ceo", "Plain observation")
+    mem.upsert_by_pattern_key(
+        "ceo", "pricing-anchor", "Anchor pricing against the dearest tier",
+        metadata={"confidence": 0.9},
+    )
+    results = mem.recall("ceo")
+    assert results[0]["content"] == "Anchor pricing against the dearest tier"
+
+
+def test_recall_text_passes_query():
+    mem = _make_memory()
+    mem.remember("cmo", "Gumroad tags drive Discover traffic")
+    mem.remember("cmo", "Lunch order preferences")
+    text = mem.recall_text("cmo", limit=1, query="gumroad discover")
+    assert "Gumroad" in text
+    assert "Lunch" not in text

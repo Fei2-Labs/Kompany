@@ -330,7 +330,10 @@ class ProjectRunner:
 
         try:
             agent = self._engine.registry.get(task.assigned_agent)
-            memory_ctx = self._engine.memory.recall_text(task.assigned_agent)
+            memory_ctx = self._engine.memory.recall_text(
+                task.assigned_agent,
+                query=f"{task.title} {project.name}",
+            )
 
             prompt = (
                 f"Project: {project.name}\n"

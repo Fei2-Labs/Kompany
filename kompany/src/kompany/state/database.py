@@ -266,6 +266,11 @@ class Database:
             ("metadata", "TEXT"),
             ("pattern_key", "TEXT"),
             ("updated_at", "TEXT"),
+            # Utility-weighted recall (Keel mechanism #6 port): access stats
+            # feed the log1p(access_count) ranking term. Bumped only by the
+            # prompt-injection path (AgentMemory.recall track_access=True).
+            ("access_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("last_accessed_at", "TEXT"),
         ]:
             try:
                 self.conn.execute(f"ALTER TABLE agent_memories ADD COLUMN {col} {defn}")
