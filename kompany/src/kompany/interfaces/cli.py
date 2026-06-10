@@ -612,6 +612,94 @@ def projects(
 
 
 @app.command()
+def fund(
+    project_id: str = typer.Argument(..., help="Project to fund"),
+    amount: float = typer.Argument(..., help="Amount (EUR) to earmark from treasury"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Earmark treasury into a project's budget envelope."""
+    engine = _get_engine(config)
+    try:
+        budget = engine.fund_project(project_id, amount)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(budget)
+        return
+    console.print(Panel(
+        f"Funded €{amount:.2f} → {budget['name']}\n"
+        f"Envelope: €{budget['spent']:.2f} spent / €{budget['funded']:.2f} funded "
+        f"(€{budget['remaining']:.2f} remaining)",
+        title="Project funding",
+    ))
+
+
+@app.command()
+def spend(
+    project_id: str = typer.Argument(..., help="Project charged for this expense"),
+    amount: float = typer.Argument(..., help="Expense amount (EUR)"),
+    description: str = typer.Argument(..., help="What the money bought"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Record a real expense against a project's envelope (gated)."""
+    engine = _get_engine(config)
+    try:
+        budget = engine.record_project_expense(project_id, amount, description)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(budget)
+        return
+    console.print(Panel(
+        f"Spent €{amount:.2f} — {description}\n"
+        f"Envelope: €{budget['spent']:.2f} spent / €{budget['funded']:.2f} funded "
+        f"(€{budget['remaining']:.2f} remaining)",
+        title="Project expense",
+    ))
+
+
+@app.command()
+def budgets(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Per-project envelopes plus consolidated company treasury."""
+    engine = _get_engine(config)
+    active = engine.projects.list_active()
+    rows = [engine.project_budget(p.id) for p in active]
+    balance = engine.ledger.get_balance()
+    free = engine.unallocated_treasury()
+    if as_json:
+        _emit_json({
+            "balance": balance,
+            "unallocated": free,
+            "projects": rows,
+        })
+        return
+    table = Table(title="Project Budgets")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Funded", justify="right")
+    table.add_column("Spent", justify="right")
+    table.add_column("Remaining", justify="right", style="green")
+    for b in rows:
+        table.add_row(
+            b["project_id"], b["name"],
+            f"€{b['funded']:.2f}", f"€{b['spent']:.2f}", f"€{b['remaining']:.2f}",
+        )
+    console.print(table)
+    console.print(
+        f"Company balance: €{balance:.2f}  |  "
+        f"unallocated: €{free:.2f}  |  "
+        f"earmarked: €{balance - free:.2f}"
+    )
+
+
+@app.command()
 def debate(
     question: str = typer.Argument(..., help="Strategic question to debate"),
     config: str = typer.Option(None, "--config", "-c"),

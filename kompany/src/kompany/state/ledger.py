@@ -19,6 +19,22 @@ class Ledger:
         ).fetchone()
         return float(row["balance_after"]) if row else 0.0
 
+    def spent_for_project(self, project_id: str) -> float:
+        """Net spend against a project's envelope (positive number).
+
+        Nets the project-tagged expense rows against project-tagged
+        refunds. Income rows are excluded — revenue belongs to the
+        company balance, not back into the project's allocation.
+        """
+        row = self.db.execute(
+            """SELECT COALESCE(SUM(amount), 0.0) AS total
+               FROM ledger
+               WHERE project_id = ? AND category != 'income'""",
+            (project_id,),
+        ).fetchone()
+        net = float(row["total"] or 0.0) if row else 0.0
+        return max(0.0, -net)
+
     def record(
         self,
         amount: float,

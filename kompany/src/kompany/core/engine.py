@@ -360,6 +360,92 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 approved_by="master",
             )
 
+    # ------------------------------------------------------------------
+    # Per-project budget envelopes
+    #
+    # A project's budget is an EARMARK of the company treasury, not a
+    # transfer: funding moves nothing in the ledger (total assets stay
+    # consolidated), it just reserves headroom. Spending against a
+    # project writes a project-tagged ledger expense, which shrinks the
+    # company balance and the envelope at the same time.
+    # ------------------------------------------------------------------
+
+    def project_budget(self, project_id: str) -> dict:
+        """Funded / spent / remaining for one project's envelope."""
+        project = self.projects.get(project_id)
+        if project is None:
+            raise ValueError(f"Unknown project {project_id!r}")
+        spent = self.ledger.spent_for_project(project_id)
+        return {
+            "project_id": project.id,
+            "name": project.name,
+            "funded": project.funded_amount,
+            "spent": spent,
+            "remaining": project.funded_amount - spent,
+        }
+
+    def unallocated_treasury(self) -> float:
+        """Company balance minus every active project's unspent envelope."""
+        balance = self.ledger.get_balance()
+        reserved = 0.0
+        for project in self.projects.list_active():
+            spent = self.ledger.spent_for_project(project.id)
+            reserved += max(0.0, project.funded_amount - spent)
+        return balance - reserved
+
+    def fund_project(self, project_id: str, amount: float) -> dict:
+        """Earmark treasury into a project's envelope.
+
+        Rejects allocations that would promise more than the company
+        actually holds (sum of unspent envelopes must stay <= balance).
+        """
+        if amount <= 0:
+            raise ValueError("funding amount must be > 0")
+        if self.projects.get(project_id) is None:
+            raise ValueError(f"Unknown project {project_id!r}")
+        free = self.unallocated_treasury()
+        if amount > free:
+            raise ValueError(
+                f"Insufficient unallocated treasury: requested €{amount:.2f}, "
+                f"free €{free:.2f} (balance minus active envelopes)"
+            )
+        self.projects.add_funding(project_id, amount)
+        self.audit.record(
+            "project.funded",
+            f"Earmarked €{amount:.2f} into project envelope",
+            detail={"project_id": project_id, "amount": amount},
+        )
+        return self.project_budget(project_id)
+
+    def record_project_expense(
+        self,
+        project_id: str,
+        amount: float,
+        description: str,
+        approved_by: str = "master",
+    ) -> dict:
+        """Record a real expense against a project's envelope, gated.
+
+        Refuses to overdraw the envelope — per-project budgets are
+        isolated even though all cash sits in one consolidated ledger.
+        """
+        if amount <= 0:
+            raise ValueError("expense amount must be > 0")
+        budget = self.project_budget(project_id)
+        if amount > budget["remaining"]:
+            raise ValueError(
+                f"Envelope overdraw: project {project_id} has "
+                f"€{budget['remaining']:.2f} remaining, expense is €{amount:.2f}"
+            )
+        self.ledger.record(
+            amount=-abs(amount),
+            description=description,
+            category=LedgerCategory.EXPENSE,
+            project_id=project_id,
+            approved_by=approved_by,
+        )
+        return self.project_budget(project_id)
+
     def execute_project(self, project_id: str) -> dict:
         """Execute a revenue project's tasks autonomously."""
         if current_run_id() is None:
