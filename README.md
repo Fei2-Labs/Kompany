@@ -23,11 +23,14 @@
 
 Give Kompany a directive and a budget. The CEO agent conducts the team, delegates tasks, creates revenue projects when funds are short, and **never downgrades your mission**. Every AI cost is tracked as a real business expense. Works standalone via CLI, REST API, MCP, or SDK.
 
-> **Open-core.** This repo is the whole engine under Apache-2.0 — no
-> crippled "community edition." Commercial extensions (curated playbooks,
+> **Open-core.** This repo is the whole engine under AGPL-3.0 — no
+> crippled "community edition." Free for your own company; a
+> [commercial license](docs/why-agpl.md) applies only if you sell
+> hosted access to others. Commercial extensions (curated playbooks,
 > specialist agent souls, business integrations) live in a separate
 > proprietary package, `kompany-pro`. Details:
-> [Open Core — Core / Pro / Cloud](#open-core--core--pro--cloud).
+> [Open Core — Core / Pro / Cloud](#open-core--core--pro--cloud) ·
+> [Why AGPL?](docs/why-agpl.md)
 
 ## Why This Exists
 
@@ -861,7 +864,7 @@ extensions live in a separate package.
 
 | Tier | What's in it | License | Where |
 |---|---|---|---|
-| **Kompany Core** *(this repo)* | Full agent engine, debate runtime, cost ledger, budget tracking, CLI, REST API, MCP server, plugin contract (5 stable ABCs), 11 base C-suite + 5 subagent souls, 7 starter templates, 3 reference workflows (`idea-validation`, `weekly-exec-review`, `landing-page-launch`) | **Apache-2.0** — modify, redistribute, sell, fork, all fine | [`Fei2-Labs/Kompany`](https://github.com/Fei2-Labs/Kompany) |
+| **Kompany Core** *(this repo)* | Full agent engine, debate runtime, cost ledger, budget tracking, CLI, REST API, MCP server, plugin contract (5 stable ABCs), 11 base C-suite + 5 subagent souls, 7 starter templates, 3 reference workflows (`idea-validation`, `weekly-exec-review`, `landing-page-launch`) | **AGPL-3.0** — free to run, modify, and fork for your own company; offering it to others as a network service requires sharing your modifications (or a [commercial license](docs/why-agpl.md)) | [`Fei2-Labs/Kompany`](https://github.com/Fei2-Labs/Kompany) |
 | **Kompany Pro** | Curated deep playbooks above the 7 Core seeds, specialist agent souls (industry-specific roles like SaaS Compliance Officer / Ecom Inventory Manager — additive over Core's 11+5, never replacement), business integrations (Stripe, Polar, Notion, Slack, …) | Proprietary | `Fei2-Labs/kompany-pro` (private repo, access via subscription or Early Backer grant) |
 | **Kompany Cloud** | Hosted SaaS — managed runtime, dashboard, scheduling, persistence, integrations | TBD pricing | Not yet launched |
 
@@ -893,7 +896,7 @@ a compatible Pro release ships. Intentional design — see
 
 **Early Backer grant.** Anyone who paid the Kompany 299 CNY presale
 before the public OSS launch was automatically promoted to the
-Kompany Early Backer tier — Core source (Apache-2.0, same as everyone)
+Kompany Early Backer tier — Core source (AGPL-3.0, same as everyone)
 plus 12 months of Pro source access, Cloud credit when Cloud ships,
 private Discord, and one roadmap-input call. Full terms:
 [`docs/early-backer-grant.md`](docs/early-backer-grant.md).
@@ -930,7 +933,7 @@ If you find Kompany useful, consider supporting the project:
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE) for details.
+AGPL-3.0 · free for your own company · [commercial license](docs/why-agpl.md) if you sell access to others — see [LICENSE](LICENSE) and [Why AGPL?](docs/why-agpl.md).
 
 ---
 

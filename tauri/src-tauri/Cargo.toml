@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Kompany — autonomous business OS, desktop shell."
 authors = ["Kompany"]
 edition = "2021"
-license = "Apache-2.0"
+license = "AGPL-3.0-only"
 
 [[bin]]
 name = "kompany-desktop"

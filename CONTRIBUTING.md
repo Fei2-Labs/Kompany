@@ -10,6 +10,17 @@ Thanks for your interest in contributing. This project is open to improvements a
 - Include your company stage profile and the directive that triggered the issue
 - Include the full error output if applicable
 
+### Contributor License Agreement (CLA)
+
+Kompany Core is AGPL-3.0 and dual-licensed: the same code also ships in
+commercially licensed builds for [Kompany Pro](docs/why-agpl.md) subscribers.
+For your contribution to be includable in both, we ask every contributor
+to sign a lightweight CLA (one-time, via the CLA bot comment on your
+first PR). You keep your copyright; you grant Kompany the right to
+license your contribution under the project's licenses. PRs cannot be
+merged before the CLA is signed. Rationale:
+[ADR-0004](docs/adr/0004-agpl-relicense.md).
+
 ### Pull Requests
 
 1. Fork the repository
