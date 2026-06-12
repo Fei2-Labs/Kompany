@@ -34,6 +34,8 @@ Decision journal entries and audit events are append-only operational records. T
 
 Kompany must not autonomously modify its own Python source code as part of business operation. Code changes require explicit development workflow control.
 
+The governed workflow (defined 2026-06-12, founder-approved): the running instance never edits itself in place. Self-originated code changes are developed in a dedicated clone of the source repository through the repository's Trellis pipeline (task → spec injection → implement → check, with a mandatory regression test), and reach the running system only through a founder-approved merge, a build, and a rollback-capable install. Change tiers: data layer (souls, prompts, memories, skills) may evolve autonomously; documentation may change with an after-the-fact receipt; engine source may only be proposed as a reviewed merge request; the constitution, the ledger and cost-tracking path, the approval and autonomy-gate code, and this self-update pipeline itself must never be changed autonomously, not even as an auto-generated proposal.
+
 ## Constitution change control
 
 This constitution cannot be auto-modified by agents or self-learning. Changes require explicit user approval through a governed process.

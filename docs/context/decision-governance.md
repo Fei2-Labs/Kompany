@@ -31,7 +31,7 @@ Journal must be wired into the engine to record every key CEO decision with rati
 ## constitution
 The system must have a constitution defining immutable rules that no agent or process may override.
 
-**Meaning:** Inviolable rules include: user is always the supreme decision maker; all spending must be recorded in the ledger; no self-modification of Python source code; the constitution itself cannot be auto-modified; decision journal entries are append-only and never deleted; team must give honest assessments and never provide falsely optimistic evaluations; user-declared exclusion domains must be respected and no plan may involve excluded domains.
+**Meaning:** Inviolable rules include: user is always the supreme decision maker; all spending must be recorded in the ledger; no in-place self-modification of Python source code (self-originated changes flow only through the governed clone → Trellis pipeline → founder-approved merge → rollback-capable install workflow, with tiered limits — see CONSTITUTION.md "Source code self-modification"); the constitution itself cannot be auto-modified; decision journal entries are append-only and never deleted; team must give honest assessments and never provide falsely optimistic evaluations; user-declared exclusion domains must be respected and no plan may involve excluded domains.
 
 **Implication:** Everything else can evolve through self-learning, but these rules are the hard floor. Create a CONSTITUTION.md file to codify them.
 
