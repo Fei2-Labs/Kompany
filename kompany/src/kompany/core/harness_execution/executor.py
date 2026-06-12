@@ -277,6 +277,7 @@ def _book_cost(
         run_id=current_run_id(),
         project_id=project.id,
         is_estimate=run_result.cost_is_estimate,
+        agent_name=task.assigned_agent,
     )
 
 

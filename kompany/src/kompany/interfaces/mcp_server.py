@@ -144,6 +144,14 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_agent_work_summary",
+        description=(
+            "Per-agent task-history summary keyed by lowercase role: "
+            "delivered/completed/failed/total counts + last_active."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="kompany_project",
         description="Get details for a specific project including tasks and revenue paths.",
         inputSchema={

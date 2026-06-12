@@ -315,6 +315,16 @@ class Kompany:
         """Probe PATH for agent CLIs that unlock zero-key model sources."""
         return self._engine.detect_agent_clis()
 
+    def agent_work_summary(self) -> dict[str, dict[str, Any]]:
+        """Per-agent task-history summary keyed by lowercase role.
+
+        Same dict REST ``GET /agents/work-summary`` and MCP
+        ``kompany_agent_work_summary`` return (06-12-panel-truthfulness
+        #22): ``delivered`` / ``completed`` / ``failed`` / ``total`` /
+        ``last_active`` per role.
+        """
+        return self._engine.agent_work_summary()
+
     def self_update_propose(self, instruction: str) -> dict[str, Any]:
         """Governed self-update propose flow (06-12-self-update-pipeline).
 

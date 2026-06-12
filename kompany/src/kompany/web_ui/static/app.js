@@ -4,12 +4,12 @@
 import { store } from "/ui/static/modules/store.js";
 import { api } from "/ui/static/modules/api.js";
 import { connectSSE } from "/ui/static/modules/sse.js";
-import { renderOffice } from "/ui/static/modules/ui/office.js";
+import { renderOffice, noteAgentActivity } from "/ui/static/modules/ui/office.js?v=2";
 import { renderInbox } from "/ui/static/modules/ui/inbox.js";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
-import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=5";
+import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=6";
 import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=4";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";
@@ -197,6 +197,18 @@ function handleEvent(evt) {
   if (type === "llm.spend") {
     const chip = getCostChip();
     if (chip) chip.onSpend(data || {});
+    // STAFF live activity (#24): directive-phase spend never writes
+    // agent_status, so flip the spending agent's card from the stream.
+    if (data.agent_name) {
+      noteAgentActivity(data.agent_name, data.action_type || "thinking");
+    }
+  }
+
+  // agent.activity already carries the full contract — feed the same
+  // overlay so sub-minute status flips aren't invisible between polls.
+  if (type === "agent.activity" && data.agent_role) {
+    const working = (data.status || "").toLowerCase() !== "idle";
+    if (working) noteAgentActivity(data.agent_role, data.current_task || data.status);
   }
 
   // CEO channel bubble: live cost (llm.spend), status lines (audit.*),

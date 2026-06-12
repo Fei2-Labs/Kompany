@@ -3786,6 +3786,38 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         result["comments"] = comments
         return result
 
+    def agent_work_summary(self) -> dict[str, dict]:
+        """Per-agent task-history summary (06-12-panel-truthfulness #22).
+
+        Cheap GROUP BY over ``tasks.assigned_agent``: lets the UI tell
+        "worked, but no project has closed yet" apart from "never
+        worked" when ``project_episodes`` is still empty. Keys are
+        lowercase roles; values carry stable keys ``delivered`` /
+        ``completed`` / ``failed`` / ``total`` / ``last_active``
+        (additive-only — Output Stability Rule).
+        """
+        rows = self.db.execute(
+            """SELECT lower(assigned_agent) AS role,
+                      SUM(CASE WHEN status = 'delivered' THEN 1 ELSE 0 END) AS delivered,
+                      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+                      COUNT(*) AS total,
+                      MAX(updated_at) AS last_active
+               FROM tasks
+               GROUP BY lower(assigned_agent)"""
+        ).fetchall()
+        return {
+            r["role"]: {
+                "delivered": int(r["delivered"] or 0),
+                "completed": int(r["completed"] or 0),
+                "failed": int(r["failed"] or 0),
+                "total": int(r["total"] or 0),
+                "last_active": r["last_active"],
+            }
+            for r in rows
+            if r["role"]
+        }
+
     # ------------------------------------------------------------------
     # Self-update pipeline (06-12-self-update-pipeline) — governed code
     # self-modification. Logic lives in core/self_update/; thin delegates.

@@ -190,22 +190,59 @@ async function renderEmptyState(list) {
   // app forgot what they picked.
   list.innerHTML = `<div class="empty">no episodes yet — loading active project…</div>`;
   try {
-    const projects = await fetch("/projects", {
-      headers: { Accept: "application/json" },
-    }).then((r) => (r.ok ? r.json() : []));
+    const projects = await api.projectsWithDrafts();
     if (!projects || !projects.length) {
       list.innerHTML = `<div class="empty">no episodes yet. Type a directive below to give the team something to run.</div>`;
       return;
     }
     const actives = projects.filter((p) => p.status === "active");
     const activeRows = actives.map(activeProjectRowHTML).join("");
-    list.innerHTML = `
-      <div class="empty">team is running your first-week directive. No completed episodes yet — first one will appear below when the team checkpoints.</div>
-      ${activeRows}
-    `;
+    const lead = actives.length
+      ? `<div class="empty">team is running your first-week directive. No completed episodes yet — first one will appear below when the team checkpoints.</div>`
+      : `<div class="empty">no episodes yet. Type a directive below to give the team something to run.</div>`;
+    list.innerHTML = `${lead}${activeRows}${draftsStripHTML(projects)}`;
     wireActiveProjectActions(list);
+    wireDraftActions(list);
   } catch (_) {
     list.innerHTML = `<div class="empty">no episodes yet.</div>`;
+  }
+}
+
+// Drafts strip (#2): unpicked first-move proposals (and any future
+// template/team drafts) are real LLM work staged as status='draft'
+// projects. Without a home they orphan — surface them with a [ start ]
+// affordance reusing the same /activate path First Move uses. Pick-only
+// for now: abandoning drafts is #10 (no engine op yet — out of scope).
+function draftsStripHTML(projects) {
+  const drafts = (projects || []).filter((p) => p.status === "draft");
+  if (!drafts.length) return "";
+  const rows = drafts.map((p) => `
+    <div class="episode-item active-project draft-project" data-pid="${escapeHTML(p.id)}">
+      <div class="ap-line">
+        <span>▹ ${escapeHTML(p.name || "(unnamed)")}</span>
+        <button type="button" class="draft-start" data-start-pid="${escapeHTML(p.id)}">[ ▶ start ]</button>
+      </div>
+      <div class="pid">${escapeHTML(p.id)} :: team-proposed, not started</div>
+    </div>`).join("");
+  return `<div class="ep-draft-wrap"><div class="ep-active-head">// DRAFTS — proposed by the team, waiting on you</div>${rows}</div>`;
+}
+
+function wireDraftActions(container) {
+  for (const btn of container.querySelectorAll(".draft-start[data-start-pid]")) {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const pid = btn.getAttribute("data-start-pid");
+      btn.disabled = true;
+      btn.textContent = "[ ▶ starting… ]";
+      try {
+        await api.activateProject(pid);
+        const eps = await api.episodes();
+        renderEpisodes(eps || []);
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = "[ ▶ start ]";
+      }
+    });
   }
 }
 
@@ -261,6 +298,29 @@ function wireActiveProjectActions(container) {
   }
 }
 
+// #22: episodes are the deep record (completed projects only), but an
+// empty episode list does NOT mean an agent never worked — delivered
+// tasks on a still-open project are real work. Render the task-history
+// fallback instead of a false "no recorded work" when the summary has
+// rows for this agent. Returns true when it rendered something.
+async function renderWorkSummaryFallback(host, key) {
+  try {
+    const summary = await api.agentsWorkSummary();
+    const row = summary && summary[key];
+    if (!row || !row.total) return false;
+    const parts = [];
+    if (row.delivered) parts.push(`${row.delivered} delivered`);
+    if (row.completed) parts.push(`${row.completed} completed`);
+    if (row.failed) parts.push(`${row.failed} failed`);
+    const counts = parts.length ? parts.join(", ") : `${row.total} task(s)`;
+    const last = row.last_active ? ` Last active ${escapeHTML(row.last_active)}.` : "";
+    host.innerHTML = `<div class="empty">No completed episodes yet — but ${escapeHTML(roleLabel(key))} has ${escapeHTML(counts)} task(s) on open projects.${last} Episodes appear when a project closes.</div>`;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 // Show one agent's tasks from the most recent episode, in the payload
 // panel. Wired to staff-panel clicks so the founder can drill into
 // "what did the CRO actually do?".
@@ -272,6 +332,9 @@ export async function showAgentTasks(role) {
   try {
     const eps = await api.episodes();
     if (!eps || !eps.length) {
+      // Truthful empty state (#22): only claim "no recorded work" when
+      // the task history is ALSO empty for this agent.
+      if (await renderWorkSummaryFallback(host, key)) return;
       host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} has no recorded work yet — no completed episodes.</div>`;
       return;
     }
@@ -284,6 +347,7 @@ export async function showAgentTasks(role) {
       (t) => String(t.assigned_agent || "").toLowerCase() === key,
     );
     if (!tasks.length) {
+      if (await renderWorkSummaryFallback(host, key)) return;
       host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} didn't own a task in the latest episode.</div>`;
       return;
     }
@@ -341,18 +405,23 @@ export function renderEpisodes(rows) {
 
   // Also surface any RUNNING project at the top with an abandon action,
   // so the founder can stop a plan even once completed episodes exist
-  // (#10). Best-effort fetch; failure just omits the rows.
-  fetch("/projects", { headers: { Accept: "application/json" } })
-    .then((r) => (r.ok ? r.json() : []))
+  // (#10), plus the DRAFTS strip (#2) so unpicked team proposals stay
+  // reachable. Best-effort fetch; failure just omits the rows.
+  api.projectsWithDrafts()
     .then((projects) => {
       const actives = (projects || []).filter((p) => p.status === "active");
-      if (!actives.length) return;
+      const draftsHTML = draftsStripHTML(projects);
+      if (!actives.length && !draftsHTML) return;
       const wrap = document.createElement("div");
       wrap.className = "ep-active-wrap";
-      wrap.innerHTML = `<div class="ep-active-head">// RUNNING NOW</div>` +
-        actives.map(activeProjectRowHTML).join("");
+      const activesHTML = actives.length
+        ? `<div class="ep-active-head">// RUNNING NOW</div>` +
+          actives.map(activeProjectRowHTML).join("")
+        : "";
+      wrap.innerHTML = activesHTML + draftsHTML;
       list.prepend(wrap);
       wireActiveProjectActions(wrap);
+      wireDraftActions(wrap);
     })
     .catch(() => {});
 }

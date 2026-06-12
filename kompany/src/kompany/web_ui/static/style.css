@@ -2167,6 +2167,16 @@ body.onboarding-body { padding-bottom: 40px; }
 .ep-active-wrap { margin-bottom: 10px; }
 .ep-active-head { color: rgba(255, 200, 80, 0.85); font-size: 10px; letter-spacing: 0.06em; margin-bottom: 4px; }
 
+/* Drafts strip (#2): unpicked team-proposed directives, pick-only */
+.ep-draft-wrap { margin-top: 10px; }
+.draft-project { opacity: 0.85; }
+.draft-start {
+  background: transparent; border: 1px solid rgba(0, 255, 65, 0.5);
+  color: rgba(120, 255, 150, 0.95); font-family: inherit; font-size: 10px;
+  padding: 1px 7px; cursor: pointer; white-space: nowrap;
+}
+.draft-start:hover:not(:disabled) { background: rgba(0, 255, 65, 0.1); }
+
 /* Settings text inputs were unstyled (native white). Theme them. */
 .set-row input {
   width: 100%;

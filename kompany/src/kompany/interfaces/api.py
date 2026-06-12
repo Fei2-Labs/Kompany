@@ -2899,6 +2899,15 @@ async def events_stream() -> StreamingResponse:
     )
 
 
+@app.get("/agents/work-summary")
+def agents_work_summary() -> dict[str, dict[str, Any]]:
+    """Per-agent task-history summary (06-12-panel-truthfulness #22).
+
+    Keyed by lowercase role; lets the UI distinguish "worked but no
+    episode closed yet" from "never worked"."""
+    return get_engine().agent_work_summary()
+
+
 @app.get("/agents/status")
 def agents_status() -> list[dict[str, Any]]:
     """Return the live status of all 11 C-suite roles for the office panel.

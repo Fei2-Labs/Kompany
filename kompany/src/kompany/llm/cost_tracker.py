@@ -77,6 +77,7 @@ class CostTracker:
         directive_id: str | None = None,
         run_id: str | None = None,
         action_type: str | None = None,
+        agent_name: str | None = None,
     ) -> float:
         """Record an LLM call cost. Returns the USD cost.
 
@@ -84,6 +85,11 @@ class CostTracker:
         ``llm.spend`` payload (e.g. ``"target_feasibility"``,
         ``"debate_round_1"``). When the caller omits it we fall back to
         ``"other"`` so the payload shape stays uniform.
+
+        ``agent_name`` (additive, 06-12-panel-truthfulness #24) is the
+        spending agent's display name (e.g. ``"CEO"``); it rides the
+        ``llm.spend`` envelope so the live STAFF panel can attribute
+        activity without parsing the free-text description.
 
         Billing-mode branching (06-11-harness-execution-leg D2): when the
         active ModelSource bills by subscription AND ``model`` routes
@@ -107,6 +113,7 @@ class CostTracker:
                 description=description,
                 run_id=rid,
                 action_type=action_type or "other",
+                agent_name=agent_name,
             )
             return 0.0
 
@@ -138,6 +145,7 @@ class CostTracker:
             cost_usd=cost,
             run_id=rid,
             balance_after=balance_after,
+            agent_name=agent_name,
         )
 
         return cost
@@ -152,6 +160,7 @@ class CostTracker:
         run_id: str | None = None,
         project_id: str | None = None,
         is_estimate: bool = False,
+        agent_name: str | None = None,
     ) -> float:
         """Record a cost reported by an external harness vehicle.
 
@@ -192,6 +201,7 @@ class CostTracker:
                 description=description,
                 run_id=rid,
                 action_type="harness_result",
+                agent_name=agent_name,
             )
             return 0.0
 
@@ -223,6 +233,7 @@ class CostTracker:
             cost_usd=cost,
             run_id=rid,
             balance_after=balance_after,
+            agent_name=agent_name,
         )
         return cost
 
@@ -242,6 +253,7 @@ class CostTracker:
         description: str,
         run_id: str | None,
         action_type: str,
+        agent_name: str | None = None,
     ) -> None:
         """Book subscription-mode spend as shadow value, never expense.
 
@@ -279,6 +291,7 @@ class CostTracker:
             balance_after=balance_after,
             shadow=True,
             shadow_value_usd=shadow_value,
+            agent_name=agent_name,
         )
 
     def run_total(self, run_id: str | None = None) -> float:
@@ -329,6 +342,7 @@ class CostTracker:
         balance_after: float | None,
         shadow: bool = False,
         shadow_value_usd: float | None = None,
+        agent_name: str | None = None,
     ) -> None:
         """Publish a ``llm.spend`` envelope on the wired event hub.
 
@@ -349,6 +363,9 @@ class CostTracker:
             "ledger_balance_after": balance_after,
             "shadow": bool(shadow),
             "shadow_value_usd": shadow_value_usd,
+            # Additive (#24): spending agent's display name, or None for
+            # non-agent calls. Lets SSE consumers attribute activity.
+            "agent_name": agent_name,
         }
         try:
             self.event_hub.publish("llm.spend", payload)

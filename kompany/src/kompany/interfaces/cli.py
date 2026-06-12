@@ -567,6 +567,40 @@ def status(
 
 
 @app.command()
+def agents(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Per-agent work summary from task history (delivered/completed/failed)."""
+    engine = _get_engine(config)
+    payload = engine.agent_work_summary()
+    if as_json:
+        _emit_json(payload)
+        return
+
+    if not payload:
+        console.print("[dim]No recorded agent work yet.[/dim]")
+        return
+
+    table = Table(title="Agent Work Summary")
+    table.add_column("Agent", style="cyan")
+    table.add_column("Delivered", style="green")
+    table.add_column("Completed", style="green")
+    table.add_column("Failed", style="red")
+    table.add_column("Total")
+    table.add_column("Last Active", style="dim")
+    for role in sorted(payload):
+        row = payload[role]
+        table.add_row(
+            role.upper(),
+            str(row["delivered"]), str(row["completed"]),
+            str(row["failed"]), str(row["total"]),
+            row["last_active"] or "—",
+        )
+    console.print(table)
+
+
+@app.command()
 def projects(
     config: str = typer.Option(None, "--config", "-c"),
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),

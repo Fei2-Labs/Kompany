@@ -623,6 +623,7 @@ class LLMClient:
             directive_id=directive_id,
             run_id=rid,
             action_type=action_type,
+            agent_name=agent_name,
         )
         resp.cost_usd = cost
         # Mark so explicit ``record_ai_cost`` calls don't double-book.

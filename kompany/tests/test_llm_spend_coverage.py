@@ -137,6 +137,47 @@ def test_single_call_emits_one_llm_spend(world):
     assert spends[0]["action_type"] == "target_feasibility"
 
 
+def test_llm_spend_carries_agent_name(world):
+    """#24: the SSE envelope must attribute spend to the calling agent
+    via a structured field, not the free-text description."""
+    world["client"].call(
+        model="claude-sonnet-4-20250514",
+        system="s",
+        prompt="p",
+        agent_name="CEO",
+        action_type="directive_classify",
+    )
+    spends = [p for t, p in world["hub"].events if t == "llm.spend"]
+    assert spends[0]["agent_name"] == "CEO"
+
+
+def test_llm_spend_agent_name_defaults_to_none():
+    """Non-agent record() calls keep a uniform payload shape."""
+    hub = _FakeHub()
+    tracker = CostTracker(ledger=None, event_hub=hub)
+    tracker.record("claude-sonnet-4-20250514", 100, 50, "anonymous call")
+    spends = [p for t, p in hub.events if t == "llm.spend"]
+    assert len(spends) == 1
+    assert "agent_name" in spends[0]
+    assert spends[0]["agent_name"] is None
+
+
+def test_record_external_carries_agent_name():
+    """Harness session costs attribute to the task's assigned agent."""
+    hub = _FakeHub()
+    tracker = CostTracker(ledger=None, event_hub=hub)
+    tracker.record_external(
+        model="claude-sonnet-4-20250514",
+        cost_usd=0.5,
+        tokens_in=100,
+        tokens_out=50,
+        description="harness session",
+        agent_name="cto",
+    )
+    spends = [p for t, p in hub.events if t == "llm.spend"]
+    assert spends[0]["agent_name"] == "cto"
+
+
 def test_three_calls_emit_three_llm_spend(world):
     for label in ("debate_round_1", "debate_synthesis", "debate_decision"):
         world["client"].call(
