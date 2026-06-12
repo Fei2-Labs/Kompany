@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic Fernet key used as KOMPANY_VAULT_KEY test fixture (not a real credential; verified distinct from any real install key)"
+regexes = ['''C8WJOwHdhwcWnW2siGKVyEggFwVHe41ERKC1SFRgfJ8=''']
