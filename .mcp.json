@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "kompany": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/kompany-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
