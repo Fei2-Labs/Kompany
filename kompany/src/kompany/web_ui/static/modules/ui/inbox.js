@@ -46,51 +46,124 @@ async function reload() {
   }
 }
 
+// Inline error line (no native dialogs — Tauri WebView blocks native dialogs).
+function showRowError(card, msg) {
+  let el = card.querySelector(".inbox-inline-error");
+  if (!el) {
+    el = document.createElement("div");
+    el.className = "body-line inbox-inline-error";
+    el.style.color = "var(--danger, #e05555)";
+    card.appendChild(el);
+  }
+  el.textContent = `› ${msg}`;
+}
+
+// First tap reveals an inline input row inside the card; second tap
+// (the [ ok ] button, or Enter) submits. No native dialogs — the
+// Kompany Tauri WebView silently returns falsy for those.
+function openInlineForm(card, btn, opts) {
+  // Only one inline form open per card at a time.
+  card.querySelector(".inbox-inline-form")?.remove();
+  if (btn.dataset.formOpen === "1") {
+    delete btn.dataset.formOpen;
+    return;
+  }
+  for (const b of card.querySelectorAll(".actions .key")) delete b.dataset.formOpen;
+  btn.dataset.formOpen = "1";
+
+  const form = document.createElement("div");
+  form.className = "inbox-inline-form";
+  const inputType = opts.type === "number" ? "number" : "text";
+  form.innerHTML = `
+    <input type="${inputType}" class="inline-input"
+      placeholder="${escapeHTML(opts.placeholder || "")}"
+      ${opts.value != null ? `value="${escapeHTML(String(opts.value))}"` : ""}
+      ${inputType === "number" ? 'min="1" step="1"' : ""}>
+    <button type="button" class="key inline-ok">[ ok ]</button>
+    <button type="button" class="key inline-cancel">[ cancel ]</button>`;
+  card.appendChild(form);
+
+  const input = form.querySelector(".inline-input");
+  const close = () => {
+    form.remove();
+    delete btn.dataset.formOpen;
+  };
+  const submit = async () => {
+    const raw = input.value.trim();
+    const okBtn = form.querySelector(".inline-ok");
+    okBtn.disabled = true;
+    try {
+      await opts.onSubmit(raw);
+      close();
+      reload();
+    } catch (e) {
+      okBtn.disabled = false;
+      showRowError(card, `${opts.label} failed: ${e.message}`);
+    }
+  };
+  form.querySelector(".inline-ok").addEventListener("click", submit);
+  form.querySelector(".inline-cancel").addEventListener("click", close);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+    if (e.key === "Escape") close();
+  });
+  input.focus();
+}
+
 function bindRow(card, row) {
   const id = row.id;
   card.querySelector('[data-action="approve"]')?.addEventListener("click", async () => {
     try {
       await api.approve(id);
       reload();
-    } catch (e) { alert(`approve failed: ${e.message}`); }
+    } catch (e) { showRowError(card, `approve failed: ${e.message}`); }
   });
-  card.querySelector('[data-action="reject"]')?.addEventListener("click", async () => {
-    const reason = prompt("reject reason?") || "rejected via ui";
-    try {
-      await api.reject(id, reason);
-      reload();
-    } catch (e) { alert(`reject failed: ${e.message}`); }
+  card.querySelector('[data-action="reject"]')?.addEventListener("click", (e) => {
+    openInlineForm(card, e.currentTarget, {
+      label: "reject",
+      placeholder: "reject reason?",
+      onSubmit: (raw) => api.reject(id, raw || "rejected via ui"),
+    });
   });
-  card.querySelector('[data-action="revise"]')?.addEventListener("click", async () => {
-    const counter = prompt("counter-proposal:");
-    if (!counter) return;
-    try {
-      await api.revise(id, counter);
-      reload();
-    } catch (e) { alert(`revise failed: ${e.message}`); }
+  card.querySelector('[data-action="revise"]')?.addEventListener("click", (e) => {
+    openInlineForm(card, e.currentTarget, {
+      label: "revise",
+      placeholder: "counter-proposal:",
+      onSubmit: (raw) => {
+        if (!raw) throw new Error("counter-proposal required");
+        return api.revise(id, raw);
+      },
+    });
   });
-  card.querySelector('[data-action="snooze"]')?.addEventListener("click", async () => {
-    const m = parseInt(prompt("snooze minutes:", "30"), 10);
-    if (!m || m <= 0) return;
-    try {
-      await api.snooze(id, m);
-      reload();
-    } catch (e) { alert(`snooze failed: ${e.message}`); }
+  card.querySelector('[data-action="snooze"]')?.addEventListener("click", (e) => {
+    openInlineForm(card, e.currentTarget, {
+      label: "snooze",
+      type: "number",
+      placeholder: "snooze minutes:",
+      value: 30,
+      onSubmit: (raw) => {
+        const m = parseInt(raw, 10);
+        if (!m || m <= 0) throw new Error("minutes must be > 0");
+        return api.snooze(id, m);
+      },
+    });
   });
-  card.querySelector('[data-action="comment"]')?.addEventListener("click", async () => {
-    const body = prompt("comment:");
-    if (!body) return;
-    try {
-      await api.comment(id, body);
-      reload();
-    } catch (e) { alert(`comment failed: ${e.message}`); }
+  card.querySelector('[data-action="comment"]')?.addEventListener("click", (e) => {
+    openInlineForm(card, e.currentTarget, {
+      label: "comment",
+      placeholder: "comment:",
+      onSubmit: (raw) => {
+        if (!raw) throw new Error("comment required");
+        return api.comment(id, raw);
+      },
+    });
   });
-  card.querySelector('[data-action="cancel"]')?.addEventListener("click", async () => {
-    const reason = prompt("cancel reason?") || "cancelled via ui";
-    try {
-      await api.cancel(id, reason);
-      reload();
-    } catch (e) { alert(`cancel failed: ${e.message}`); }
+  card.querySelector('[data-action="cancel"]')?.addEventListener("click", (e) => {
+    openInlineForm(card, e.currentTarget, {
+      label: "cancel",
+      placeholder: "cancel reason?",
+      onSubmit: (raw) => api.cancel(id, raw || "cancelled via ui"),
+    });
   });
 }
 
