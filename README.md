@@ -3,7 +3,6 @@
 </p>
 
 <p align="center">
-  <strong>Kompany</strong><br>
   Autonomous Business Operating System for Solo Founders
 </p>
 
