@@ -338,6 +338,18 @@ class Kompany:
         """Recent Anima diary entries, newest first (REST ``GET /anima/diary``)."""
         return self._engine.anima_diary_list(limit=limit)
 
+    def channels_status(self) -> dict[str, Any]:
+        """Channel adapter health + outbox counts (06-12-channels PRD D5).
+
+        Same dict REST ``GET /channels/status`` and MCP
+        ``kompany_channels_status`` return.
+        """
+        return self._engine.channels_status()
+
+    def channels_outbox(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Recent channel outbox rows (REST ``GET /channels/outbox``)."""
+        return self._engine.outbox_list(limit=limit)
+
     def self_update_propose(self, instruction: str) -> dict[str, Any]:
         """Governed self-update propose flow (06-12-self-update-pipeline).
 

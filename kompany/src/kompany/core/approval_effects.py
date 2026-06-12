@@ -21,6 +21,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from kompany.channels.outbox import (
+    ACTION_CHANNEL_POST,
+    approve_channel_post,
+    reject_channel_post,
+)
 from kompany.core.harness_execution.executor import (
     ACTION_BUDGET_INCREASE,
     ACTION_ENVELOPE_TOPUP,
@@ -34,7 +39,12 @@ from kompany.state.models import ApprovalRequest
 
 # Action types whose approve/reject triggers an engine-side effect here.
 HARNESS_EFFECT_ACTIONS: frozenset[str] = frozenset(
-    {ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE, ACTION_SELF_UPDATE}
+    {
+        ACTION_ENVELOPE_TOPUP,
+        ACTION_BUDGET_INCREASE,
+        ACTION_SELF_UPDATE,
+        ACTION_CHANNEL_POST,
+    }
 )
 
 
@@ -51,6 +61,10 @@ def apply_post_approve_effect(
         return _approve_budget_increase(engine, request)
     if request.action_type == ACTION_SELF_UPDATE:
         return approve_self_update(engine, request)
+    if request.action_type == ACTION_CHANNEL_POST:
+        # Tier 1 (06-12-channels D3): mark approved + manual-post comment.
+        # NEVER posts anywhere — constitution publishing gate.
+        return approve_channel_post(engine, request)
     return {"status": "no_effect"}
 
 
@@ -60,6 +74,8 @@ def apply_post_reject_effect(
     """Rejected: audit it and leave the task PENDING with a real next step."""
     if request.action_type == ACTION_SELF_UPDATE:
         return reject_self_update(engine, request)
+    if request.action_type == ACTION_CHANNEL_POST:
+        return reject_channel_post(engine, request)
     payload = request.payload or {}
     task_id = payload.get("task_id")
     if request.action_type == ACTION_ENVELOPE_TOPUP:

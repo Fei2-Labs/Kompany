@@ -17,6 +17,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
 13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
+14. [Channels: Talk to Your Company Anywhere](#channels-talk-to-your-company-anywhere)
 13. [Anima: The Company's Persona](#anima-the-companys-persona)
 13. [Using the REST API](#using-the-rest-api)
 14. [Using the MCP Server](#using-the-mcp-server)
@@ -726,6 +727,20 @@ kompany anima diary    # recent entries, newest first
 ```
 
 The same operations exist on every interface: REST `GET /anima/state` + `GET /anima/diary`, MCP `kompany_anima_state` / `kompany_anima_diary`, SDK `k.anima_state()` / `k.anima_diary()`. Config flags: `anima_enabled` (whole layer) and `anima_diary_enabled` (just the daily LLM call), in YAML or `KOMPANY_ANIMA_ENABLED` / `KOMPANY_ANIMA_DIARY_ENABLED`.
+
+---
+
+## Channels: Talk to Your Company Anywhere
+
+Channels connect outside transports to the same CEO conversation engine the app and CLI use — adapters translate; the engine reasons.
+
+**Telegram (chat with the CEO).** Set `TELEGRAM_BOT_TOKEN` (BotFather) and `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated; anything else is ignored). Any server boot (app, daemon) starts the long-poll worker automatically. Each chat keeps its own conversation session: clarify questions come back as replies, spend gates ask for `GO`, duplicate updates are replay-protected.
+
+**Outbox (drafts-only publishing).** When `anima_outbox_enabled` is on, the daily diary also files an outbox draft. Every draft becomes a `channel_post` approval card — approving marks it ready and you copy/post manually. Nothing auto-posts in this release; auto-posting to X/Weibo lands later behind its own integration and the same approval gate.
+
+**Email triage (inbound).** Set `email_imap_host` / `email_imap_user` (password in the credential vault as `email_imap_password`). The daemon polls every N ticks (`email_poll_every_ticks`, default 12) and files one read-only triage card per new mail — you decide what becomes a directive.
+
+Status anywhere: `kompany channels status`, `kompany channels outbox`, REST `/channels/*`, MCP `kompany_channels_*`, SDK.
 
 ---
 

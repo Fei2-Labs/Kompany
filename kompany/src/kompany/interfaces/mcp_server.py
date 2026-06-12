@@ -144,6 +144,31 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_channels_status",
+        description=(
+            "Channel adapter health (Telegram worker, email-in poller) "
+            "and outbound-drafts outbox counts by status."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_channels_outbox",
+        description=(
+            "Recent channel outbox rows (outbound drafts), newest first. "
+            "Drafts-only MVP: approved rows are posted manually."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows to return",
+                    "default": 20,
+                },
+            },
+        },
+    ),
+    Tool(
         name="kompany_anima_state",
         description=(
             "Anima persona state (valence, energy, derived tone, "

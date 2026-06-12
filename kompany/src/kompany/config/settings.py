@@ -95,6 +95,19 @@ class KompanySettings(BaseSettings):
     anima_enabled: bool = True
     anima_diary_enabled: bool = True
 
+    # Bidirectional channels (06-12-channels). ``anima_outbox_enabled``
+    # gates the diary → outbox-draft hook (PRD D3, default OFF — drafts
+    # only, never auto-posted). Email-in (PRD D4) polls IMAP inside the
+    # ticker every ``email_poll_every_ticks`` ticks; the password lives
+    # in the credential vault under ``email_imap_password``, never here.
+    anima_outbox_enabled: bool = False
+    email_imap_host: str = Field(default="", alias="KOMPANY_EMAIL_IMAP_HOST")
+    email_imap_user: str = Field(default="", alias="KOMPANY_EMAIL_IMAP_USER")
+    email_imap_folder: str = Field(
+        default="INBOX", alias="KOMPANY_EMAIL_IMAP_FOLDER"
+    )
+    email_poll_every_ticks: int = 12
+
     # ``extra="ignore"`` is critical: a founder's machine may have any
     # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
     # custom-provider keys from earlier testing). Without this, engine
@@ -193,6 +206,18 @@ class KompanySettings(BaseSettings):
             for flag in ("anima_enabled", "anima_diary_enabled"):
                 if flag in data:
                     overrides[flag] = bool(data[flag])
+            # Bidirectional channels (06-12-channels).
+            if "anima_outbox_enabled" in data:
+                overrides["anima_outbox_enabled"] = bool(
+                    data["anima_outbox_enabled"]
+                )
+            for key in ("email_imap_host", "email_imap_user", "email_imap_folder"):
+                if key in data:
+                    overrides[key] = str(data[key])
+            if "email_poll_every_ticks" in data:
+                overrides["email_poll_every_ticks"] = int(
+                    data["email_poll_every_ticks"]
+                )
             # data_dir from YAML (issue #21): silently ignoring this key
             # caused a real production-contamination incident — an
             # isolated config's data_dir was dropped and the engine wrote

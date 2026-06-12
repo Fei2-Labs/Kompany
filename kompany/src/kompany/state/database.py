@@ -652,6 +652,35 @@ class Database:
                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
                )"""
         )
+        # Bidirectional channels (06-12-channels): chat-thread → CEO-channel
+        # session mapping (PR1), approval-gated outbound drafts (PR2), and
+        # seen-mail UID tracking for the IMAP poller (PR3). New tables →
+        # _migrate() per the shadow_costs precedent.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS channel_session_map (
+                   chat_id TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS channel_outbox (
+                   id TEXT PRIMARY KEY,
+                   channel TEXT NOT NULL,
+                   text TEXT NOT NULL,
+                   status TEXT NOT NULL DEFAULT 'draft',
+                   source TEXT NOT NULL DEFAULT '',
+                   approval_id TEXT,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS channel_email_seen (
+                   uid_key TEXT PRIMARY KEY,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

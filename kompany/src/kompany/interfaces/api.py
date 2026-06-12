@@ -2912,6 +2912,18 @@ def anima_diary(limit: int = 30) -> list[dict[str, Any]]:
     return get_engine().anima_diary_list(limit=limit)
 
 
+@app.get("/channels/status")
+def channels_status() -> dict[str, Any]:
+    """Channel adapter health + outbox counts (06-12-channels PRD D5)."""
+    return get_engine().channels_status()
+
+
+@app.get("/channels/outbox")
+def channels_outbox(limit: int = 20) -> list[dict[str, Any]]:
+    """Most recent channel outbox rows, newest first."""
+    return get_engine().outbox_list(limit=limit)
+
+
 @app.get("/agents/work-summary")
 def agents_work_summary() -> dict[str, dict[str, Any]]:
     """Per-agent task-history summary (06-12-panel-truthfulness #22).

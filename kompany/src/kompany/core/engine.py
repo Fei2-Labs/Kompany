@@ -236,6 +236,25 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             except Exception:  # noqa: BLE001 — glossary seed must never block boot
                 pass
 
+        # Bidirectional channels (06-12-channels). Telegram worker starts
+        # with the engine's background workers iff a bot token is set
+        # (PRD D2); email-in piggybacks on the ticker cadence (PRD D4) so
+        # the daemon needs no extra worker. Logic lives in channels/
+        # (engine.py is over the cap).
+        self.telegram_worker = None
+        if self.settings.telegram_bot_token:
+            from kompany.channels.telegram import TelegramWorker
+
+            self.telegram_worker = TelegramWorker(engine=self)
+        self.email_poller = None
+        if self.settings.email_imap_host and self.settings.email_imap_user:
+            from kompany.channels.email_in import ImapPoller
+
+            self.email_poller = ImapPoller(engine=self)
+            self.ticker.actions.append(
+                ("email_poll", self.email_poller.tick_action)
+            )
+
         self.llm = LLMClient(
             settings=self.settings,
             cost_tracker=self.cost_tracker,
@@ -1178,14 +1197,18 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         )
 
     async def start(self) -> None:
-        """Start engine background workers (watchdog scanner + ticker)."""
+        """Start engine background workers (watchdog + ticker + channels)."""
         self.watchdog.start()
         self.ticker.start()
+        if self.telegram_worker is not None:
+            self.telegram_worker.start()
 
     async def stop(self) -> None:
         """Stop engine background workers."""
         await self.watchdog.stop()
         await self.ticker.stop()
+        if self.telegram_worker is not None:
+            await self.telegram_worker.stop()
 
     # ------------------------------------------------------------------
     # Company templates (ready-to-play scenarios)
@@ -2114,6 +2137,21 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         from kompany.core import anima
 
         return anima.anima_diary_list_op(self, limit=limit)
+
+    # ----- Channels surface (06-12-channels PRD D5)
+    # Thin wrappers — logic lives in ``channels/ops.py``.
+
+    def channels_status(self) -> dict:
+        """Adapter health (telegram worker, email poller) + outbox counts."""
+        from kompany.channels import ops as channel_ops
+
+        return channel_ops.channels_status_op(self)
+
+    def outbox_list(self, limit: int = 20) -> list[dict]:
+        """Most recent channel outbox rows, newest first."""
+        from kompany.channels import ops as channel_ops
+
+        return channel_ops.outbox_list_op(self, limit=limit)
 
     def list_credentials(self) -> list[dict]:
         return [entry.model_dump(mode="json") for entry in self.credentials.list()]

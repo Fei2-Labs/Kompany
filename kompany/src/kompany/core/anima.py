@@ -195,15 +195,27 @@ class Anima:
             action_type="anima_diary",
             max_tokens=DIARY_MAX_TOKENS,
         )
+        entry = (resp.text or "").strip()
         self.diary_store.record(
             date=today,
-            entry=(resp.text or "").strip(),
+            entry=entry,
             valence=valence,
             energy=energy,
             cost=float(getattr(resp, "cost_usd", 0.0) or 0.0),
         )
         store.set_last_diary_date(today)
-        return [f"anima_diary:{today}"]
+        actions = [f"anima_diary:{today}"]
+        # Channel outbox hook (06-12-channels PRD D3): flag-gated diary →
+        # outbox draft + approval card. Drafts ONLY — never auto-posted.
+        if entry and getattr(settings, "anima_outbox_enabled", False):
+            try:
+                from kompany.channels.outbox import diary_outbox_hook
+
+                draft = diary_outbox_hook(self._engine, today, entry)
+                actions.append(f"anima_outbox_draft:{draft['id']}")
+            except Exception:  # noqa: BLE001 — a draft miss must not kill the tick
+                actions.append("anima_outbox_draft:error")
+        return actions
 
     # ------------------------------------------------------------------
     # Glossary seed (D1) — idempotent, one cheap read when present
