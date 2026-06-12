@@ -16,6 +16,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 10. [Executing Projects](#executing-projects)
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+13. [Multiple Brands: Workspaces](#multiple-brands-workspaces)
 13. [Tools & Actions](#tools--actions)
 13. [Founder Profile & Rules](#founder-profile--rules)
 13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
@@ -569,6 +570,33 @@ One billing consequence to know: because the heartbeat doesn't run while suspend
 ### Install details (macOS)
 
 `kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` with `KeepAlive` and `RunAtLoad`, pins `KOMPANY_DATA_DIR` to the data directory chosen at install time, and logs to `<data_dir>/logs/daemon.out.log` / `daemon.err.log`. The launch command prefers the server binary bundled inside `/Applications/Kompany.app` (no Python install needed); without the desktop app it falls back to your current Python interpreter. On non-macOS platforms `install` exits with a clear macOS-only message — run `kompany daemon run` under your own process supervisor instead.
+
+---
+
+## Multiple Brands: Workspaces
+
+Running more than one brand? Each brand gets its own **workspace** — a fully isolated data directory with its own database, credential vault, ledger, and integrations. Brand A's mailbox, money, and customer data never touch Brand B's; there is no shared state to leak across.
+
+```bash
+kompany workspace list                       # all brands; ▸ marks the active one
+kompany workspace create acme --label "Acme" # new dir under ~/.kompany-workspaces/acme
+kompany workspace switch acme                # make it active (then onboard the new brand)
+kompany workspace remove old-brand           # registry entry only — data stays on disk
+```
+
+The registry lives at `~/.kompany-workspaces.json`, outside every workspace. Your existing `~/.kompany` is registered automatically as the `default` workspace the first time the registry is consulted — nothing moves.
+
+How the engine picks its data dir, in order:
+
+1. `KOMPANY_DATA_DIR` env — explicit override; the registry is **bypassed entirely**.
+2. The active workspace from the registry.
+3. `~/.kompany` default.
+
+A `data_dir` key inside the chosen workspace's `config.yaml` still applies after step 2/3.
+
+Same operations everywhere: REST `GET /workspaces`, `POST /workspaces/switch`, `POST /workspaces`; MCP `kompany_workspaces` / `kompany_workspace_switch`; SDK `k.workspaces_list()` / `k.workspace_switch(name)` / `k.workspace_create(name)`; and a switcher in the web UI's Settings page (two-stage confirm; the page reloads after the switch).
+
+Switching while a server is running: the sidecar's `POST /workspaces/switch` drops its cached engine, so the **next** request rebinds to the new brand's data dir (the desktop WebView just reloads). One server serves one active workspace at a time. The daemon's launchd plist pins `KOMPANY_DATA_DIR`, so an installed daemon **stays on its brand** regardless of registry switches — the switch response says `restart_required: true` in that case. Running multiple brand daemons side by side (one plist per brand) is future work.
 
 ---
 

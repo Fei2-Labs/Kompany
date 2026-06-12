@@ -161,6 +161,17 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
         except ValueError as exc:
             return {"error": str(exc)}
 
+    if name == "kompany_workspaces":
+        return engine.workspaces_list()
+
+    if name == "kompany_workspace_switch":
+        from kompany.config.workspaces import WorkspaceError
+
+        try:
+            return engine.workspace_switch(arguments["name"])
+        except WorkspaceError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_channels_status":
         return engine.channels_status()
 

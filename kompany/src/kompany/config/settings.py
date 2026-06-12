@@ -166,24 +166,38 @@ class KompanySettings(BaseSettings):
         # boots (sidecar, daemon, MCP) silently ignored models / tick /
         # flag settings the founder had saved. Live-verification finding,
         # 06-12-daemon-tick-loop.
+        # Workspace registry (issue #15): when KOMPANY_DATA_DIR is NOT
+        # set, the active workspace from ~/.kompany-workspaces.json
+        # supplies the data dir. Env always bypasses the registry; a
+        # ``data_dir`` key inside the chosen workspace's config.yaml
+        # still applies after (issue #21 ordering unchanged):
+        # env > YAML data_dir > active workspace > ~/.kompany default.
+        from kompany.config import workspaces as _workspaces
+
+        overrides: dict[str, Any] = {}
+        ws_dir = _workspaces.active_data_dir()
+        if ws_dir is not None:
+            overrides["data_dir"] = ws_dir
         if config_path is None:
-            candidate = cls().data_dir / "config.yaml"
+            base_dir = ws_dir if ws_dir is not None else cls().data_dir
+            candidate = base_dir / "config.yaml"
             if candidate.exists():
                 config_path = str(candidate)
-        overrides: dict[str, Any] = {}
         data: dict[str, Any] = {}
         if config_path and Path(config_path).exists():
             with open(config_path) as f:
                 data = yaml.safe_load(f) or {}
             company = data.get("company", {})
-            overrides = {
+            # update(), not assignment — the workspace data_dir override
+            # above must survive the YAML parse (issue #15).
+            overrides.update({
                 "company_name": company.get("name", ""),
                 "company_goal": company.get("goal", ""),
                 "company_stage": company.get("stage", "solo"),
                 "company_time_horizon": company.get("time_horizon", ""),
                 "company_exclusions": company.get("exclusions", ""),
                 "currency": company.get("currency", "EUR"),
-            }
+            })
             # Model tier overrides from YAML
             models = data.get("models", {})
             if "apex" in models:

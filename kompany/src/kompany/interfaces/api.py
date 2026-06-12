@@ -389,11 +389,13 @@ def onboarding_stashed_credentials() -> StashedCredentialsResponse:
 
 
 def _resolved_data_dir() -> Path:
-    """Resolve the data dir the sidecar should use, consistent with engine."""
-    env = os.environ.get("KOMPANY_DATA_DIR", "").strip()
-    if env:
-        return Path(env).expanduser()
-    return Path("~/.kompany").expanduser()
+    """Resolve the data dir the sidecar should use, consistent with engine.
+
+    Full chain (issue #15): KOMPANY_DATA_DIR env > active workspace from
+    the registry > ~/.kompany default."""
+    from kompany.config.workspaces import resolve_data_dir
+
+    return resolve_data_dir()
 
 
 @app.get("/onboarding/status", response_model=OnboardingStatusResponse)
@@ -3112,6 +3114,56 @@ def channels_status() -> dict[str, Any]:
 def channels_outbox(limit: int = 20) -> list[dict[str, Any]]:
     """Most recent channel outbox rows, newest first."""
     return get_engine().outbox_list(limit=limit)
+
+
+class WorkspaceSwitchRequest(BaseModel):
+    name: str
+
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    label: str = ""
+
+
+@app.get("/workspaces")
+def workspaces_list() -> dict[str, Any]:
+    """Workspace registry (issue #15): active brand + all entries.
+    Canonical shape: ``engine.workspaces_list()`` — same on CLI/MCP/SDK."""
+    return get_engine().workspaces_list()
+
+
+@app.post("/workspaces/switch")
+def workspaces_switch(req: WorkspaceSwitchRequest) -> dict[str, Any]:
+    """Switch the active workspace (brand) and rebind this server.
+
+    Flips the registry, then drops the cached engine + event hub so the
+    NEXT request rebuilds against the new data dir. Connected SSE
+    clients keep the old hub — the web UI reloads the page after a
+    switch, which is the supported recovery. ``restart_required`` is
+    True only when KOMPANY_DATA_DIR pins this process to one dir (the
+    registry flip then cannot take effect here — daemon plist case)."""
+    from kompany.config.workspaces import WorkspaceError
+    from kompany.core.event_hub import reset_event_hub
+
+    try:
+        entry = get_engine().workspace_switch(req.name)
+    except WorkspaceError as exc:
+        return {"error": str(exc)}
+    reset_engine()
+    reset_event_hub()
+    return entry
+
+
+@app.post("/workspaces")
+def workspaces_create(req: WorkspaceCreateRequest) -> dict[str, Any]:
+    """Create + register a fresh workspace dir (not yet active).
+    Switch to it, then run onboarding against the new dir."""
+    from kompany.config.workspaces import WorkspaceError
+
+    try:
+        return get_engine().workspace_create(req.name, label=req.label)
+    except WorkspaceError as exc:
+        return {"error": str(exc)}
 
 
 @app.get("/agents/work-summary")

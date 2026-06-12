@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 100" width="480" height="100">
+  <defs>
+    <filter id="glow" x="-10%" y="-20%" width="120%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="480" height="100" fill="#000000"/>
+
+  <!-- Logo mark, scaled to 90×90, inset 5px -->
+  <svg x="5" y="5" width="90" height="90" viewBox="0 0 256 256">
+    <g filter="url(#glow)" stroke="#00ff41" fill="#00ff41" stroke-linecap="round">
+      <line x1="56" y1="22" x2="56" y2="234" stroke-width="20"/>
+      <line x1="66" y1="128" x2="160" y2="26"  stroke-width="13"/>
+      <line x1="66" y1="128" x2="160" y2="230" stroke-width="13"/>
+      <circle cx="66"  cy="128" r="9"  stroke="none"/>
+      <circle cx="160" cy="26"  r="6"  stroke="none"/>
+      <line x1="160" y1="26" x2="212" y2="11"  stroke-width="2.5"/>
+      <line x1="160" y1="26" x2="224" y2="33"  stroke-width="2.5"/>
+      <line x1="160" y1="26" x2="212" y2="63"  stroke-width="2.5"/>
+      <circle cx="216" cy="10"  r="5" stroke="none"/>
+      <circle cx="228" cy="33"  r="5" stroke="none"/>
+      <circle cx="216" cy="67"  r="5" stroke="none"/>
+      <circle cx="160" cy="230" r="6"  stroke="none"/>
+      <line x1="160" y1="230" x2="212" y2="213" stroke-width="2.5"/>
+      <line x1="160" y1="230" x2="224" y2="233" stroke-width="2.5"/>
+      <line x1="160" y1="230" x2="212" y2="248" stroke-width="2.5"/>
+      <circle cx="216" cy="211" r="5" stroke="none"/>
+      <circle cx="228" cy="233" r="5" stroke="none"/>
+      <circle cx="216" cy="249" r="5" stroke="none"/>
+    </g>
+  </svg>
+
+  <!-- Divider line -->
+  <line x1="106" y1="18" x2="106" y2="82"
+        stroke="#00ff41" stroke-width="1"
+        stroke-opacity="0.3"/>
+
+  <!-- Wordmark -->
+  <text x="118" y="66"
+        font-family="'JetBrains Mono','Courier New',Courier,monospace"
+        font-size="46" font-weight="700"
+        fill="#00ff41"
+        filter="url(#glow)"
+        letter-spacing="3">KOMPANY</text>
+</svg>

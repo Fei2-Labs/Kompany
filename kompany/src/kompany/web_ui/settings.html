@@ -152,6 +152,17 @@
       </div>
       <div class="set-result" id="cr-result" hidden></div>
     </div>
+
+    <div class="frame" data-label="SETTINGS // workspaces">
+      <h2 class="set-h">// WORKSPACES</h2>
+      <p class="set-note">One isolated workspace per brand — own database, vault, ledger, integrations. Nothing is shared. Switching rebinds this server to the brand's data dir and reloads the page.</p>
+      <div id="ws-list" class="set-meta">loading…</div>
+      <div class="set-row"><label for="ws-name">New workspace</label><input id="ws-name" type="text" autocomplete="off" placeholder="brand-name (lowercase)"></div>
+      <div class="set-control">
+        <button type="button" id="ws-create" class="onb-btn onb-btn-discuss">[ + CREATE WORKSPACE ]</button>
+      </div>
+      <div class="set-result" id="ws-result" hidden></div>
+    </div>
   </div>
 
   <script type="module">
@@ -722,6 +733,96 @@
         crRotate.textContent = "[ ⟳ ROTATE KEY ]";
       }
     });
+
+    // ----- Workspaces (issue #15: one isolated data dir per brand) ------
+    const wsList = document.getElementById("ws-list");
+    const wsResult = document.getElementById("ws-result");
+    function wsShow(msg, ok) {
+      wsResult.hidden = false;
+      wsResult.textContent = msg;
+      wsResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    let wsSwitchArmed = null; // two-stage confirm: name armed for switch
+    async function wsLoad() {
+      try {
+        const d = await fetch("/workspaces", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        wsList.innerHTML = "";
+        for (const w of d.workspaces) {
+          const row = document.createElement("div");
+          row.className = "set-row";
+          const label = document.createElement("label");
+          label.textContent = (w.active ? "▸ " : "") + w.name + (w.label && w.label !== w.name ? ` — ${w.label}` : "");
+          const ctl = document.createElement("div");
+          ctl.className = "set-control";
+          const dir = document.createElement("span");
+          dir.className = "set-meta";
+          dir.textContent = w.data_dir;
+          ctl.appendChild(dir);
+          if (!w.active) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "onb-btn onb-btn-discuss";
+            btn.textContent = "[ ▸ SWITCH ]";
+            btn.addEventListener("click", async () => {
+              // No native dialogs in the Kompany WebView — two-stage
+              // button confirm, same pattern as vault key rotation.
+              if (wsSwitchArmed !== w.name) {
+                wsSwitchArmed = w.name;
+                btn.textContent = "[ ▸ CONFIRM — switches the whole app to this brand ]";
+                wsShow(`click again to switch to '${w.name}' — the page reloads`, true);
+                return;
+              }
+              btn.disabled = true;
+              try {
+                const r = await fetch("/workspaces/switch", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", Accept: "application/json" },
+                  body: JSON.stringify({ name: w.name }),
+                });
+                const res = await r.json().catch(() => ({}));
+                if (res.error) { wsShow("✗ " + res.error, false); return; }
+                if (res.restart_required) {
+                  wsShow("✓ switched in the registry — this server is pinned by KOMPANY_DATA_DIR; restart it to pick up the new brand", true);
+                  return;
+                }
+                wsShow("✓ switched — reloading…", true);
+                location.reload();
+              } catch (e) { wsShow("switch failed: " + e.message, false); }
+              finally { btn.disabled = false; wsSwitchArmed = null; }
+            });
+            ctl.appendChild(btn);
+          }
+          row.appendChild(label);
+          row.appendChild(ctl);
+          wsList.appendChild(row);
+        }
+        if (d.env_override) {
+          const note = document.createElement("div");
+          note.className = "set-meta";
+          note.textContent = "KOMPANY_DATA_DIR is set — it bypasses the registry; switching here will not affect this server until that env var is removed.";
+          wsList.appendChild(note);
+        }
+      } catch (e) {
+        wsList.textContent = "failed to load workspaces: " + e.message;
+      }
+    }
+    document.getElementById("ws-create").addEventListener("click", async () => {
+      const name = document.getElementById("ws-name").value.trim();
+      if (!name) { wsShow("workspace name required", false); return; }
+      try {
+        const r = await fetch("/workspaces", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ name }),
+        });
+        const res = await r.json().catch(() => ({}));
+        if (res.error) { wsShow("✗ " + res.error, false); return; }
+        wsShow(`✓ created '${res.name}' — switch to it, then onboard the new brand`, true);
+        document.getElementById("ws-name").value = "";
+        wsLoad();
+      } catch (e) { wsShow("create failed: " + e.message, false); }
+    });
+    wsLoad();
   </script>
 </body>
 </html>

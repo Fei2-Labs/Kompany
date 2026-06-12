@@ -397,6 +397,21 @@ class Kompany:
             task_id=task_id,
         )
 
+    def workspaces_list(self) -> dict[str, Any]:
+        """Workspace registry (issue #15): active brand + entries. Same
+        shape as REST ``GET /workspaces`` and MCP ``kompany_workspaces``."""
+        return self._engine.workspaces_list()
+
+    def workspace_switch(self, name: str) -> dict[str, Any]:
+        """Mark ``name`` as the active workspace. The wrapped engine
+        stays bound to its original data dir — build a new SDK instance
+        after switching. Raises ``WorkspaceError`` for unknown names."""
+        return self._engine.workspace_switch(name)
+
+    def workspace_create(self, name: str, label: str = "") -> dict[str, Any]:
+        """Create + register a fresh workspace dir (not yet active)."""
+        return self._engine.workspace_create(name, label=label)
+
     def anima_state(self) -> dict[str, Any]:
         """Current Anima persona state (06-12-anima-persona PRD D5).
 

@@ -2248,6 +2248,41 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
 
         return anima.anima_diary_list_op(self, limit=limit)
 
+    # ----- Workspaces (issue #15, multi-brand). Thin wrappers — logic
+    # lives in ``config/workspaces.py``. A workspace IS a data dir;
+    # switching only flips the registry — callers (REST switch endpoint,
+    # CLI) must rebuild their engine so stores rebind to the new dir.
+
+    def workspaces_list(self) -> dict:
+        """Registry payload: active name, env_override flag, entries."""
+        from kompany.config import workspaces
+
+        return workspaces.workspaces_list()
+
+    def workspace_switch(self, name: str) -> dict:
+        """Mark ``name`` active. THIS engine instance stays bound to its
+        original data dir — the payload says so honestly: callers must
+        re-init (REST calls ``reset_engine()``; CLI exits anyway).
+
+        ``restart_required`` is True when ``KOMPANY_DATA_DIR`` pins the
+        process to a dir the registry cannot change (daemon plist), or
+        for any long-lived consumer that cannot rebuild its engine."""
+        import os
+
+        from kompany.config import workspaces
+
+        entry = workspaces.set_active(name)
+        entry["restart_required"] = bool(
+            os.environ.get("KOMPANY_DATA_DIR", "").strip()
+        )
+        return entry
+
+    def workspace_create(self, name: str, label: str = "") -> dict:
+        """Create + register a fresh workspace dir (not yet active)."""
+        from kompany.config import workspaces
+
+        return workspaces.create(name, label=label)
+
     # ----- Channels surface (06-12-channels PRD D5)
     # Thin wrappers — logic lives in ``channels/ops.py``.
 

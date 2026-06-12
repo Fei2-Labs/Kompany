@@ -33,8 +33,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kompany.config.settings import KompanySettings
-
 DISCOVERY_FILENAME = "server.json"
 HEALTH_PROBE_TIMEOUT_SECONDS = 0.5
 # kompany_execute can legitimately run for many minutes; uvicorn does
@@ -50,11 +48,14 @@ class SidecarProxyError(RuntimeError):
 def default_data_dir() -> Path:
     """Resolve the same data_dir the in-process engine would use.
 
-    ``KompanyEngine()`` loads ``KompanySettings`` with env overrides
-    (``KOMPANY_DATA_DIR``), so reading settings here guarantees the MCP
-    process and the sidecar agree on where ``server.json`` lives.
+    ``KompanyEngine()`` resolves env ``KOMPANY_DATA_DIR`` > active
+    workspace (issue #15 registry) > ``~/.kompany`` — same chain here so
+    the MCP process and the sidecar agree on where ``server.json``
+    lives, including right after a workspace switch.
     """
-    return KompanySettings().data_dir
+    from kompany.config.workspaces import resolve_data_dir
+
+    return resolve_data_dir()
 
 
 def discovery_path(data_dir: Path | None = None) -> Path:

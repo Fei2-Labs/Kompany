@@ -209,6 +209,31 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_workspaces",
+        description=(
+            "List workspaces (one isolated data dir per brand): active "
+            "name, env_override flag, entries with data_dir + label. "
+            "KOMPANY_DATA_DIR env bypasses the registry entirely."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_workspace_switch",
+        description=(
+            "Switch the active workspace (brand). Flips the registry; "
+            "running engines must re-init to bind the new data dir — "
+            "restart_required=true means this process is pinned by "
+            "KOMPANY_DATA_DIR and needs a restart instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Workspace name"},
+            },
+            "required": ["name"],
+        },
+    ),
+    Tool(
         name="kompany_tools_propose",
         description=(
             "Propose a tool action (e.g. email.send). Files a tool_action "
