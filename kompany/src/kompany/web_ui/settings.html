@@ -134,8 +134,23 @@
       <div class="set-result" id="fr-result" hidden></div>
     </div>
 
-    <div class="frame set-soon" data-label="SETTINGS // more">
-      <p class="set-note">Credentials are coming here (backlog #8).</p>
+    <div class="frame" data-label="SETTINGS // integrations">
+      <h2 class="set-h">// INTEGRATIONS</h2>
+      <p class="set-note">Everything the team can connect to. Connected = all required credentials are in the encrypted vault. Connect fills the missing credentials inline; disconnect clears them.</p>
+      <div id="ig-list" class="set-meta">loading…</div>
+      <div class="set-result" id="ig-result" hidden></div>
+    </div>
+
+    <div class="frame" data-label="SETTINGS // credentials">
+      <h2 class="set-h">// CREDENTIALS</h2>
+      <p class="set-note">Raw vault entries (values stay encrypted — never shown). Update writes a new value; delete removes the entry (the integration using it shows as not connected).</p>
+      <div id="cr-list" class="set-meta">loading…</div>
+      <div class="set-meta" style="margin-top:14px">Rotate vault key — re-encrypts every stored credential with a new key. Save the new key: it replaces KOMPANY_VAULT_KEY.</div>
+      <div class="set-row"><label for="cr-newkey">New vault key</label><input id="cr-newkey" type="password" autocomplete="off" placeholder="new Fernet key"></div>
+      <div class="set-control">
+        <button type="button" id="cr-rotate" class="onb-btn onb-btn-discuss">[ ⟳ ROTATE KEY ]</button>
+      </div>
+      <div class="set-result" id="cr-result" hidden></div>
     </div>
   </div>
 
@@ -497,6 +512,216 @@
       } catch (e) { frShow("save failed: " + e.message, false); }
     });
     frLoad();
+
+    // ---- Integrations (#8) ----
+    // Loader-driven list from GET /integrations. Connect = inline inputs
+    // per missing credential → POST /credentials each. Disconnect =
+    // two-stage button confirm → DELETE /credentials/{name} per required
+    // credential. No native dialogs (dead in the Tauri WebView).
+    const igList = document.getElementById("ig-list");
+    const igResult = document.getElementById("ig-result");
+    function igShow(msg, ok) {
+      igResult.hidden = false; igResult.textContent = msg;
+      igResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    async function igConnectedCreds() {
+      const entries = await fetch("/credentials", { headers: { Accept: "application/json" } }).then((r) => r.json());
+      return new Set((entries || []).map((e) => e.name));
+    }
+    function igRenderRow(integ, vaultNames) {
+      const row = document.createElement("div");
+      row.className = "set-row ig-row";
+      row.style.flexWrap = "wrap";
+      const chip = integ.connected ? "✓ connected" : "○ not connected";
+      const head = document.createElement("div");
+      head.style.flex = "1 1 100%";
+      head.innerHTML =
+        `<strong>${integ.display_name}</strong> <span class="${integ.connected ? "ok" : ""}">${chip}</span>` +
+        `<div class="set-meta">${integ.description || ""}</div>` +
+        `<div class="set-meta">credentials: ${integ.required_credentials.join(", ") || "none"}` +
+        `${integ.tools.length ? " · tools: " + integ.tools.join(", ") : ""}</div>`;
+      row.appendChild(head);
+      const actions = document.createElement("div");
+      actions.className = "set-control";
+      if (!integ.connected) {
+        const missing = integ.required_credentials.filter((n) => !vaultNames.has(n));
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.className = "onb-btn onb-btn-submit";
+        btn.textContent = "[ ▸ connect ]";
+        const form = document.createElement("div");
+        form.hidden = true; form.style.flex = "1 1 100%";
+        const inputs = {};
+        for (const name of (missing.length ? missing : integ.required_credentials)) {
+          const fr = document.createElement("div");
+          fr.className = "set-row";
+          const lab = document.createElement("label");
+          lab.textContent = name;
+          const inp = document.createElement("input");
+          inp.type = /key|password|token|secret/i.test(name) ? "password" : "text";
+          inp.autocomplete = "off";
+          fr.appendChild(lab); fr.appendChild(inp);
+          form.appendChild(fr);
+          inputs[name] = inp;
+        }
+        const save = document.createElement("button");
+        save.type = "button"; save.className = "onb-btn onb-btn-submit";
+        save.textContent = "[ ▸ save credentials ]";
+        form.appendChild(save);
+        btn.addEventListener("click", () => { form.hidden = !form.hidden; });
+        save.addEventListener("click", async () => {
+          save.disabled = true;
+          try {
+            for (const [name, inp] of Object.entries(inputs)) {
+              const value = inp.value.trim();
+              if (!value) continue;
+              const r = await fetch("/credentials", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify({ name, value }),
+              });
+              if (!r.ok) {
+                const d = await r.json().catch(() => ({}));
+                throw new Error(d.detail || `failed to save ${name}`);
+              }
+            }
+            igShow(`✓ credentials saved for ${integ.display_name}`, true);
+            igLoad(); crLoad();
+          } catch (e) { igShow("✗ " + e.message, false); }
+          finally { save.disabled = false; }
+        });
+        actions.appendChild(btn);
+        row.appendChild(actions);
+        row.appendChild(form);
+      } else {
+        const btn = document.createElement("button");
+        btn.type = "button"; btn.className = "onb-btn";
+        btn.textContent = "[ × disconnect ]";
+        let confirming = false;
+        btn.addEventListener("click", async () => {
+          if (!confirming) {
+            confirming = true;
+            btn.textContent = "[ × CONFIRM — clears stored credentials ]";
+            return;
+          }
+          btn.disabled = true;
+          try {
+            for (const name of integ.required_credentials) {
+              await fetch(`/credentials/${encodeURIComponent(name)}`, { method: "DELETE" });
+            }
+            igShow(`✓ ${integ.display_name} disconnected`, true);
+            igLoad(); crLoad();
+          } catch (e) { igShow("✗ disconnect failed: " + e.message, false); }
+          finally { btn.disabled = false; }
+        });
+        actions.appendChild(btn);
+        row.appendChild(actions);
+      }
+      return row;
+    }
+    async function igLoad() {
+      try {
+        const [list, vaultNames] = await Promise.all([
+          fetch("/integrations", { headers: { Accept: "application/json" } }).then((r) => r.json()),
+          igConnectedCreds(),
+        ]);
+        igList.textContent = "";
+        if (!list || !list.length) { igList.textContent = "no integrations registered"; return; }
+        for (const integ of list) igList.appendChild(igRenderRow(integ, vaultNames));
+      } catch (_) { igList.textContent = "integrations unavailable"; }
+    }
+    igLoad();
+
+    // ---- Credentials vault (#8) ----
+    const crList = document.getElementById("cr-list");
+    const crResult = document.getElementById("cr-result");
+    function crShow(msg, ok) {
+      crResult.hidden = false; crResult.textContent = msg;
+      crResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    function crRenderRow(entry) {
+      const row = document.createElement("div");
+      row.className = "set-row cr-row";
+      const lab = document.createElement("label");
+      lab.textContent = entry.name;
+      lab.title = entry.updated_at ? "updated " + entry.updated_at : "";
+      const inp = document.createElement("input");
+      inp.type = "password"; inp.autocomplete = "off";
+      inp.placeholder = "•••••• — type to replace";
+      const save = document.createElement("button");
+      save.type = "button"; save.className = "onb-btn onb-btn-submit";
+      save.textContent = "[ ▸ update ]";
+      save.addEventListener("click", async () => {
+        const value = inp.value.trim();
+        if (!value) { crShow("type a new value first", false); return; }
+        save.disabled = true;
+        try {
+          const r = await fetch("/credentials", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ name: entry.name, value }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (r.ok) { crShow(`✓ ${entry.name} updated`, true); inp.value = ""; crLoad(); igLoad(); }
+          else crShow("✗ " + (d.detail || "update failed"), false);
+        } catch (e) { crShow("update failed: " + e.message, false); }
+        finally { save.disabled = false; }
+      });
+      const del = document.createElement("button");
+      del.type = "button"; del.className = "onb-btn";
+      del.textContent = "[ × ]";
+      let confirming = false;
+      del.addEventListener("click", async () => {
+        if (!confirming) { confirming = true; del.textContent = "[ × confirm ]"; return; }
+        del.disabled = true;
+        try {
+          const r = await fetch(`/credentials/${encodeURIComponent(entry.name)}`, { method: "DELETE" });
+          if (r.ok) { crShow(`✓ ${entry.name} deleted`, true); crLoad(); igLoad(); }
+          else crShow("✗ delete failed", false);
+        } catch (e) { crShow("delete failed: " + e.message, false); }
+        finally { del.disabled = false; }
+      });
+      row.appendChild(lab); row.appendChild(inp); row.appendChild(save); row.appendChild(del);
+      return row;
+    }
+    async function crLoad() {
+      try {
+        const entries = await fetch("/credentials", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        crList.textContent = "";
+        if (!entries || !entries.length) { crList.textContent = "vault is empty"; return; }
+        for (const entry of entries) crList.appendChild(crRenderRow(entry));
+      } catch (_) { crList.textContent = "credentials unavailable"; }
+    }
+    crLoad();
+
+    // Rotate vault key — two-stage confirm; re-encrypts every entry.
+    const crRotate = document.getElementById("cr-rotate");
+    let crRotateConfirm = false;
+    crRotate.addEventListener("click", async () => {
+      const newKey = document.getElementById("cr-newkey").value.trim();
+      if (!newKey) { crShow("new vault key required", false); return; }
+      if (!crRotateConfirm) {
+        crRotateConfirm = true;
+        crRotate.textContent = "[ ⟳ CONFIRM — re-encrypts the whole vault ]";
+        crShow("click again to confirm key rotation — update KOMPANY_VAULT_KEY afterwards", true);
+        return;
+      }
+      crRotate.disabled = true;
+      try {
+        const r = await fetch("/credentials/rotate-key", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ new_vault_key: newKey }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) { crShow(`✓ key rotated (${d.rotated ?? "?"} entries) — set KOMPANY_VAULT_KEY to the new key`, true); document.getElementById("cr-newkey").value = ""; }
+        else crShow("✗ " + (d.detail || "rotation failed"), false);
+      } catch (e) { crShow("rotation failed: " + e.message, false); }
+      finally {
+        crRotate.disabled = false;
+        crRotateConfirm = false;
+        crRotate.textContent = "[ ⟳ ROTATE KEY ]";
+      }
+    });
   </script>
 </body>
 </html>

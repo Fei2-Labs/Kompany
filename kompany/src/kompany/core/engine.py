@@ -4138,6 +4138,14 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
 
         return tool_actions.tools_list(self)
 
+    def integrations_list(self) -> list[dict]:
+        """Registered integrations with required credentials + connection
+        state. Same shape on REST ``GET /integrations``, MCP
+        ``kompany_integrations`` and the SDK (#8)."""
+        from kompany.core import tool_actions
+
+        return tool_actions.integrations_list(self)
+
     def execute_tool(self, tool_name: str, inputs: dict) -> dict:
         """Inline execution — read-only zero-cost tools only. Anything
         side-effecting or paid is refused with ``requires_approval``."""

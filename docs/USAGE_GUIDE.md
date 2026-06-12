@@ -480,6 +480,15 @@ kompany approve <approval-id>       # executes the send for real
 
 Same operations everywhere: REST `GET /tools` + `POST /tools/propose`, MCP `kompany_tools_list` / `kompany_tools_propose`, SDK `k.tools_list()` / `k.tools_propose(...)`.
 
+### Integrations & Credentials (Settings)
+
+The **Settings page** is the single config home — anything skippable at onboarding (model source, founder profile, founder rules, credentials) stays editable there. Two sections cover connections:
+
+- **INTEGRATIONS** — every registered integration with its connection state, the credentials it needs, and the tools it provides. Connect fills the missing credentials inline (stored encrypted in the vault); disconnect clears them.
+- **CREDENTIALS** — the raw vault entries (values never shown). Update a value, delete an entry, or rotate the vault key (re-encrypts everything with a new key).
+
+Same inventory everywhere: CLI `kompany integrations`, REST `GET /integrations`, MCP `kompany_integrations`, SDK `k.integrations_list()`. Credentials: REST `GET/POST /credentials`, `DELETE /credentials/{name}`, `POST /credentials/rotate-key`.
+
 ---
 
 ## Founder Profile & Rules

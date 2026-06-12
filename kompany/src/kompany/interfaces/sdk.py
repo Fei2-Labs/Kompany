@@ -368,6 +368,12 @@ class Kompany:
         ``kompany_tools_list`` (action pipeline #4/#5)."""
         return self._engine.tools_list()
 
+    def integrations_list(self) -> list[dict[str, Any]]:
+        """Registered integrations with required credentials + connection
+        state. Same shape as REST ``GET /integrations`` and MCP
+        ``kompany_integrations`` (#8)."""
+        return self._engine.integrations_list()
+
     def tools_propose(
         self,
         tool_name: str,

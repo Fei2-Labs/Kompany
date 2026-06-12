@@ -145,6 +145,9 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_tools_list":
         return engine.tools_list()
 
+    if name == "kompany_integrations":
+        return engine.integrations_list()
+
     if name == "kompany_tools_propose":
         try:
             return engine.propose_action(

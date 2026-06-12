@@ -279,6 +279,69 @@ def test_tools_list_parity_sdk_rest_mcp(engine, monkeypatch):
     assert {r["name"] for r in rest_out} == {"test.echo", "test.send", "test.pay"}
 
 
+def test_integrations_list_shape_and_connected_flip(engine):
+    rows = engine.integrations_list()
+    assert [r["integration_id"] for r in rows] == ["test_integ"]
+    row = rows[0]
+    assert row["display_name"] == "Test Integration"
+    assert row["required_credentials"] == ["custom_api_key"]
+    assert row["connected"] is False
+    assert sorted(row["tools"]) == ["test.echo", "test.pay", "test.send"]
+    assert isinstance(row["description"], str)
+    engine.credentials.set("custom_api_key", "k")
+    assert engine.integrations_list()[0]["connected"] is True
+    engine.credentials.delete("custom_api_key")
+    assert engine.integrations_list()[0]["connected"] is False
+
+
+def test_integrations_parity_sdk_rest_mcp(engine, monkeypatch):
+    """SDK == REST == MCP (CLI renders the same engine call)."""
+    import asyncio
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    import kompany.interfaces.api as api_mod
+    from kompany.interfaces import mcp_proxy, mcp_server
+
+    sdk_out = engine.integrations_list()
+
+    monkeypatch.setattr(api_mod, "_engine", engine)
+    with TestClient(api_mod.app) as client:
+        rest_out = client.get("/integrations").json()
+
+    monkeypatch.setattr(mcp_proxy, "discover_sidecar", lambda data_dir=None: None)
+    monkeypatch.setattr(mcp_server, "_engine", engine)
+    out = asyncio.run(mcp_server.call_tool("kompany_integrations", {}))
+    mcp_out = _json.loads(out[0].text)
+
+    assert sdk_out == rest_out == mcp_out
+    assert rest_out[0]["integration_id"] == "test_integ"
+
+
+def test_rest_credentials_set_list_delete(engine, monkeypatch):
+    """Settings page contract: POST /credentials connects, DELETE
+    /credentials/{name} disconnects, GET /integrations reflects both."""
+    from fastapi.testclient import TestClient
+
+    import kompany.interfaces.api as api_mod
+
+    monkeypatch.setattr(api_mod, "_engine", engine)
+    with TestClient(api_mod.app) as client:
+        r = client.post("/credentials", json={"name": "custom_api_key", "value": "k1"})
+        assert r.status_code == 200
+        names = [e["name"] for e in client.get("/credentials").json()]
+        assert "custom_api_key" in names
+        assert client.get("/integrations").json()[0]["connected"] is True
+
+        r = client.delete("/credentials/custom_api_key")
+        assert r.status_code == 200
+        assert r.json()["deleted"] is True
+        names = [e["name"] for e in client.get("/credentials").json()]
+        assert "custom_api_key" not in names
+        assert client.get("/integrations").json()[0]["connected"] is False
+
+
 def test_rest_propose_unknown_tool_is_400(engine, monkeypatch):
     from fastapi.testclient import TestClient
 

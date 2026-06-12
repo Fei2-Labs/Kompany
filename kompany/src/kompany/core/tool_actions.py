@@ -100,6 +100,35 @@ def tools_list(engine: Any) -> list[dict[str, Any]]:
     return out
 
 
+def integrations_list(engine: Any) -> list[dict[str, Any]]:
+    """All registered integrations with connection state — the
+    founder-facing inventory behind ``kompany integrations`` /
+    ``GET /integrations``. Loader-driven (builtins + entry-point
+    plugins), so a new integration shows up everywhere automatically.
+    """
+    out: list[dict[str, Any]] = []
+    for integ in loader.registered("integration"):
+        try:
+            tool_names = sorted(t.name for t in integ.tools())
+        except Exception:  # noqa: BLE001 — one broken plugin can't block
+            tool_names = []
+        doc_lines = (integ.__doc__ or "").strip().splitlines()
+        description = str(
+            getattr(integ, "description", "") or (doc_lines[0] if doc_lines else "")
+        )
+        out.append(
+            {
+                "integration_id": integ.integration_id,
+                "display_name": integ.display_name,
+                "description": description,
+                "required_credentials": list(integ.required_credentials or ()),
+                "connected": _integration_connected(engine, integ),
+                "tools": tool_names,
+            }
+        )
+    return sorted(out, key=lambda r: r["integration_id"])
+
+
 # ---------------------------------------------------------------------------
 # Inline execution (read-only fast path)
 # ---------------------------------------------------------------------------
@@ -280,6 +309,7 @@ __all__ = [
     "ACTION_TOOL_EXECUTE",
     "execute_approved_tool_action",
     "execute_tool",
+    "integrations_list",
     "reject_tool_action",
     "tool_registry",
     "tools_list",

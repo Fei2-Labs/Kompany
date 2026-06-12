@@ -1166,14 +1166,6 @@ def set_founder_rules_setting(req: FounderRulesRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-class IntegrationInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    integration_id: str
-    display_name: str
-    required_credentials: list[str]
-    connected: bool
-
-
 class ConnectEmailRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     smtp_host: str = Field(..., min_length=1)
@@ -1189,26 +1181,13 @@ class IntegrationActionResponse(BaseModel):
     detail: str = ""
 
 
-@app.get("/integrations", response_model=list[IntegrationInfo])
-def list_integrations() -> list[IntegrationInfo]:
-    """List built-in integrations + whether the founder has connected
-    each (all required credentials present in the vault)."""
-    from kompany.integrations.email_smtp import EmailIntegration, ResendIntegration
-
-    engine = get_engine()
-    out: list[IntegrationInfo] = []
-    for integ in (EmailIntegration(), ResendIntegration()):
-        creds = integ.required_credentials
-        connected = bool(creds) and all(
-            (engine.credentials.get(c) or "") for c in creds
-        )
-        out.append(IntegrationInfo(
-            integration_id=integ.integration_id,
-            display_name=integ.display_name,
-            required_credentials=list(creds),
-            connected=connected,
-        ))
-    return out
+@app.get("/integrations")
+def list_integrations() -> list[dict[str, Any]]:
+    """List registered integrations (loader-driven: builtins + plugins)
+    with required credentials + whether the founder has connected each
+    (all required credentials present in the vault). Canonical shape:
+    ``engine.integrations_list()`` — same on MCP/SDK/CLI (#8)."""
+    return get_engine().integrations_list()
 
 
 @app.post("/integrations/email/connect", response_model=IntegrationActionResponse)

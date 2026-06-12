@@ -200,6 +200,15 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_integrations",
+        description=(
+            "List registered integrations: id, display name, description, "
+            "required credentials, connection state, tools provided. "
+            "Connected = all required credentials present in the vault."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="kompany_tools_propose",
         description=(
             "Propose a tool action (e.g. email.send). Files a tool_action "

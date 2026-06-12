@@ -2940,3 +2940,32 @@ def tools_propose_cmd(
     console.print(
         f"[green]Proposed.[/green] Approve with: kompany approve {result['id']}"
     )
+
+
+@app.command("integrations")
+def integrations_cmd(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """List integrations with required credentials + connection state."""
+    engine = _get_engine(config)
+    rows = engine.integrations_list()
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        console.print("[dim]No integrations registered.[/dim]")
+        return
+    table = Table(title=f"Integrations ({len(rows)})")
+    table.add_column("Integration", style="cyan")
+    table.add_column("Connected")
+    table.add_column("Required credentials", style="dim")
+    table.add_column("Tools", style="dim")
+    for row in rows:
+        table.add_row(
+            f"{row['display_name']} [dim]({row['integration_id']})[/dim]",
+            "[green]yes[/green]" if row["connected"] else "[yellow]no[/yellow]",
+            ", ".join(row["required_credentials"]),
+            ", ".join(row["tools"]),
+        )
+    console.print(table)
