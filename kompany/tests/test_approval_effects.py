@@ -266,10 +266,11 @@ def test_effect_actions_cover_both_pr4_action_types():
     from kompany.core.self_update.effects import ACTION_SELF_UPDATE
 
     from kompany.channels.outbox import ACTION_CHANNEL_POST
+    from kompany.core.tool_actions import ACTION_TOOL_EXECUTE
 
     assert HARNESS_EFFECT_ACTIONS == {
         ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE, ACTION_SELF_UPDATE,
-        ACTION_CHANNEL_POST,
+        ACTION_CHANNEL_POST, ACTION_TOOL_EXECUTE,
     }
 
 

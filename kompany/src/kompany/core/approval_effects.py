@@ -35,6 +35,11 @@ from kompany.core.self_update.effects import (
     approve_self_update,
     reject_self_update,
 )
+from kompany.core.tool_actions import (
+    ACTION_TOOL_EXECUTE,
+    execute_approved_tool_action,
+    reject_tool_action,
+)
 from kompany.state.models import ApprovalRequest
 
 # Action types whose approve/reject triggers an engine-side effect here.
@@ -44,6 +49,7 @@ HARNESS_EFFECT_ACTIONS: frozenset[str] = frozenset(
         ACTION_BUDGET_INCREASE,
         ACTION_SELF_UPDATE,
         ACTION_CHANNEL_POST,
+        ACTION_TOOL_EXECUTE,
     }
 )
 
@@ -65,6 +71,10 @@ def apply_post_approve_effect(
         # Tier 1 (06-12-channels D3): mark approved + manual-post comment.
         # NEVER posts anywhere — constitution publishing gate.
         return approve_channel_post(engine, request)
+    if request.action_type == ACTION_TOOL_EXECUTE:
+        # Proposed tool action (#4/#5): the founder's yes executes the
+        # real external action via the Integration, with audit + stamp.
+        return execute_approved_tool_action(engine, request)
     return {"status": "no_effect"}
 
 
@@ -76,6 +86,8 @@ def apply_post_reject_effect(
         return reject_self_update(engine, request)
     if request.action_type == ACTION_CHANNEL_POST:
         return reject_channel_post(engine, request)
+    if request.action_type == ACTION_TOOL_EXECUTE:
+        return reject_tool_action(engine, request)
     payload = request.payload or {}
     task_id = payload.get("task_id")
     if request.action_type == ACTION_ENVELOPE_TOPUP:

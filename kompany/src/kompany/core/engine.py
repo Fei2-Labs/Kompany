@@ -3939,14 +3939,19 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 self._finalize_target_feasibility(request, outcome="approved")
             if request.action_type == "glossary_review":
                 self._finalize_glossary_review(request, outcome="approved")
-            # Deferred tool action (#5): the founder approved a proposed
-            # external action (e.g. send email). Execute it for real now —
-            # this is the autonomy payoff: agent proposes → founder
-            # approves → it actually happens, with a real-result audit.
+            # Deferred tool action (#4/#5): the founder approved a
+            # proposed external action (e.g. send email). Execute it for
+            # real now — agent proposes → founder approves → it actually
+            # happens, with a real-result audit. Logic lives in
+            # core/tool_actions.py (routed via approval_effects below);
+            # ``tool_result`` kept as the surface-facing result key.
             if request.action_type == "tool_action":
-                out = self._execute_tool_action(request)
+                from kompany.core import approval_effects
+
+                effect = approval_effects.apply_post_approve_effect(self, request)
                 payload = request.model_dump(mode="json")
-                payload["tool_result"] = out
+                payload["effect"] = effect
+                payload["tool_result"] = effect.get("result", effect)
                 return payload
             # Harness budget approvals (PR5): approving must actually
             # fund the envelope / raise the task cap. Logic lives in
@@ -4009,15 +4014,26 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
     # ------------------------------------------------------------------
 
     def _tool_registry(self) -> dict:
-        """Map tool name → Tool instance. Built-in integrations now;
-        plugin integrations (entry-point discovered) will merge in here."""
-        from kompany.integrations.email_smtp import EmailIntegration
+        """Map tool name → Tool instance (loader: builtins + plugins)."""
+        from kompany.core import tool_actions
 
-        registry: dict = {}
-        for integ in (EmailIntegration(),):
-            for tool in integ.tools():
-                registry[tool.name] = tool
-        return registry
+        return {
+            name: entry["tool"]
+            for name, entry in tool_actions.tool_registry(self).items()
+        }
+
+    def tools_list(self) -> list[dict]:
+        """Registered tools with side_effect / tier / connection state."""
+        from kompany.core import tool_actions
+
+        return tool_actions.tools_list(self)
+
+    def execute_tool(self, tool_name: str, inputs: dict) -> dict:
+        """Inline execution — read-only zero-cost tools only. Anything
+        side-effecting or paid is refused with ``requires_approval``."""
+        from kompany.core import tool_actions
+
+        return tool_actions.execute_tool(self, tool_name, inputs)
 
     def propose_action(
         self,
@@ -4029,20 +4045,44 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         requested_by: str = "team",
         directive_id: str | None = None,
         project_id: str | None = None,
+        task_id: str | None = None,
+        reason: str | None = None,
     ) -> dict:
         """Queue a deferred external action for founder approval.
 
         The action does NOT run now — it lands in the inbox as a
-        ``tool_action`` approval carrying the tool + inputs. On approve,
-        ``approve_request`` executes it for real. This is the founder's
-        money/decision gate: nothing external happens without a yes.
+        ``tool_action`` approval carrying the tool + inputs + cost
+        preview. On approve, ``approve_request`` executes it for real.
+        This is the founder's money/decision gate: nothing external
+        happens without a yes. PAID actions are hard-gated here too —
+        they can ONLY reach execution through this card.
         """
+        from kompany.core import tool_actions
         from kompany.state.models import ApprovalRequest
 
+        entry = tool_actions.tool_registry(self).get(tool_name)
+        if entry is None:
+            raise ValueError(f"unknown tool: {tool_name}")
+        tool = entry["tool"]
+        payload: dict = {
+            "tool_name": tool_name,
+            "inputs": inputs,
+            "side_effect": tool.side_effect.value,
+            "autonomy_tier": tool.autonomy_tier.value,
+        }
+        if reason:
+            payload["reason"] = reason
+        if task_id:
+            payload["task_id"] = task_id
+        try:
+            parsed = tool.input_schema(**inputs) if tool.input_schema else inputs
+            payload["estimated_cost_usd"] = tool.estimate_cost(parsed).total_usd
+        except Exception as exc:  # noqa: BLE001 — preview must not block
+            payload["estimate_error"] = f"{type(exc).__name__}: {exc}"
         request = self.approvals.create(ApprovalRequest(
             action_type="tool_action",
             summary=summary,
-            payload={"tool_name": tool_name, "inputs": inputs},
+            payload=payload,
             requested_by=requested_by,
             severity=severity,
             directive_id=directive_id,
@@ -4056,48 +4096,6 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             project_id=project_id,
         )
         return request.model_dump(mode="json")
-
-    def _execute_tool_action(self, request) -> dict:
-        """Execute an approved ``tool_action`` for real. Records the
-        real result (sent id / charge id / error) to audit + as an
-        approval comment so the founder sees what happened."""
-        from kompany.plugins.contract import ToolContext
-
-        payload = request.payload or {}
-        tool_name = payload.get("tool_name", "")
-        inputs = payload.get("inputs", {}) or {}
-        tool = self._tool_registry().get(tool_name)
-        if tool is None:
-            out = {"ok": False, "detail": f"unknown tool: {tool_name}"}
-            self.audit.record("tool_action.failed", f"Unknown tool {tool_name}",
-                              detail={"approval_id": request.id}, project_id=request.project_id)
-            return out
-        ctx = ToolContext(
-            run_id=current_run_id() or "",
-            ledger=self.ledger, audit=self.audit,
-            credentials=self.credentials, settings=self.settings,
-        )
-        try:
-            schema = tool.input_schema
-            parsed = schema(**inputs) if schema else inputs
-            result = tool.execute(parsed, ctx)
-            out = result.model_dump() if hasattr(result, "model_dump") else dict(result)
-        except Exception as exc:  # noqa: BLE001
-            out = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
-        self.audit.record(
-            "tool_action.executed",
-            f"Executed approved action: {tool_name}",
-            detail={"approval_id": request.id, "tool_name": tool_name, "result": out},
-            project_id=request.project_id,
-        )
-        try:
-            self.approvals.add_comment(
-                request.id, by_type="system", by_id=None,
-                body=f"Executed {tool_name}: {out}",
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return out
 
     # ------------------------------------------------------------------
     # Approval thread + RPG inbox (05-18-approval-thread-and-rpg)

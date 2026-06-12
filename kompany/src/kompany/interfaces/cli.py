@@ -2831,3 +2831,79 @@ def reset(
     for note in result.notes:
         console.print(f"  [dim]{note}[/dim]")
     console.print("[green]reset complete[/green]")
+
+
+# ---------------------------------------------------------------------------
+# Tools & actions (#4/#5) — list registered tools, propose an action
+# ---------------------------------------------------------------------------
+
+tools_app = typer.Typer(
+    name="tools",
+    help="Native tools — list the registry, propose an action for approval.",
+    no_args_is_help=True,
+)
+app.add_typer(tools_app)
+
+
+@tools_app.command("list")
+def tools_list_cmd(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """List registered tools with side_effect / tier / connection state."""
+    engine = _get_engine(config)
+    rows = engine.tools_list()
+    if as_json:
+        _emit_json(rows)
+        return
+    if not rows:
+        console.print("[dim]No tools registered.[/dim]")
+        return
+    table = Table(title=f"Tools ({len(rows)})")
+    table.add_column("Tool", style="cyan")
+    table.add_column("Side effect")
+    table.add_column("Tier")
+    table.add_column("Connected")
+    table.add_column("Providers", style="dim")
+    for row in rows:
+        table.add_row(
+            row["name"],
+            row["side_effect"] + (" [red](paid)[/red]" if row["paid"] else ""),
+            row["autonomy_tier"],
+            "[green]yes[/green]" if row["connected"] else "[yellow]no[/yellow]",
+            ", ".join(p["integration_id"] for p in row["providers"]),
+        )
+    console.print(table)
+
+
+@tools_app.command("propose")
+def tools_propose_cmd(
+    tool_name: str = typer.Argument(..., help="Tool to propose, e.g. email.send"),
+    json_inputs: str = typer.Option(..., "--json-inputs", help="Tool inputs as a JSON object"),
+    summary: str = typer.Option(None, "--summary", help="Card summary shown in the inbox"),
+    reason: str = typer.Option(None, "--reason", help="Why this action should run"),
+    project_id: str = typer.Option(None, "--project-id"),
+    config: str = typer.Option(None, "--config", "-c"),
+):
+    """Propose a tool action — lands in the inbox; approve to execute."""
+    import json as _json
+
+    engine = _get_engine(config)
+    try:
+        inputs = _json.loads(json_inputs)
+        if not isinstance(inputs, dict):
+            raise ValueError("--json-inputs must be a JSON object")
+        result = engine.propose_action(
+            tool_name,
+            inputs,
+            summary=summary or f"Run {tool_name}",
+            reason=reason,
+            project_id=project_id,
+        )
+    except ValueError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(1) from exc
+    _emit_json(result)
+    console.print(
+        f"[green]Proposed.[/green] Approve with: kompany approve {result['id']}"
+    )

@@ -191,6 +191,34 @@ TOOLS = [
         },
     ),
     Tool(
+        name="kompany_tools_list",
+        description=(
+            "List registered native tools (action pipeline): name, "
+            "side_effect, autonomy tier, paid flag, provider connection "
+            "state. Side-effecting/paid tools run only via propose+approve."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_tools_propose",
+        description=(
+            "Propose a tool action (e.g. email.send). Files a tool_action "
+            "approval card — nothing executes until the founder approves. "
+            "PAID actions can ONLY run through this path."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "description": "Tool name, e.g. email.send"},
+                "inputs": {"type": "object", "description": "Tool inputs"},
+                "summary": {"type": "string", "description": "Card summary"},
+                "reason": {"type": "string", "description": "Why this action"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["tool_name"],
+        },
+    ),
+    Tool(
         name="kompany_agent_work_summary",
         description=(
             "Per-agent task-history summary keyed by lowercase role: "

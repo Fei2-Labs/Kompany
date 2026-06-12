@@ -24,6 +24,9 @@ class LedgerCategory(str, Enum):
     # for subscription billing (06-11-harness-execution-leg D2). Booked
     # idempotently per calendar month by ``engine.heartbeat_once``.
     SUBSCRIPTION_FEE = "subscription_fee"
+    # Real money an executed tool action reports spending (#4/#5 action
+    # pipeline). Booked by core/tool_actions.py on approved execution.
+    TOOL_COST = "tool_cost"
 
 
 class LedgerEntry(BaseModel):

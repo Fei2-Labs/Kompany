@@ -16,6 +16,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 10. [Executing Projects](#executing-projects)
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+13. [Tools & Actions](#tools--actions)
 13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
 14. [Channels: Talk to Your Company Anywhere](#channels-talk-to-your-company-anywhere)
 13. [Anima: The Company's Persona](#anima-the-companys-persona)
@@ -454,6 +455,29 @@ Three kinds of cards land in the INBOX from harness execution:
 ### If the CLI Is Missing
 
 If the CLI for your chosen source isn't on PATH (say you picked the Claude subscription but `claude` isn't installed), nothing crashes: the engine records a `harness_vehicle_missing` health event with an install hint, and tasks fall back to the legacy single-shot, text-only mode until you install the CLI or switch the source in Settings.
+
+---
+
+## Tools & Actions
+
+Agents don't just write about actions — they can perform them through **native tools** provided by integrations (the first is `email.send`). Every tool call goes through one universal pipeline:
+
+- **Read-only, zero-cost tools** run inline, no approval needed.
+- **Anything side-effecting (or costing money)** becomes a **proposed action**: a `tool_action` card in your approval inbox. Nothing external happens until you approve. Approving executes it for real via the integration (credentials come from the encrypted vault) and the REAL result — sent id or error — lands in the audit log and on the card. Rejecting executes nothing.
+- **PAID actions are hard-gated**: a tool that spends money can NEVER auto-execute, regardless of any autonomy or policy configuration. No auto-pay, ever.
+
+If execution fails (e.g. missing credentials), the error appears on the card and the action stays re-approvable — connect the account and approve again to retry. A tool that reports real spend books a `tool_cost` expense in the ledger.
+
+```bash
+kompany tools list                  # registry: side effect, tier, paid flag, connection state
+kompany tools propose email.send \
+  --json-inputs '{"to": "lead@example.com", "subject": "Hi", "body": "Hello"}' \
+  --summary "Outreach to lead" --reason "follow up on signup"
+kompany inbox                       # the card appears here
+kompany approve <approval-id>       # executes the send for real
+```
+
+Same operations everywhere: REST `GET /tools` + `POST /tools/propose`, MCP `kompany_tools_list` / `kompany_tools_propose`, SDK `k.tools_list()` / `k.tools_propose(...)`.
 
 ---
 

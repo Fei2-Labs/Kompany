@@ -142,6 +142,22 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_agent_work_summary":
         return engine.agent_work_summary()
 
+    if name == "kompany_tools_list":
+        return engine.tools_list()
+
+    if name == "kompany_tools_propose":
+        try:
+            return engine.propose_action(
+                arguments["tool_name"],
+                arguments.get("inputs", {}) or {},
+                summary=arguments.get("summary")
+                or f"Run {arguments['tool_name']}",
+                reason=arguments.get("reason"),
+                project_id=arguments.get("project_id"),
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_channels_status":
         return engine.channels_status()
 

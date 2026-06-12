@@ -2278,6 +2278,43 @@ class SuspendRequest(BaseModel):
     reason: str = "manual"
 
 
+class ToolProposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool_name: str = Field(..., min_length=1)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+    reason: str | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+
+
+@app.get("/tools")
+def list_tools_registry() -> list[dict[str, Any]]:
+    """Registered tools with side_effect / autonomy tier / connection state."""
+    engine = get_engine()
+    return engine.tools_list()
+
+
+@app.post("/tools/propose")
+def propose_tool_action(req: ToolProposeRequest) -> dict[str, Any]:
+    """Propose a tool action (#4) — files a tool_action approval card.
+
+    Nothing executes now; approving the card (POST /approvals/{id}/approve)
+    runs the action for real. PAID actions can ONLY run through this path."""
+    engine = get_engine()
+    try:
+        return engine.propose_action(
+            req.tool_name,
+            req.inputs,
+            summary=req.summary or f"Run {req.tool_name}",
+            reason=req.reason,
+            project_id=req.project_id,
+            task_id=req.task_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/tools/policies")
 def list_tool_policies(agent_role: str | None = None) -> list[dict[str, Any]]:
     """List tool authorization policies."""

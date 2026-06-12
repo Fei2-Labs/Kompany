@@ -1,0 +1,296 @@
+"""Action pipeline + native tools (#4/#5, 06-12-action-pipeline-tools).
+
+Covers the universal pipeline: read-only inline; side-effect/cost →
+proposed action → approval → execute → audit; PAID hard-gated never-auto;
+loader builtin discovery; tools_list shape + four-interface parity.
+"""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import BaseModel
+
+from kompany.core.autonomy import AutonomyGate
+from kompany.core.engine import KompanyEngine
+from kompany.plugins.contract import (
+    AutonomyTier,
+    CostEstimate,
+    Integration,
+    SideEffect,
+    Tool,
+)
+
+# ---------------------------------------------------------------------------
+# Fakes
+# ---------------------------------------------------------------------------
+
+
+class _In(BaseModel):
+    text: str = "x"
+
+
+class _Out(BaseModel):
+    ok: bool = True
+    detail: str = ""
+    spent_usd: float = 0.0
+
+
+class _EchoTool(Tool):
+    name = "test.echo"
+    description = "read-only echo"
+    input_schema = _In
+    output_schema = _Out
+    side_effect = SideEffect.READ
+    autonomy_tier = AutonomyTier.AUTO
+
+    def estimate_cost(self, inputs):
+        return CostEstimate()
+
+    def execute(self, inputs, ctx):
+        return _Out(detail=f"echo:{inputs.text}")
+
+
+class _SendTool(Tool):
+    name = "test.send"
+    description = "external action"
+    input_schema = _In
+    output_schema = _Out
+    side_effect = SideEffect.EXTERNAL_ACTION
+    autonomy_tier = AutonomyTier.APPROVAL
+    calls: list[str] = []
+
+    def estimate_cost(self, inputs):
+        return CostEstimate()
+
+    def execute(self, inputs, ctx):
+        # Prove credentials are injected from the vault.
+        key = ctx.credentials.get("custom_api_key") or ""
+        if not key:
+            return _Out(ok=False, detail="missing credential: custom_api_key")
+        _SendTool.calls.append(inputs.text)
+        return _Out(detail=f"sent:{inputs.text} key:{key}")
+
+
+class _PayTool(Tool):
+    name = "test.pay"
+    description = "paid action"
+    input_schema = _In
+    output_schema = _Out
+    side_effect = SideEffect.SPEND
+    autonomy_tier = AutonomyTier.APPROVAL
+
+    def estimate_cost(self, inputs):
+        return CostEstimate(external_usd=5.0)
+
+    def execute(self, inputs, ctx):
+        return _Out(detail="charged", spent_usd=5.0)
+
+
+class _FakeIntegration(Integration):
+    integration_id = "test_integ"
+    display_name = "Test Integration"
+    required_credentials = ("custom_api_key",)
+
+    def tools(self):
+        return [_EchoTool(), _SendTool(), _PayTool()]
+
+
+@pytest.fixture()
+def engine(monkeypatch):
+    monkeypatch.setattr(
+        "kompany.plugins.loader.discover",
+        lambda: {"integration": [_FakeIntegration()]},
+    )
+    _SendTool.calls = []
+    return KompanyEngine()
+
+
+# ---------------------------------------------------------------------------
+# AutonomyGate hard gates
+# ---------------------------------------------------------------------------
+
+
+def test_gate_read_auto_passes():
+    assert AutonomyGate().check_tool("read", "auto", 0.0) is True
+
+
+def test_gate_side_effect_never_inline():
+    assert AutonomyGate().check_tool("external_action", "auto", 0.0) is False
+
+
+def test_gate_paid_never_auto_even_when_configured_auto():
+    gate = AutonomyGate()
+    # PAID hard gate: configured-auto policy CANNOT unlock spend.
+    assert gate.check_tool("spend", "auto", 0.0, configured_auto=True) is False
+    assert gate.check_tool("read", "auto", 0.01, configured_auto=True) is False
+
+
+# ---------------------------------------------------------------------------
+# Inline execution (read-only)
+# ---------------------------------------------------------------------------
+
+
+def test_read_only_tool_executes_inline_without_card(engine):
+    out = engine.execute_tool("test.echo", {"text": "hi"})
+    assert out["ok"] is True
+    assert out["result"]["detail"] == "echo:hi"
+    assert engine.inbox() == []  # no approval card filed
+    events = [e for e in engine.audit.recent(20) if e["event_type"] == "tool_action.inline"]
+    assert events
+
+
+def test_side_effect_tool_refused_inline(engine):
+    out = engine.execute_tool("test.send", {"text": "hi"})
+    assert out["ok"] is False
+    assert out["requires_approval"] is True
+    assert _SendTool.calls == []
+
+
+def test_paid_tool_refused_inline_even_with_auto_policy(engine):
+    out = engine.execute_tool("test.pay", {"text": "buy"})
+    assert out["ok"] is False
+    assert out["requires_approval"] is True
+
+
+def test_execute_unknown_tool_raises(engine):
+    with pytest.raises(ValueError):
+        engine.execute_tool("nope.tool", {})
+
+
+# ---------------------------------------------------------------------------
+# Propose → approve → execute → audit
+# ---------------------------------------------------------------------------
+
+
+def test_propose_approve_executes_with_credentials_and_audit(engine):
+    engine.credentials.set("custom_api_key", "k123")
+    card = engine.propose_action(
+        "test.send", {"text": "hello"}, summary="Send hello", reason="outreach"
+    )
+    assert card["payload"]["side_effect"] == "external_action"
+    assert card["payload"]["estimated_cost_usd"] == 0.0
+    assert card["payload"]["reason"] == "outreach"
+    assert _SendTool.calls == []  # proposed, NOT executed
+
+    res = engine.approve_request(card["id"], approved_by="master")
+    assert res["tool_result"]["ok"] is True
+    assert "key:k123" in res["tool_result"]["detail"]
+    assert _SendTool.calls == ["hello"]
+
+    # Audit trail: proposed + executed.
+    types = [e["event_type"] for e in engine.audit.recent(50)]
+    assert "tool_action.proposed" in types
+    assert "tool_action.executed" in types
+
+    # Idempotent re-approve: stamp guards a second execution.
+    stored = engine.approvals.get(card["id"])
+    assert stored.payload["effect_applied"] is True
+    res2 = engine.approve_request(card["id"], approved_by="master")
+    assert res2["effect"]["status"] == "already_applied"
+    assert _SendTool.calls == ["hello"]  # still exactly once
+
+
+def test_reject_never_executes(engine):
+    engine.credentials.set("custom_api_key", "k123")
+    card = engine.propose_action("test.send", {"text": "no"}, summary="Send")
+    engine.reject_request(card["id"], reason="not now")
+    assert _SendTool.calls == []
+    types = [e["event_type"] for e in engine.audit.recent(50)]
+    assert "tool_action.rejected" in types
+    assert "tool_action.executed" not in types
+
+
+def test_paid_tool_books_ledger_expense_on_approved_execution(engine):
+    card = engine.propose_action("test.pay", {"text": "buy"}, summary="Pay")
+    assert card["payload"]["estimated_cost_usd"] == 5.0
+    res = engine.approve_request(card["id"])
+    assert res["tool_result"]["spent_usd"] == 5.0
+    totals = engine.ledger.get_totals()
+    assert totals.get("tool_cost") == -5.0
+
+
+def test_missing_credentials_fail_on_card_not_crash(engine):
+    # No api_key in the vault → execution reports the error on the card,
+    # no stamp → fixing credentials and re-approving retries.
+    card = engine.propose_action("test.send", {"text": "hi"}, summary="Send")
+    res = engine.approve_request(card["id"])
+    assert res["tool_result"]["ok"] is False
+    assert "missing credential" in res["tool_result"]["detail"]
+    stored = engine.approvals.get(card["id"])
+    assert not stored.payload.get("effect_applied")
+    comments = engine.approvals.list_comments(card["id"])
+    assert any("missing credential" in c.body for c in comments)
+
+
+def test_propose_unknown_tool_raises(engine):
+    with pytest.raises(ValueError):
+        engine.propose_action("nope.tool", {}, summary="x")
+
+
+# ---------------------------------------------------------------------------
+# Loader builtins + tools_list shape + parity
+# ---------------------------------------------------------------------------
+
+
+def test_loader_discovers_builtin_email_integration():
+    from kompany.plugins import loader
+
+    ids = [i.integration_id for i in loader.discover()["integration"]]
+    assert "email_smtp" in ids
+    assert "resend" in ids
+
+
+def test_tools_list_shape(engine):
+    rows = engine.tools_list()
+    by_name = {r["name"]: r for r in rows}
+    assert set(by_name) == {"test.echo", "test.send", "test.pay"}
+    pay = by_name["test.pay"]
+    assert pay["side_effect"] == "spend"
+    assert pay["paid"] is True
+    assert pay["connected"] is False
+    assert pay["providers"][0]["integration_id"] == "test_integ"
+    engine.credentials.set("custom_api_key", "k")
+    assert {r["name"]: r["connected"] for r in engine.tools_list()}["test.send"] is True
+
+
+def test_tools_list_parity_sdk_rest_mcp(engine, monkeypatch):
+    """SDK == REST == MCP (CLI renders the same engine call)."""
+    import asyncio
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    import kompany.interfaces.api as api_mod
+    from kompany.interfaces import mcp_proxy, mcp_server
+
+    # SDK path == engine op by construction; assert via engine directly.
+    sdk_out = engine.tools_list()
+
+    monkeypatch.setattr(api_mod, "_engine", engine)
+    with TestClient(api_mod.app) as client:
+        rest_out = client.get("/tools").json()
+
+    monkeypatch.setattr(mcp_proxy, "discover_sidecar", lambda data_dir=None: None)
+    monkeypatch.setattr(mcp_server, "_engine", engine)
+    out = asyncio.run(mcp_server.call_tool("kompany_tools_list", {}))
+    mcp_out = _json.loads(out[0].text)
+
+    assert sdk_out == rest_out == mcp_out
+    assert {r["name"] for r in rest_out} == {"test.echo", "test.send", "test.pay"}
+
+
+def test_rest_propose_unknown_tool_is_400(engine, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    import kompany.interfaces.api as api_mod
+
+    monkeypatch.setattr(api_mod, "_engine", engine)
+    with TestClient(api_mod.app) as client:
+        r = client.post("/tools/propose", json={"tool_name": "nope.tool", "inputs": {}})
+        assert r.status_code == 400
+        ok = client.post(
+            "/tools/propose",
+            json={"tool_name": "test.echo", "inputs": {"text": "x"}, "summary": "s"},
+        )
+        assert ok.status_code == 200
+        assert ok.json()["action_type"] == "tool_action"

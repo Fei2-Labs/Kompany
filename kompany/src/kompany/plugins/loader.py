@@ -25,6 +25,18 @@ if TYPE_CHECKING:
     )
 
 
+# Builtin contributions shipped inside the kompany package itself —
+# no entry point needed (the package's own pyproject entry points are
+# only visible when installed, and the engine must work from a source
+# checkout). Each value is "module:ClassName".
+_BUILTIN_CONTRIBUTIONS: dict[str, tuple[str, ...]] = {
+    "integration": (
+        "kompany.integrations.email_smtp:EmailIntegration",
+        "kompany.integrations.email_smtp:ResendIntegration",
+    ),
+}
+
+
 _GROUP_TO_KIND = {
     "kompany.workflows": "workflow",
     "kompany.souls": "soul",
@@ -47,6 +59,18 @@ def discover() -> dict[str, list]:
     """
     found: dict[str, list] = {kind: [] for kind in _GROUP_TO_KIND.values()}
     errors: list[tuple[str, str, str]] = []
+
+    # Builtins first — plugins merge in after (never replace).
+    from importlib import import_module
+
+    for kind, paths in _BUILTIN_CONTRIBUTIONS.items():
+        for path in paths:
+            try:
+                module_name, class_name = path.split(":")
+                cls = getattr(import_module(module_name), class_name)
+                found[kind].append(cls())
+            except Exception as exc:  # noqa: BLE001 — surfaced via errors list
+                errors.append(("builtin", path, repr(exc)))
 
     for group, kind in _GROUP_TO_KIND.items():
         for ep in entry_points(group=group):

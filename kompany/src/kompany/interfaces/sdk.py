@@ -325,6 +325,35 @@ class Kompany:
         """
         return self._engine.agent_work_summary()
 
+    def tools_list(self) -> list[dict[str, Any]]:
+        """Registered native tools with side_effect / tier / connection
+        state. Same shape as REST ``GET /tools`` and MCP
+        ``kompany_tools_list`` (action pipeline #4/#5)."""
+        return self._engine.tools_list()
+
+    def tools_propose(
+        self,
+        tool_name: str,
+        inputs: dict[str, Any],
+        summary: str = "",
+        reason: str | None = None,
+        project_id: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Propose a tool action — files a ``tool_action`` approval card.
+
+        Nothing executes now; approving the card runs the action for
+        real. PAID actions can ONLY run through this path. Raises
+        ``ValueError`` for an unknown tool."""
+        return self._engine.propose_action(
+            tool_name,
+            inputs,
+            summary=summary or f"Run {tool_name}",
+            reason=reason,
+            project_id=project_id,
+            task_id=task_id,
+        )
+
     def anima_state(self) -> dict[str, Any]:
         """Current Anima persona state (06-12-anima-persona PRD D5).
 
