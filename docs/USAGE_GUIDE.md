@@ -24,7 +24,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 13. [Using the REST API](#using-the-rest-api)
 14. [Using the MCP Server](#using-the-mcp-server)
 15. [Using the Python SDK](#using-the-python-sdk)
-16. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
+16. [Using with Claude Code](#using-with-claude-code)
 17. [Cost Management](#cost-management)
 18. [Agent Memory](#agent-memory)
 19. [Best Practices](#best-practices)
@@ -747,17 +747,22 @@ result = k.execute_project("abc12345")
 
 ---
 
-## Using as a Claude Code Skill
+## Using with Claude Code
 
-Kompany ships as a Claude Code skill. Invoke it directly in any Claude Code session:
+Claude Code is an MCP client like any other — the canonical capability surface is the `kompany-mcp` server (70+ typed `kompany_*` tools). There are two ways to connect it, plus one optional flavor layer:
+
+**1. Plugin (one-click).** The repo ships a Claude Code plugin manifest at `.claude-plugin/plugin.json`. Installing the plugin registers the `kompany-mcp` server automatically and adds a `/kompany` command:
 
 ```
 /kompany "Buy a Mac Studio M4 128GB, budget €50"
 /kompany "What's our balance?"
-/kompany "Should we build SSO or focus on self-serve onboarding?"
 ```
 
-The skill file is at `.claude/skills/kompany/SKILL.md`. It activates the venv, ensures the engine is installed, and routes your directive through `kompany directive`.
+Requires the `kompany-mcp` entry point on your PATH (`pip install -e ".[mcp]"`).
+
+**2. Manual MCP config.** No plugin needed — add the server to your Claude Code MCP settings exactly as shown in [Claude Code Configuration](#claude-code-configuration) above. Same tools, same engine.
+
+**3. Skill (optional flavor).** `.claude/skills/kompany/SKILL.md` is a thin layer that conveys the founder mental model (mission integrity, AI costs are real costs, virtual time, approval inbox) and points the agent at the MCP tools. It adds no capabilities of its own — everything goes through MCP.
 
 ---
 

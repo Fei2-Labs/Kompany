@@ -107,7 +107,7 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
   - [REST API](#rest-api)
   - [MCP Server](#mcp-server)
   - [Python SDK](#python-sdk)
-  - [Claude Code Skill](#claude-code-skill)
+  - [Using with Claude Code](#using-with-claude-code)
 - [Directive Types](#directive-types)
 - [Autonomy Tiers](#autonomy-tiers)
 - [Multi-Agent Debates](#multi-agent-debates)
@@ -618,23 +618,19 @@ print(result)
 
 ---
 
-### Claude Code Skill
+### Using with Claude Code
 
-Kompany ships as a Claude Code skill. Invoke it directly in any Claude Code session:
+Claude Code connects to Kompany the same way every other agent runtime does — through the `kompany-mcp` server. Two install paths:
 
-```
-/kompany "Buy a Mac Studio M4 128GB, budget €50"
-```
+- **Plugin (one-click):** install the Claude Code plugin (`.claude-plugin/plugin.json`). It registers the MCP server and adds a `/kompany` command:
 
-```
-/kompany "What's our balance?"
-```
+  ```
+  /kompany "Buy a Mac Studio M4 128GB, budget €50"
+  ```
 
-```
-/kompany "Should we build SSO or focus on self-serve onboarding?"
-```
+- **Manual:** add `kompany-mcp` to your MCP settings as shown in [MCP Server](#mcp-server) above.
 
-The skill file is at `.claude/skills/kompany/SKILL.md`. It activates the venv, ensures the engine is installed, and routes your directive through `kompany directive`.
+An optional thin skill (`.claude/skills/kompany/SKILL.md`) conveys the founder mental model; all capabilities live in the `kompany_*` MCP tools. See `docs/USAGE_GUIDE.md` § "Using with Claude Code" for details.
 
 ---
 

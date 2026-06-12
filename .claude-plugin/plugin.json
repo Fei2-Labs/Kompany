@@ -1,0 +1,19 @@
+{
+  "name": "kompany",
+  "version": "0.1.0",
+  "description": "Autonomous business OS for solo founders. One-click registers the kompany-mcp server (70+ typed kompany_* tools) plus a /kompany directive command.",
+  "author": {
+    "name": "Fei2 Labs",
+    "url": "https://github.com/Fei2-Labs/Kompany"
+  },
+  "homepage": "https://github.com/Fei2-Labs/Kompany",
+  "repository": "https://github.com/Fei2-Labs/Kompany",
+  "license": "Apache-2.0",
+  "keywords": ["business", "agents", "founder", "mcp", "autonomous"],
+  "commands": ["./.claude-plugin/commands/kompany.md"],
+  "mcpServers": {
+    "kompany": {
+      "command": "kompany-mcp"
+    }
+  }
+}
