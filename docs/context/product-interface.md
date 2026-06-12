@@ -28,6 +28,13 @@ Users see summary-level information by default, with drill-down access to full d
 
 **Implication:** All agent activity, decisions, and interactions must be stored in structured form so they can drive both text-based queries now and a visual kanban / RPG-style interface later.
 
+## live activity stream
+The engine publishes agent activity over SSE with an advisory `activity_kind` field so visual frontends can render what kind of work is happening.
+
+**Meaning:** Agent status events carry an `activity_kind` derived from the role (coding, marketing, …; `idle` when not working). Harness execution adds `activity_kind: "harness"`: while a task runs as a real CLI session, every normalized session event is republished on the EventHub as a `harness.event` whose payload carries `project_id`, `task_id`, `agent_role`, `kind` (e.g. `session_started`, `turn`, `tool_use`, `text`, `cost_delta`, `permission_denied`), and `summary` (a short human-readable line).
+
+**Implication:** `activity_kind: "harness"` is purely additive to the SSE activity contract — existing consumers, including the kompany-world (repo-B) sprite-world UI, keep working unchanged and can opt in to render live harness activity.
+
 ## remote access
 Telegram bot serves as a remote interface adapter for mobile control, alongside the existing local interfaces.
 

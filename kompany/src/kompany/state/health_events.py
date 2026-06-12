@@ -33,6 +33,10 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # the company glossary. See ``cos_glossary_scan`` + the
     # ``glossary_review`` approval flow.
     "glossary_drift_alert",
+    # Fires when the ModelSource's derived loop vehicle binary (claude /
+    # codex / opencode) is missing from PATH — the engine degrades to the
+    # legacy single-call path instead of crashing (harness leg PR5).
+    "harness_vehicle_missing",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

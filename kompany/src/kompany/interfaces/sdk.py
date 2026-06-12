@@ -303,6 +303,30 @@ class Kompany:
         """Restore a SQLite snapshot."""
         return self._engine.restore_backup(backup_id)
 
+    def model_source(self) -> dict[str, Any] | None:
+        """Active model source as a plain dict; ``None`` = legacy billing.
+
+        ModelSource founder surface (06-11-harness-execution-leg). The
+        dict carries ``kind`` / ``billing_mode`` / ``monthly_fee_usd``
+        plus the derived (read-only) ``vehicle`` — same shape as REST
+        ``GET /settings/model-source`` and MCP ``kompany_model_source_show``.
+        """
+        return self._engine.get_model_source()
+
+    def set_model_source(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Set the active model source; ``None`` clears it (legacy billing).
+
+        ``payload`` takes ``kind`` (custom_api | claude_subscription |
+        openai_subscription) plus optional ``billing_mode`` /
+        ``monthly_fee_usd`` / ``price_overrides``. Raises ``ValueError``
+        on validation failure (e.g. subscription without a monthly fee).
+        """
+        return self._engine.set_model_source(payload)
+
+    def detect_clis(self) -> dict[str, Any]:
+        """Probe PATH for agent CLIs that unlock zero-key model sources."""
+        return self._engine.detect_agent_clis()
+
     def list_credentials(self) -> list[dict[str, Any]]:
         return self._engine.list_credentials()
 

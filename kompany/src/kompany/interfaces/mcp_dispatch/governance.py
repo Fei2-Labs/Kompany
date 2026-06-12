@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from kompany.core.engine import KompanyEngine
+from kompany.core.harness_execution.permission_gate import handle_permission_gate
 
 
 class UnknownToolError(LookupError):
@@ -128,6 +129,12 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
         )
         return result or {"error": f"Approval '{arguments['approval_id']}' not found"}
 
+    if name == "kompany_permission_gate":
+        # Blocking by design (sleep-poll until founder decision/timeout);
+        # the MCP proxy client's 1800s call timeout comfortably covers
+        # the gate's 120s default.
+        return handle_permission_gate(engine, arguments)
+
     if name == "kompany_approval_comment":
         result = engine.comment_on_approval(
             arguments["approval_id"],
@@ -221,5 +228,32 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
     if name == "kompany_glossary_remove":
         removed = engine.remove_glossary_term(arguments["term"])
         return {"removed": removed, "term": arguments["term"]}
+
+    # ModelSource founder surface (06-11-harness-execution-leg PR5b).
+    if name == "kompany_model_source_show":
+        return engine.get_model_source()
+
+    if name == "kompany_model_source_set":
+        payload: dict | None = None
+        if not arguments.get("clear"):
+            if not arguments.get("kind"):
+                return {"error": "pass kind=... to set a source, or clear=true to remove it"}
+            payload = {
+                key: arguments[key]
+                for key in (
+                    "kind",
+                    "billing_mode",
+                    "monthly_fee_usd",
+                    "price_overrides",
+                )
+                if arguments.get(key) is not None
+            }
+        try:
+            return engine.set_model_source(payload)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    if name == "kompany_detect_clis":
+        return engine.detect_agent_clis()
 
     raise UnknownToolError(name)

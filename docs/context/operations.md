@@ -7,6 +7,13 @@ The system may exceed its budget, but the agent team must collectively judge whe
 
 **Implication:** Budget discipline is an emergent capability of the agent team, not a hardcoded rule. When the team misjudges, the retrospective and self-learning loop should capture the mistake and improve future judgment.
 
+## task execution sessions
+Project tasks execute as real multi-turn agentic sessions in per-project workspaces, capped per task and gated by the founder approval inbox.
+
+**Meaning:** When the founder configures a model source, every ProjectRunner task runs via an external agent CLI (Claude Code CLI, Codex CLI, or opencode — derived from the source, never chosen directly) inside the project's git workspace. The CEO assigns each task a budget cap at decomposition ($0.50 default, $5 ceiling); the project's budget envelope is the hard outer cap. A session that hits its cap pauses and files a budget-increase approval; an exhausted envelope parks tasks and files one top-up approval per project — approving these cards actually raises the cap / funds the envelope. Side-effecting tool calls inside a session pause for inbox approval (~120s window; an unanswered request stays in the inbox and redeems on the task's next run).
+
+**Implication:** "Completed" requires evidence — a workspace diff or real tool results, never keyword guessing. Denied tool use classifies the task as blocked with the pending approval as the founder's next step. Sessions persist their id on the task, so a re-run continues from where it stopped instead of restarting.
+
 ## financial monitoring
 CFO should continuously monitor the financial health of every running project and trigger alerts when actuals diverge from projections.
 

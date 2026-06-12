@@ -125,6 +125,11 @@ class OnboardResult:
     # after onboarding completes, so callers (CLI, REST) can deep-link to
     # the team's recommendation.
     targets_review_id: str | None = None
+    # ModelSource written during onboarding (06-11-harness-execution-leg
+    # PR5b): "custom_api" for the API-key path, a *_subscription kind
+    # when the founder picked a detected zero-key CLI. ``None`` when the
+    # source could not be written (stub engine / reuse path).
+    model_source_kind: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -637,6 +642,139 @@ def _step_provider(
 
 
 # ---------------------------------------------------------------------------
+# Step 2.5 — model source (06-11-harness-execution-leg PR5b)
+# ---------------------------------------------------------------------------
+
+# Founder-facing labels for the detected zero-key subscription options.
+_SOURCE_CHOICE_LABELS: dict[str, str] = {
+    "claude_subscription": "claude-subscription",
+    "openai_subscription": "openai-subscription",
+}
+
+
+def _detected_subscription_kinds() -> dict[str, dict[str, Any]]:
+    """source_kind → CLI info for detected zero-key subscription CLIs."""
+    from kompany.core.model_source_ops import detect_agent_clis
+
+    found: dict[str, dict[str, Any]] = {}
+    for name, info in detect_agent_clis().items():
+        kind = info.get("source_kind")
+        if info.get("found") and kind in _SOURCE_CHOICE_LABELS:
+            found[kind] = {**info, "cli": name}
+    return found
+
+
+def _choose_model_source(
+    console: Console, *, yes: bool, provider_flag: str | None
+) -> tuple[str, float | None]:
+    """Pick a model source kind; returns ``(kind, monthly_fee_usd)``.
+
+    Headless mode and an explicit ``--provider`` flag always take the
+    API-key path (``custom_api``). Interactively, detected agent CLIs
+    are offered as zero-key subscription options — defaulting to the
+    API-key path so nothing changes unless the founder opts in.
+    """
+    if yes or provider_flag:
+        return "custom_api", None
+    try:
+        detected = _detected_subscription_kinds()
+    except Exception:  # noqa: BLE001 — detection is best-effort
+        detected = {}
+    if not detected:
+        return "custom_api", None
+    badges = ", ".join(
+        f"{info['cli']}{' ' + info['version'] if info.get('version') else ''}"
+        for info in detected.values()
+    )
+    console.print(f"      [green]✓[/green] agent CLIs detected: {badges}")
+    choices = [_SOURCE_CHOICE_LABELS[k] for k in detected] + ["api-key"]
+    picked = Prompt.ask("      Model source", choices=choices, default="api-key")
+    kind = next(
+        (k for k, label in _SOURCE_CHOICE_LABELS.items() if label == picked),
+        "custom_api",
+    )
+    if kind == "custom_api":
+        return kind, None
+    fee_text = Prompt.ask("      Monthly subscription fee (USD)", default="20")
+    try:
+        fee = float(fee_text)
+    except (TypeError, ValueError):
+        fee = 20.0
+    return kind, fee
+
+
+def _setup_claude_subscription_provider(
+    console: Console, *, engine: Any, result: OnboardResult
+) -> bool:
+    """Zero-key provider setup when the claude subscription was picked.
+
+    Probes the local ``claude`` CLI (subscription auth — no API key) and
+    routes the single-shot model tiers through the ``claude-code``
+    provider, persisting the pick the same way the custom-provider path
+    does. Returns ``False`` when the probe fails so the caller can fall
+    back to the API-key flow.
+    """
+    _emit_step(console, 2, "LLM provider")
+    test_mode = os.environ.get("KOMPANY_TEST_MODE", "") == "1"
+    detail = None if test_mode else _ping_claude_code()
+    if detail is not None:
+        console.print(
+            f"      [yellow]claude CLI probe failed: {detail} — "
+            "falling back to API-key setup.[/yellow]"
+        )
+        result.notes.append(f"claude subscription probe failed: {detail}")
+        return False
+    console.print(
+        "      [green]✓[/green] claude CLI reachable "
+        "(subscription auth — no API key needed)"
+    )
+    result.provider = "claude_code"
+    result.api_key_storage = None
+    result.ping_status = "skipped_test_mode" if test_mode else "ok"
+    model = "claude-code:sonnet"
+    try:
+        engine.db.execute(
+            """INSERT INTO company_config (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                 value = excluded.value, updated_at = datetime('now')""",
+            ("custom_model_picked", model),
+        )
+    except Exception as exc:  # noqa: BLE001 — tier persist is best-effort
+        result.notes.append(f"model tier persist failed ({exc})")
+    for attr in ("model_apex", "model_primary", "model_economy"):
+        try:
+            setattr(engine.settings, attr, model)
+        except (ValueError, TypeError):
+            pass
+    return True
+
+
+def _write_model_source(
+    console: Console,
+    *,
+    engine: Any,
+    result: OnboardResult,
+    kind: str,
+    monthly_fee: float | None,
+) -> None:
+    """Persist the chosen model source via the engine (non-fatal)."""
+    setter = getattr(engine, "set_model_source", None)
+    if setter is None:
+        return
+    payload: dict[str, Any] = {"kind": kind}
+    if monthly_fee is not None:
+        payload["monthly_fee_usd"] = float(monthly_fee)
+    try:
+        setter(payload)
+    except Exception as exc:  # noqa: BLE001 — settings stay editable later
+        result.notes.append(f"model source not saved: {exc}")
+        return
+    result.model_source_kind = kind
+    console.print(f"      [green]✓[/green] model source: {kind}")
+
+
+# ---------------------------------------------------------------------------
 # Step 3 — template selection
 # ---------------------------------------------------------------------------
 
@@ -910,16 +1048,41 @@ def run_onboard(
 
             engine = KompanyEngine()
 
-        # ----- Step 2 (provider) -------------------------------------
-        _step_provider(
-            cons,
-            yes=yes,
-            provider_flag=provider,
-            api_key_flag=api_key,
-            engine=engine,
-            result=result,
-            reused=reused,
-        )
+        # ----- Step 2 (model source + provider) ----------------------
+        # 06-11-harness-execution-leg PR5b: detected agent CLIs are
+        # offered as zero-key subscription model sources; the existing
+        # API-key flow maps to a ``custom_api`` source.
+        source_kind: str = "custom_api"
+        monthly_fee: float | None = None
+        if not reused:
+            source_kind, monthly_fee = _choose_model_source(
+                cons, yes=yes, provider_flag=provider
+            )
+        if source_kind == "claude_subscription" and _setup_claude_subscription_provider(
+            cons, engine=engine, result=result
+        ):
+            pass  # zero-key path complete — no API key prompt
+        else:
+            if source_kind == "claude_subscription":
+                # CLI probe failed — degrade to the API-key flow.
+                source_kind, monthly_fee = "custom_api", None
+            _step_provider(
+                cons,
+                yes=yes,
+                provider_flag=provider,
+                api_key_flag=api_key,
+                engine=engine,
+                result=result,
+                reused=reused,
+            )
+        if not reused:
+            _write_model_source(
+                cons,
+                engine=engine,
+                result=result,
+                kind=source_kind,
+                monthly_fee=monthly_fee,
+            )
 
         # ----- Step 3 (template) -------------------------------------
         _step_template(
@@ -1166,6 +1329,18 @@ def onboard_headless(
             else:
                 # Surface as an error so the wizard form can retry.
                 raise OnboardError("ping_failed", f"{provider} ping failed: {detail}")
+
+        # ----- Model source (06-11-harness-execution-leg PR5b) -----------
+        # The headless API-key path maps to a ``custom_api`` source;
+        # zero-key subscription sources are an interactive/Settings flow.
+        if not reused:
+            setter = getattr(engine, "set_model_source", None)
+            if setter is not None:
+                try:
+                    setter({"kind": "custom_api"})
+                    result.model_source_kind = "custom_api"
+                except Exception as exc:  # noqa: BLE001 — editable later in Settings
+                    result.notes.append(f"model source not saved: {exc}")
 
         # ----- Template apply -------------------------------------------
         # Mission-targets task (05-19): the four override knobs flow

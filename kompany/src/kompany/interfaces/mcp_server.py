@@ -10,6 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 from kompany.core.engine import KompanyEngine
+from kompany.core.harness_execution import permission_gate
 from kompany.interfaces import mcp_proxy
 from kompany.interfaces.mcp_dispatch import UnknownToolError, dispatch_tool
 
@@ -648,6 +649,31 @@ TOOLS = [
         },
     ),
     Tool(
+        name="kompany_permission_gate",
+        description=(
+            "Adjudicate one harness-session permission prompt (PRD D5): "
+            "files a harness_permission approval in the founder inbox and "
+            "blocks until it is approved, rejected, or times out. Returns "
+            "the Claude Code PermissionResult shape "
+            "({'behavior': 'allow'|'deny', ...}); wired via "
+            "--permission-prompt-tool, not meant for interactive use."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tool_name": {"type": "string", "description": "Tool the session wants to run"},
+                "input": {"type": "object", "description": "Tool input from the permission prompt", "default": {}},
+                "tool_use_id": {"type": "string", "description": "Claude's tool_use id (passthrough)"},
+                "project_id": {"type": "string", "description": "Owning project (env-injected when omitted)"},
+                "task_id": {"type": "string", "description": "Owning task (env-injected when omitted)"},
+                "agent_role": {"type": "string", "description": "Requesting agent role (env-injected when omitted)"},
+                "timeout_seconds": {"type": "number", "default": 120},
+                "poll_interval_seconds": {"type": "number", "default": 2},
+            },
+            "required": ["tool_name"],
+        },
+    ),
+    Tool(
         name="kompany_approval_comment",
         description="Append a free-form comment to an approval thread.",
         inputSchema={
@@ -771,6 +797,44 @@ TOOLS = [
             "required": ["term"],
         },
     ),
+    # ModelSource founder surface (06-11-harness-execution-leg PR5b).
+    Tool(
+        name="kompany_model_source_show",
+        description=(
+            "Show the active model source (kind, billing_mode, monthly fee) "
+            "or null when none is configured (legacy per-token billing)."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_model_source_set",
+        description=(
+            "Set the active model source. kind: custom_api | "
+            "claude_subscription | openai_subscription. Subscription kinds "
+            "require monthly_fee_usd. Pass clear=true to remove the source "
+            "(legacy per-token billing). The execution loop is derived by "
+            "the engine — there is no loop/vehicle input."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "description": "custom_api | claude_subscription | openai_subscription"},
+                "billing_mode": {"type": "string", "description": "api | subscription (defaults from kind)"},
+                "monthly_fee_usd": {"type": "number", "description": "Required for subscription billing"},
+                "price_overrides": {"type": "object", "description": "model -> [input_usd, output_usd] per million tokens"},
+                "clear": {"type": "boolean", "description": "Remove the source (legacy billing)", "default": False},
+            },
+        },
+    ),
+    Tool(
+        name="kompany_detect_clis",
+        description=(
+            "Probe PATH for agent CLIs (claude / codex / opencode) that "
+            "unlock zero-key model sources. Returns {cli: {found, path, "
+            "version, source_kind}}."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
 ]
 
 
@@ -781,6 +845,13 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    # Permission gate context (PRD D5): the claude session launches this
+    # server with the task identity in env (see permission_gate's
+    # ``build_permission_routing_args``); merge it into the arguments
+    # BEFORE the proxy/dispatch split so the sidecar — a different
+    # process without these env vars — receives the full context too.
+    if name == permission_gate.GATE_TOOL_NAME:
+        arguments = permission_gate.enrich_gate_arguments(arguments)
     # Proxy-first: when the desktop app's sidecar is alive, execute the
     # tool inside its engine so the app panel receives live SSE events
     # and every euro books in the one cost ledger. Discovery runs per

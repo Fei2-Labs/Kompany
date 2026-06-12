@@ -1000,6 +1000,45 @@ def set_model_setting(req: SetModelRequest) -> ModelSettingResponse:
     return get_model_setting()
 
 
+class ModelSourceRequest(BaseModel):
+    """Body for ``PUT /settings/model-source``.
+
+    ``kind=None`` clears the source (legacy per-token billing). The
+    execution loop is derived by the engine — there is deliberately no
+    vehicle/runner input here (PRD 06-11 D1).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    kind: str | None = None
+    billing_mode: str | None = None
+    monthly_fee_usd: float | None = None
+    price_overrides: dict[str, tuple[float, float]] | None = None
+
+
+@app.get("/settings/model-source")
+def get_model_source_setting() -> dict | None:
+    """Active model source (or null). Same dict shape as SDK/MCP."""
+    return get_engine().get_model_source()
+
+
+@app.put("/settings/model-source")
+def set_model_source_setting(req: ModelSourceRequest) -> dict:
+    """Set or clear the active model source; persists to the settings YAML."""
+    payload: dict | None = None
+    if req.kind is not None:
+        payload = {k: v for k, v in req.model_dump().items() if v is not None}
+    try:
+        return get_engine().set_model_source(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/settings/detect-clis")
+def detect_clis_setting() -> dict:
+    """Probe PATH for agent CLIs that unlock zero-key model sources."""
+    return get_engine().detect_agent_clis()
+
+
 class IntegrationInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     integration_id: str

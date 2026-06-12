@@ -191,6 +191,10 @@ def test_constants_match_prd():
         # Added by 05-19-glossary-and-drift-detection: CoS retrospective
         # writes this when it spots forbidden synonyms in agent output.
         "glossary_drift_alert",
+        # Added by 06-11-harness-execution-leg PR5: the ModelSource's
+        # derived vehicle binary is missing from PATH — the engine
+        # degrades to the legacy single-call path instead of crashing.
+        "harness_vehicle_missing",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

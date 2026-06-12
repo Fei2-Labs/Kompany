@@ -14,6 +14,13 @@ Each provider is configured with a pricing mode: pay-per-token or subscription.
 
 **Implication:** CFO sees real cash outflow. CTO uses shadow cost for routing decisions so the team maintains cost awareness even on subscription plans. When subscription quota is exhausted, CTO's routing degrades to another available provider. Model prices are hardcoded and updated periodically as a CTO maintenance task.
 
+## harness execution
+Agent tasks run as external CLI sessions derived from the founder's model source; the execution loop is never a founder-facing choice.
+
+**Meaning:** The founder picks a model source (custom API key, Claude subscription, OpenAI subscription); the engine derives which CLI carries the work (claude / codex / opencode), runs each task in a per-project git workspace under `<data_dir>/workspaces/<project_id>`, streams normalized session events to the EventHub, and persists the session id on the task row so an engine restart resumes rather than restarts. Session cost reaches the ledger only through `CostTracker.record_external`, which branches on billing mode: api books a real per-token expense; subscription books shadow value only, with the monthly fee booked once per calendar month by the heartbeat.
+
+**Implication:** A missing CLI binary degrades gracefully — one `harness_vehicle_missing` health event with an install hint, then tasks fall back to the legacy single-shot path. No crash, no silent failure.
+
 ## data persistence
 Use SQLite as the sole persistence layer. All state must be durable across restarts.
 

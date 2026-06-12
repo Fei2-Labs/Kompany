@@ -6,6 +6,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from kompany.core.harness_execution import (
+    execute_harness_task,
+    resolve_caps,
+    select_runner,
+)
 from kompany.state.models import (
     Project,
     ProjectStatus,
@@ -64,10 +69,17 @@ def _classify_outcome(title: str, output: str) -> tuple[str, str]:
     return ("blocked" if blocked else "delivered"), action
 
 class TaskSpec(BaseModel):
-    """A single task specification."""
+    """A single task specification.
+
+    ``budget_cap_usd``/``max_turns`` are CEO-assigned per-task caps
+    (PRD 06-11 D3); ``None`` falls back to the harness defaults via
+    ``resolve_caps`` at task-creation time.
+    """
     title: str
     assigned_agent: str
     prompt: str
+    budget_cap_usd: float | None = None
+    max_turns: int | None = None
 
 
 class TaskDecomposition(BaseModel):
@@ -113,10 +125,13 @@ class ProjectRunner:
         if not existing_tasks:
             tasks = self._decompose(project)
             for spec in tasks:
+                cap, turns = resolve_caps(spec.budget_cap_usd, spec.max_turns)
                 task = Task(
                     project_id=project_id,
                     title=spec.title,
                     assigned_agent=spec.assigned_agent,
+                    budget_cap_usd=cap,
+                    max_turns=turns,
                 )
                 self._engine.projects.create_task(task)
 
@@ -296,7 +311,11 @@ class ProjectRunner:
             f"- writer: content creation, proposals, landing pages\n"
             f"- analyst: financial modeling, ROI calculations\n"
             f"- builder: code, configurations, integrations\n"
-            f"- procurement: sourcing, vendor evaluation\n"
+            f"- procurement: sourcing, vendor evaluation\n\n"
+            f"For each task also assign budget_cap_usd (AI spend cap for "
+            f"that task, within this project's budget envelope: 0.50 for "
+            f"a small/routine task, up to 5.00 only for genuinely complex "
+            f"work) and max_turns (agentic loop turns, default 30).\n"
         )
 
         resp = ceo.call_structured(
@@ -310,6 +329,18 @@ class ProjectRunner:
         self, task: Task, project: Project, result: ProjectRunResult
     ) -> None:
         """Execute a single task using the assigned agent."""
+        # Harness execution leg (06-11-harness-execution-leg PR4): when a
+        # ModelSource is configured (and the feature flag is on), every
+        # task runs a full agentic harness session instead of one
+        # structured LLM call. ``model_source=None`` or flag off → the
+        # legacy single-call path below, untouched.
+        runner = select_runner(
+            getattr(self._engine, "settings", None),
+            health_events=getattr(self._engine, "health_events", None),
+        )
+        if runner is not None:
+            execute_harness_task(self._engine, runner, task, project, result)
+            return
         # Mark as active
         self._engine.projects.update_task_status(task.id, TaskStatus.ACTIVE)
         self._engine.agent_status.set(

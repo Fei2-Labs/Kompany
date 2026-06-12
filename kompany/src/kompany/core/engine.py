@@ -18,6 +18,7 @@ from kompany.core.directive import (
 )
 from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id, run_scope
+from kompany.core.subscription_fee import book_subscription_fee_if_due
 from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient
 from kompany.llm.cost_tracker import CostTracker
@@ -69,6 +70,7 @@ from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
+from kompany.state.shadow_costs import ShadowCostStore
 from kompany.state.glossary import (
     CompanyGlossary,
     GlossaryEntry,
@@ -106,6 +108,9 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
     """Core engine. All interfaces (CLI, API, MCP, SDK) call this."""
 
     def __init__(self, config_path: str | None = None):
+        # Remembered so ModelSource settings mutations persist to the
+        # same YAML this engine was loaded from (model_source_ops).
+        self._config_path = config_path
         self.settings = KompanySettings.load(config_path)
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
         self.db = Database(self.settings.data_dir)
@@ -161,7 +166,16 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         # cost recording fans out a ``llm.spend`` SSE event so the web
         # UI's dashboard chip / live cost meter stays in sync without
         # polling. See ``05-19-cost-visibility-discipline``.
-        self.cost_tracker = CostTracker(self.ledger, event_hub=get_event_hub())
+        # ``settings`` + ``shadow_costs`` carry the billing_mode rules
+        # (06-11-harness-execution-leg D2): subscription-billed calls
+        # book shadow value instead of a real expense.
+        self.shadow_costs = ShadowCostStore(self.db)
+        self.cost_tracker = CostTracker(
+            self.ledger,
+            event_hub=get_event_hub(),
+            settings=self.settings,
+            shadow_costs=self.shadow_costs,
+        )
         self.autonomy = AutonomyGate()
 
         # Resilience watchdog: silent-run + stranded-task supervisor.
@@ -1642,6 +1656,9 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 summary=f"{len(active_projects)} active project(s) in progress.",
                 payload={"project_ids": [p.id for p in active_projects]},
             ))
+        fee_event = self._book_subscription_fee_if_due()
+        if fee_event is not None:
+            notifications.append(fee_event)
 
         report = HeartbeatReport(
             runtime=runtime,
@@ -1672,6 +1689,15 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 adapter=adapter,
             )
         return payload
+
+    def _book_subscription_fee_if_due(self) -> NotificationEvent | None:
+        """Book the monthly ModelSource subscription fee, once per month.
+
+        Thin delegate — logic + injectable clock live in
+        :mod:`kompany.core.subscription_fee` (engine.py is over the file
+        size cap; new concerns go in siblings).
+        """
+        return book_subscription_fee_if_due(self.settings, self.db, self.ledger)
 
     def dispatch_notifications(
         self,
@@ -2010,6 +2036,27 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             "active_projects": [p["name"] for p in projects],
             "blockers": blockers,
         }
+
+    # ----- ModelSource founder surface (06-11-harness-execution-leg PR5b)
+    # Thin wrappers — logic lives in ``core/model_source_ops.py``.
+
+    def get_model_source(self) -> dict | None:
+        """Active model source as a plain dict; ``None`` = legacy billing."""
+        from kompany.core import model_source_ops
+
+        return model_source_ops.get_model_source(self)
+
+    def set_model_source(self, payload: dict | None) -> dict:
+        """Set (or clear, with ``None``) the active model source."""
+        from kompany.core import model_source_ops
+
+        return model_source_ops.set_model_source(self, payload)
+
+    def detect_agent_clis(self) -> dict:
+        """Probe PATH for agent CLIs that unlock zero-key model sources."""
+        from kompany.core import model_source_ops
+
+        return model_source_ops.detect_agent_clis()
 
     def list_credentials(self) -> list[dict]:
         return [entry.model_dump(mode="json") for entry in self.credentials.list()]
@@ -2352,7 +2399,13 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
         # Re-wire after backup restore: same hub instance, fresh ledger.
-        self.cost_tracker = CostTracker(self.ledger, event_hub=get_event_hub())
+        self.shadow_costs = ShadowCostStore(self.db)
+        self.cost_tracker = CostTracker(
+            self.ledger,
+            event_hub=get_event_hub(),
+            settings=self.settings,
+            shadow_costs=self.shadow_costs,
+        )
 
         # 4. Audit restore in the (now restored) live DB.
         self.audit.record(
@@ -3741,6 +3794,17 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 payload = request.model_dump(mode="json")
                 payload["tool_result"] = out
                 return payload
+            # Harness budget approvals (PR5): approving must actually
+            # fund the envelope / raise the task cap. Logic lives in
+            # core/approval_effects.py (subscription_fee precedent);
+            # the effect itself guards idempotency on replayed approves.
+            from kompany.core import approval_effects
+
+            if request.action_type in approval_effects.HARNESS_EFFECT_ACTIONS:
+                effect = approval_effects.apply_post_approve_effect(self, request)
+                payload = request.model_dump(mode="json")
+                payload["effect"] = effect
+                return payload
             return request.model_dump(mode="json")
         return None
 
@@ -3774,6 +3838,15 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                 self._finalize_target_feasibility(request, outcome="rejected")
             if request.action_type == "glossary_review":
                 self._finalize_glossary_review(request, outcome="rejected")
+            # Harness budget approvals (PR5): a "no" still needs a real
+            # next step on the task (re-scope / abandon), never a dead end.
+            from kompany.core import approval_effects
+
+            if request.action_type in approval_effects.HARNESS_EFFECT_ACTIONS:
+                effect = approval_effects.apply_post_reject_effect(self, request)
+                payload = request.model_dump(mode="json")
+                payload["effect"] = effect
+                return payload
             return request.model_dump(mode="json")
         return None
 

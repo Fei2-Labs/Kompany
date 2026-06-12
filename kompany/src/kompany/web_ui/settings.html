@@ -47,6 +47,32 @@
       <div class="set-result" id="set-result" hidden></div>
     </div>
 
+    <div class="frame" data-label="SETTINGS // model source">
+      <h2 class="set-h">// MODEL SOURCE</h2>
+      <p class="set-note">Where the company's AI work runs and how it's billed. A custom API key books real per-token cost; a subscription books its monthly fee as the real recurring expense (per-call spend is tracked as shadow value only).</p>
+      <div class="set-meta" id="ms-clis">probing installed CLIs…</div>
+      <div class="set-row">
+        <label for="ms-kind">Source</label>
+        <div class="set-control">
+          <select id="ms-kind">
+            <option value="">(not configured — per-token API billing)</option>
+            <option value="custom_api">Custom API key</option>
+            <option value="claude_subscription">Claude subscription</option>
+            <option value="openai_subscription">OpenAI subscription</option>
+          </select>
+        </div>
+      </div>
+      <div class="set-row" id="ms-fee-row" hidden>
+        <label for="ms-fee">Monthly fee (USD)</label>
+        <input id="ms-fee" type="number" min="0" step="0.01" placeholder="20.00">
+      </div>
+      <div class="set-meta" id="ms-summary"></div>
+      <div class="set-control">
+        <button type="button" id="ms-save" class="onb-btn onb-btn-submit">[ ▸ SAVE ]</button>
+      </div>
+      <div class="set-result" id="ms-result" hidden></div>
+    </div>
+
     <div class="frame" data-label="SETTINGS // integrations">
       <h2 class="set-h">// EMAIL — RESEND (recommended)</h2>
       <p class="set-note">Connect Resend (API). Preferred over raw SMTP — better deliverability + delivery ids. Paste your Resend API key + a verified sender address.</p>
@@ -141,6 +167,95 @@
     });
 
     load();
+
+    // ---- Model source ----
+    // Tauri WebView: window.confirm/alert are dead — clearing uses an
+    // inline two-stage button confirm instead.
+    const msKind = document.getElementById("ms-kind");
+    const msFeeRow = document.getElementById("ms-fee-row");
+    const msFee = document.getElementById("ms-fee");
+    const msSummary = document.getElementById("ms-summary");
+    const msSave = document.getElementById("ms-save");
+    const msResult = document.getElementById("ms-result");
+    const msClis = document.getElementById("ms-clis");
+    let msConfirmClear = false;
+    // Founder-facing descriptions of the derived execution loop — never
+    // says "runner"; the engine picks the loop from the source kind.
+    const MS_SUMMARIES = {
+      claude_subscription: "Tasks execute via the Claude Code CLI on your Claude subscription. Per-call spend is shadow value; the monthly fee is the real recurring expense.",
+      openai_subscription: "Tasks execute via the Codex CLI on your OpenAI subscription. Per-call spend is shadow value; the monthly fee is the real recurring expense.",
+      custom_api: "Tasks execute via the opencode CLI with your API key. Every call books real per-token cost to the ledger.",
+      "": "No model source — every call books real per-token cost via your API key (legacy mode).",
+    };
+    function msShow(msg, ok) {
+      msResult.hidden = false; msResult.textContent = msg;
+      msResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    function msRefreshUi() {
+      const kind = msKind.value;
+      msFeeRow.hidden = !(kind === "claude_subscription" || kind === "openai_subscription");
+      msSummary.textContent = MS_SUMMARIES[kind] || "";
+      msConfirmClear = false;
+      msSave.textContent = "[ ▸ SAVE ]";
+    }
+    async function msLoad() {
+      try {
+        const src = await fetch("/settings/model-source", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        if (src && src.kind) {
+          msKind.value = src.kind;
+          if (src.monthly_fee_usd != null) msFee.value = src.monthly_fee_usd;
+        } else {
+          msKind.value = "";
+        }
+        msRefreshUi();
+      } catch (_) { msShow("failed to load model source", false); }
+      try {
+        const clis = await fetch("/settings/detect-clis", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        const parts = Object.entries(clis || {}).map(([name, info]) =>
+          `${name} CLI ${info.found ? "✓" : "✗"}${info.version ? " " + info.version : ""}`);
+        msClis.textContent = parts.length ? "detected: " + parts.join(" · ") : "";
+      } catch (_) { msClis.textContent = "CLI probe unavailable"; }
+    }
+    msKind.addEventListener("change", msRefreshUi);
+    msSave.addEventListener("click", async () => {
+      const kind = msKind.value;
+      const body = {};
+      if (kind) {
+        body.kind = kind;
+        if (!msFeeRow.hidden) {
+          const fee = parseFloat(msFee.value);
+          if (Number.isNaN(fee)) { msShow("monthly fee required for a subscription source", false); return; }
+          body.monthly_fee_usd = fee;
+        }
+      } else if (!msConfirmClear) {
+        // Two-stage inline confirm before dropping back to legacy billing.
+        msConfirmClear = true;
+        msSave.textContent = "[ ▸ CONFIRM — back to per-token billing ]";
+        msShow("click again to confirm removing the model source", true);
+        return;
+      }
+      msSave.disabled = true;
+      try {
+        const r = await fetch("/settings/model-source", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          msShow(kind ? `✓ model source set to ${kind}` : "✓ model source cleared", true);
+        } else {
+          msShow("✗ " + (d.detail || "save failed"), false);
+        }
+      } catch (e) {
+        msShow("save failed: " + e.message, false);
+      } finally {
+        msSave.disabled = false;
+        msConfirmClear = false;
+        msSave.textContent = "[ ▸ SAVE ]";
+      }
+    });
+    msLoad();
 
     // ---- Resend integration ----
     const rsStatus = document.getElementById("resend-status");

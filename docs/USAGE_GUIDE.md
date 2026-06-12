@@ -14,14 +14,15 @@ This guide covers everything you need to operate Kompany, from initializing your
 8. [Running Strategic Debates](#running-strategic-debates)
 9. [Viewing the Ledger](#viewing-the-ledger)
 10. [Executing Projects](#executing-projects)
-11. [Using the REST API](#using-the-rest-api)
-12. [Using the MCP Server](#using-the-mcp-server)
-13. [Using the Python SDK](#using-the-python-sdk)
-14. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
-15. [Cost Management](#cost-management)
-16. [Agent Memory](#agent-memory)
-17. [Best Practices](#best-practices)
-18. [Troubleshooting](#troubleshooting)
+11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
+12. [Using the REST API](#using-the-rest-api)
+13. [Using the MCP Server](#using-the-mcp-server)
+14. [Using the Python SDK](#using-the-python-sdk)
+15. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
+16. [Cost Management](#cost-management)
+17. [Agent Memory](#agent-memory)
+18. [Best Practices](#best-practices)
+19. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -391,6 +392,67 @@ The `ProjectRunner` handles execution:
 
 ---
 
+## Execution: Model Source & Harness Sessions
+
+Tasks don't have to be single LLM calls. When you configure a **model source**, every project task runs as a real multi-turn agentic session — tools, file edits, a persistent per-project workspace — executed via the Claude Code CLI, the Codex CLI, or opencode, depending on the source you pick. You choose where the work runs and how it's billed; the engine derives the rest.
+
+### Choosing a Model Source
+
+| Source kind | How tasks execute | Billing |
+|---|---|---|
+| `custom_api` | via the opencode CLI with your API key | `api` — real per-token expense |
+| `claude_subscription` | via the Claude Code CLI on your Claude subscription | `subscription` — monthly fee |
+| `openai_subscription` | via the Codex CLI on your OpenAI subscription | `subscription` — monthly fee |
+
+Configure it on any surface:
+
+- **Settings page** (web UI / desktop app) — the `MODEL SOURCE` section probes your installed CLIs, lets you pick a source (and a monthly fee for subscriptions), and shows a plain-language summary of how work will run.
+- **Onboarding** — interactive onboarding auto-detects installed agent CLIs (`claude`, `codex`, `opencode`) and offers detected subscriptions as options. Picking the Claude subscription is fully zero-key (single-shot calls route through the `claude` CLI too); picking the OpenAI subscription still asks for an API key for the C-suite's single-shot calls — only task execution rides the Codex CLI. The default stays the API-key path; nothing changes unless you opt in.
+- **CLI:**
+
+  ```bash
+  kompany model-source show                                       # active source (or "not configured")
+  kompany model-source set --kind claude_subscription --monthly-fee 20
+  kompany model-source set --kind custom_api
+  kompany model-source set --clear                                # back to legacy per-token billing
+  kompany model-source detect                                     # probe PATH for claude / codex / opencode
+  ```
+
+- **REST:** `GET /settings/model-source`, `PUT /settings/model-source` (body: `kind`, optional `billing_mode` / `monthly_fee_usd` / `price_overrides`; `kind: null` clears), `GET /settings/detect-clis`.
+- **MCP:** `kompany_model_source_show`, `kompany_model_source_set` (pass `clear: true` to remove), `kompany_detect_clis`.
+- **SDK:** `k.model_source()`, `k.set_model_source({...})` (`None` clears), `k.detect_clis()`.
+
+The serialized source always includes a read-only `execution_summary` describing how work runs. There is deliberately no input for picking the execution loop — it follows from the source kind.
+
+### Billing Modes
+
+- **`api`** (default for `custom_api`) — every call books real per-token cost to the ledger, exactly like single-shot calls. Use `price_overrides` (per-model `[input_usd, output_usd]` per million tokens) to fill or override pricing for private deployments.
+- **`subscription`** (default for the subscription kinds; `monthly_fee_usd` required) — the monthly fee is your real expense, booked to the ledger once per calendar month (idempotent — restarts and repeated heartbeats never double-book it). Per-call real cost is 0: individual sessions never touch the balance. Each session still records its tokens plus an API-equivalent **shadow value** (surfaced in `llm.spend` events with `shadow: true` and kept in the shadow-cost record) so you and the team keep quota awareness and can judge whether the subscription pays for itself.
+
+You can override the default pairing — e.g. run a `claude_subscription` source with `billing_mode=api` during a pay-as-you-go trial month.
+
+### Per-Task Budget Caps
+
+At project decomposition the CEO assigns each task a budget cap and a turn cap:
+
+- Default: **$0.50** per task. The CEO may assign up to the **$5.00** ceiling for genuinely complex work — never more (clamped when the task is written). Default turn cap: 30.
+- A founder-approved budget increase (see below) can raise a task's cap **past the CEO ceiling** — your approval is authoritative and is never re-clamped at execution time.
+- The project's budget envelope is the hard outer cap: a task never spends more than the envelope's remaining balance, and an exhausted envelope parks tasks instead of running them.
+
+### The Approval Inbox During Sessions
+
+Three kinds of cards land in the INBOX from harness execution:
+
+- **`harness_permission` — a session asks to use a side-effecting tool.** The session pauses on the tool call and waits about 120 seconds for your decision. Approve within the window → the tool call proceeds mid-run. Reject → the tool is denied (with your reason) and the task classifies as blocked, listing the denied tools. No decision in time → the tool is denied for now, but **the request stays in your inbox**: approve it later and the task's next run redeems the approval instantly. Approvals are one-shot — each covers exactly one ask; a later identical ask files a fresh request.
+- **`project_envelope_topup` — the project's budget envelope is exhausted.** Tasks are parked (never refused) and one top-up card per project shows the suggested amount. Approving actually moves money: the envelope is funded from unallocated treasury and parked tasks run on the project's next execution. If the treasury can't cover it yet, the approval stands — it retries once funds free up. Rejecting parks the project with explicit next steps.
+- **`harness_budget_increase` — a session hit its per-task cap.** The run pauses (the session is saved) and the card shows the cap, the amount spent, and the proposed increase. Approving raises the task's cap for real — re-run the project and the session continues from where it stopped. The payload slots `approved_top_up_usd` / `approved_increase_usd` are honored ahead of the suggested amounts — the hook for founder-edited amounts in a future inbox UI.
+
+### If the CLI Is Missing
+
+If the CLI for your chosen source isn't on PATH (say you picked the Claude subscription but `claude` isn't installed), nothing crashes: the engine records a `harness_vehicle_missing` health event with an install hint, and tasks fall back to the legacy single-shot, text-only mode until you install the CLI or switch the source in Settings.
+
+---
+
 ## Using the REST API
 
 Start the API server (requires `pip install -e ".[api]"`):
@@ -590,6 +652,8 @@ Every LLM API call is tracked as a real business expense. The `CostTracker` reco
 - Input and output token counts
 - Calculated cost based on model pricing
 - Description of what the call was for
+
+If you configured a subscription model source, per-call spend is recorded as shadow value instead and the monthly fee is the real expense — see [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions).
 
 ### Model Pricing
 

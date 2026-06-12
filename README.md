@@ -40,6 +40,7 @@ Kompany gives you an autonomous C-suite that **operates** — classifying direct
 1. **Mission Integrity** — The CEO never downgrades the Master's mission. Budget insufficient? Create a revenue project to earn the funds. "We can't afford it" is not an answer. "Here's how we'll fund it" is.
 2. **AI Costs Are Real Costs** — Every LLM call is an operational expense tracked in the company ledger. The balance can go negative. This increases the revenue target, never cancels the mission.
 3. **Goal Persistence** — A negative balance doesn't cancel anything. If the company is -€2 after running agents and needs €4,450 for a Mac Studio, the revenue project target is €4,452.
+4. **Real Work, Not Just Words** — Project tasks run as real multi-turn execution sessions via the Claude Code CLI, Codex CLI, or opencode — on your own subscription or API key — with per-task budget caps and an approval inbox gating side effects.
 
 ## How It Works
 

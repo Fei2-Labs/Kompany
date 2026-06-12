@@ -110,10 +110,11 @@ class Projects:
         self.db.execute(
             """INSERT INTO tasks
                (id, project_id, title, status, assigned_agent,
-                parent_task_id, run_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                parent_task_id, run_id, budget_cap_usd, max_turns)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task.id, task.project_id, task.title,
-             task.status.value, task.assigned_agent, task.parent_task_id, rid),
+             task.status.value, task.assigned_agent, task.parent_task_id, rid,
+             task.budget_cap_usd, task.max_turns),
         )
         self.db.commit()
         return task
@@ -125,6 +126,22 @@ class Projects:
             (project_id,),
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
+
+    def get_task(self, task_id: str) -> Task | None:
+        """Fetch one task by id."""
+        row = self.db.execute(
+            "SELECT * FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
+        return self._row_to_task(row) if row else None
+
+    def set_task_budget_cap(self, task_id: str, budget_cap_usd: float) -> None:
+        """Set a task's AI-spend cap (founder-approved budget increase)."""
+        self.db.execute(
+            """UPDATE tasks SET budget_cap_usd = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (float(budget_cap_usd), task_id),
+        )
+        self.db.commit()
 
     def update_task_status(
         self, task_id: str, status: TaskStatus, result: dict | None = None
@@ -166,6 +183,23 @@ class Projects:
         )
         self.db.commit()
 
+    def set_task_harness_session(
+        self, task_id: str, session_id: str, vehicle: str
+    ) -> None:
+        """Persist the vehicle session identity on a task (PRD D4).
+
+        Written after every harness run so an engine restart (or a
+        retry of a budget-capped task) can ``resume()`` the same session
+        instead of starting from scratch.
+        """
+        self.db.execute(
+            """UPDATE tasks SET harness_session_id = ?, harness_vehicle = ?,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (session_id, vehicle, task_id),
+        )
+        self.db.commit()
+
     def touch_task(self, task_id: str) -> None:
         """Bump a task's ``updated_at`` without changing other fields."""
         self.db.execute(
@@ -204,4 +238,8 @@ class Projects:
             assigned_agent=row["assigned_agent"],
             result=json.loads(row["result"]) if row["result"] else None,
             parent_task_id=row["parent_task_id"],
+            budget_cap_usd=row["budget_cap_usd"],
+            max_turns=row["max_turns"],
+            harness_session_id=row["harness_session_id"],
+            harness_vehicle=row["harness_vehicle"],
         )
