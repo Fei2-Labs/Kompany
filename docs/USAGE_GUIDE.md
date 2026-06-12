@@ -16,6 +16,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 10. [Executing Projects](#executing-projects)
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
 13. [Using the REST API](#using-the-rest-api)
 14. [Using the MCP Server](#using-the-mcp-server)
 15. [Using the Python SDK](#using-the-python-sdk)
@@ -684,6 +685,30 @@ Kompany ships as a Claude Code skill. Invoke it directly in any Claude Code sess
 ```
 
 The skill file is at `.claude/skills/kompany/SKILL.md`. It activates the venv, ensures the engine is installed, and routes your directive through `kompany directive`.
+
+---
+
+## Self-Update: Governed Code Changes
+
+Kompany can change its own code — but never the copy that is running, and never without you. The flow implements the constitution's "Source code self-modification" clause:
+
+```bash
+kompany self-update propose "Fix the dashboard date format and add a regression test"
+kompany self-update list
+kompany self-update show <id>
+```
+
+What happens on `propose`:
+
+1. A dedicated **clone** of the Kompany repo is created under `<data_dir>/self_update/repo` (the running checkout is constitutionally off-limits to sessions).
+2. A harness session implements the change on a fresh `self-update/<id>` branch, under its own budget cap (`self_update_budget_cap_usd`, default $2) and a mandatory-regression-test contract.
+3. The REAL diff is tier-checked. Protected paths (the constitution, the ledger and cost-tracking code, the approval/autonomy code, the self-update pipeline itself, CI workflows) abort the proposal outright — the branch is discarded and a health event is recorded. The brakes can't modify the brakes.
+4. The test suite runs inside the clone. Red tests don't hide the proposal — the card says `tests: FAILED` and you decide.
+5. A `self_update_proposal` card lands in your inbox with the diff stat, files, test summary, and session cost.
+
+What happens on **approve**: the branch is pushed to origin and a GitHub PR is opened when `gh` is available (otherwise you open it manually — the push result is on the card). **Merging stays on GitHub, in your hands.** After you merge, rebuild and reinstall with the existing scripts. Reject keeps the branch local for autopsy.
+
+The same operation is available everywhere: REST `POST /self-update/propose`, MCP `kompany_self_update_propose`, SDK `k.self_update_propose(...)`.
 
 ---
 
