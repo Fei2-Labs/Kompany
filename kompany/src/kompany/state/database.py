@@ -607,6 +607,29 @@ class Database:
                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
                )"""
         )
+
+        # Self-update proposals (06-12-self-update-pipeline PR1): one row
+        # per governed self-modification attempt — clone branch, post-
+        # session tier, diff evidence, test summary, lifecycle status.
+        # New table → _migrate() per the shadow_costs precedent.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS self_update_proposals (
+                   id TEXT PRIMARY KEY,
+                   instruction TEXT NOT NULL,
+                   branch TEXT NOT NULL,
+                   tier TEXT,
+                   files_changed TEXT,
+                   diff_stat TEXT,
+                   test_summary TEXT,
+                   session_id TEXT,
+                   vehicle TEXT,
+                   status TEXT NOT NULL DEFAULT 'running',
+                   approval_id TEXT,
+                   cost_usd REAL,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

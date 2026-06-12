@@ -127,7 +127,9 @@ def harness_model(settings: Any, vehicle: str) -> str:
 
 
 def select_runner(
-    settings: Any, health_events: Any = None
+    settings: Any,
+    health_events: Any = None,
+    permission_mode: str | None = None,
 ) -> HarnessRunner | None:
     """Derive the loop vehicle from the active ModelSource (PRD D1).
 
@@ -152,6 +154,14 @@ def select_runner(
         return None
     model = harness_model(settings, vehicle)
     if vehicle == "claude_code":
+        # permission_mode override: self-update sessions run with
+        # acceptEdits — file edits in the throwaway clone are the whole
+        # point and the D5 inbox gate is for live-project side effects,
+        # not clone work (06-12-self-update-pipeline live finding: the
+        # default mode denied every Write and sessions produced empty
+        # diffs). Other vehicles gate via their own profiles.
+        if permission_mode is not None:
+            return ClaudeCodeRunner(model=model, permission_mode=permission_mode)
         return ClaudeCodeRunner(model=model)
     if vehicle == "codex":
         return CodexRunner(model=model)

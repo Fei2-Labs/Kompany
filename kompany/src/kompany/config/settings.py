@@ -79,6 +79,15 @@ class KompanySettings(BaseSettings):
     tick_interval_seconds: int = 300
     daemon_auto_execute: bool = True
 
+    # Self-update pipeline (06-12-self-update-pipeline PRD D5). Code work
+    # is heavier than the task default ($0.50/30) — the dedicated session
+    # cap is $2 / 40 turns. ``self_update_test_cmd`` runs inside the
+    # clone's ``kompany/`` directory with PYTHONPATH pinned to the
+    # clone's ``src`` (PRD D4).
+    self_update_budget_cap_usd: float = 2.0
+    self_update_max_turns: int = 40
+    self_update_test_cmd: str = "python -m pytest tests/ -q"
+
     # ``extra="ignore"`` is critical: a founder's machine may have any
     # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
     # custom-provider keys from earlier testing). Without this, engine
@@ -173,6 +182,19 @@ class KompanySettings(BaseSettings):
                 overrides["tick_interval_seconds"] = int(data["tick_interval_seconds"])
             if "daemon_auto_execute" in data:
                 overrides["daemon_auto_execute"] = bool(data["daemon_auto_execute"])
+            # Self-update pipeline settings (06-12-self-update-pipeline).
+            if "self_update_budget_cap_usd" in data:
+                overrides["self_update_budget_cap_usd"] = float(
+                    data["self_update_budget_cap_usd"]
+                )
+            if "self_update_max_turns" in data:
+                overrides["self_update_max_turns"] = int(
+                    data["self_update_max_turns"]
+                )
+            if "self_update_test_cmd" in data:
+                overrides["self_update_test_cmd"] = str(
+                    data["self_update_test_cmd"]
+                )
         settings = cls(**overrides)
         # ModelSource fallback (06-11-harness-execution-leg PR5b): the
         # founder surfaces persist the active source to
