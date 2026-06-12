@@ -54,8 +54,8 @@ AGENTS.*.local.md
 
 # Founder internals — live in the private kompany-docs repo, symlinked here.
 # Contributors: copy AGENTS.example.md to AGENTS.md for your own agent setup.
-.agents/
-.trellis/
-.claude/
+/.agents
+/.trellis
+/.claude
 /AGENTS.md
 /kompany-prd.md

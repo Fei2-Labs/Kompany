@@ -8,7 +8,7 @@
   },
   "homepage": "https://github.com/Fei2-Labs/Kompany",
   "repository": "https://github.com/Fei2-Labs/Kompany",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-only",
   "keywords": ["business", "agents", "founder", "mcp", "autonomous"],
   "commands": ["./.claude-plugin/commands/kompany.md"],
   "mcpServers": {
