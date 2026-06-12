@@ -25,11 +25,16 @@ from kompany.core.harness_execution.executor import (
     ACTION_BUDGET_INCREASE,
     ACTION_ENVELOPE_TOPUP,
 )
+from kompany.core.self_update.effects import (
+    ACTION_SELF_UPDATE,
+    approve_self_update,
+    reject_self_update,
+)
 from kompany.state.models import ApprovalRequest
 
 # Action types whose approve/reject triggers an engine-side effect here.
 HARNESS_EFFECT_ACTIONS: frozenset[str] = frozenset(
-    {ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE}
+    {ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE, ACTION_SELF_UPDATE}
 )
 
 
@@ -44,6 +49,8 @@ def apply_post_approve_effect(
         return _approve_envelope_topup(engine, request)
     if request.action_type == ACTION_BUDGET_INCREASE:
         return _approve_budget_increase(engine, request)
+    if request.action_type == ACTION_SELF_UPDATE:
+        return approve_self_update(engine, request)
     return {"status": "no_effect"}
 
 
@@ -51,6 +58,8 @@ def apply_post_reject_effect(
     engine: Any, request: ApprovalRequest
 ) -> dict[str, Any]:
     """Rejected: audit it and leave the task PENDING with a real next step."""
+    if request.action_type == ACTION_SELF_UPDATE:
+        return reject_self_update(engine, request)
     payload = request.payload or {}
     task_id = payload.get("task_id")
     if request.action_type == ACTION_ENVELOPE_TOPUP:

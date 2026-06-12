@@ -1039,6 +1039,35 @@ class ModelSourceRequest(BaseModel):
     price_overrides: dict[str, tuple[float, float]] | None = None
 
 
+class SelfUpdateProposeRequest(BaseModel):
+    """Body for ``POST /self-update/propose``."""
+
+    instruction: str
+
+
+@app.post("/self-update/propose")
+def self_update_propose(req: SelfUpdateProposeRequest) -> dict:
+    """Governed self-update propose flow (06-12-self-update-pipeline)."""
+    try:
+        return get_engine().self_update_propose(req.instruction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/self-update/proposals")
+def self_update_proposals(limit: int = 20) -> list[dict]:
+    """Recent self-update proposals, newest first."""
+    return get_engine().self_update_list(limit=limit)
+
+
+@app.get("/self-update/proposals/{proposal_id}")
+def self_update_proposal(proposal_id: str) -> dict:
+    row = get_engine().self_update_show(proposal_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return row
+
+
 @app.get("/settings/model-source")
 def get_model_source_setting() -> dict | None:
     """Active model source (or null). Same dict shape as SDK/MCP."""

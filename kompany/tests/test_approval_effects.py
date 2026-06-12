@@ -263,8 +263,10 @@ def test_reject_topup_mentions_rescope_or_abandon(tmp_path):
 
 
 def test_effect_actions_cover_both_pr4_action_types():
+    from kompany.core.self_update.effects import ACTION_SELF_UPDATE
+
     assert HARNESS_EFFECT_ACTIONS == {
-        ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE,
+        ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE, ACTION_SELF_UPDATE,
     }
 
 

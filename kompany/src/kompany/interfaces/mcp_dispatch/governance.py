@@ -229,6 +229,20 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
         removed = engine.remove_glossary_term(arguments["term"])
         return {"removed": removed, "term": arguments["term"]}
 
+    # Self-update pipeline (06-12-self-update-pipeline PR2).
+    if name == "kompany_self_update_propose":
+        try:
+            return engine.self_update_propose(arguments["instruction"])
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    if name == "kompany_self_update_list":
+        return engine.self_update_list(limit=int(arguments.get("limit") or 20))
+
+    if name == "kompany_self_update_show":
+        row = engine.self_update_show(arguments["proposal_id"])
+        return row if row is not None else {"error": "proposal not found"}
+
     # ModelSource founder surface (06-11-harness-execution-leg PR5b).
     if name == "kompany_model_source_show":
         return engine.get_model_source()

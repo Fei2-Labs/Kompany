@@ -797,6 +797,46 @@ TOOLS = [
             "required": ["term"],
         },
     ),
+    # Self-update pipeline (06-12-self-update-pipeline PR2).
+    Tool(
+        name="kompany_self_update_propose",
+        description=(
+            "Governed self-update: run a harness session in the dedicated "
+            "repo clone, enforce the T3 tier guard on the real diff, run "
+            "tests, and file a self_update_proposal approval card. The "
+            "merge stays human (founder approves, branch is pushed, PR "
+            "opened best-effort)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "instruction": {
+                    "type": "string",
+                    "description": "What to change and why (plain language)",
+                },
+            },
+            "required": ["instruction"],
+        },
+    ),
+    Tool(
+        name="kompany_self_update_list",
+        description="Recent self-update proposals, newest first.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "default": 20},
+            },
+        },
+    ),
+    Tool(
+        name="kompany_self_update_show",
+        description="One self-update proposal by id.",
+        inputSchema={
+            "type": "object",
+            "properties": {"proposal_id": {"type": "string"}},
+            "required": ["proposal_id"],
+        },
+    ),
     # ModelSource founder surface (06-11-harness-execution-leg PR5b).
     Tool(
         name="kompany_model_source_show",

@@ -315,6 +315,24 @@ class Kompany:
         """Probe PATH for agent CLIs that unlock zero-key model sources."""
         return self._engine.detect_agent_clis()
 
+    def self_update_propose(self, instruction: str) -> dict[str, Any]:
+        """Governed self-update propose flow (06-12-self-update-pipeline).
+
+        Runs a harness session in the dedicated clone, enforces the T3
+        tier guard on the real diff, runs tests, and files a
+        ``self_update_proposal`` approval card. Same dict shape as REST
+        ``POST /self-update/propose`` and MCP ``kompany_self_update_propose``.
+        """
+        return self._engine.self_update_propose(instruction)
+
+    def self_update_list(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Recent self-update proposals, newest first."""
+        return self._engine.self_update_list(limit=limit)
+
+    def self_update_show(self, proposal_id: str) -> dict[str, Any] | None:
+        """One proposal row by id; ``None`` when unknown."""
+        return self._engine.self_update_show(proposal_id)
+
     def list_credentials(self) -> list[dict[str, Any]]:
         return self._engine.list_credentials()
 

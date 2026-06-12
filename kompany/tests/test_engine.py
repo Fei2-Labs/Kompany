@@ -112,6 +112,8 @@ def engine(tmp_path, monkeypatch):
     # always carries the tick store; restore_backup rewires its db.
     from kompany.state.daemon_ticks import DaemonTickStore
     engine.daemon_ticks = DaemonTickStore(db)
+    from kompany.state.self_update_proposals import SelfUpdateProposalStore
+    engine.self_update_proposals = SelfUpdateProposalStore(db)
     engine.autonomy = __import__(
         "kompany.core.autonomy", fromlist=["AutonomyGate"]
     ).AutonomyGate()

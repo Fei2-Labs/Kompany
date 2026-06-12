@@ -70,6 +70,7 @@ from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
 from kompany.state.daemon_ticks import DaemonTickStore
+from kompany.state.self_update_proposals import SelfUpdateProposalStore
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
 from kompany.state.shadow_costs import ShadowCostStore
@@ -205,6 +206,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         # heartbeat that advances work with no founder session open.
         # Tick logic lives in core/ticker.py (engine.py is over the cap).
         self.daemon_ticks = DaemonTickStore(self.db)
+        self.self_update_proposals = SelfUpdateProposalStore(self.db)
         self.ticker = Ticker(
             engine=self,
             ticks=self.daemon_ticks,
@@ -2430,6 +2432,7 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         # in place so post-restore ticks keep recording without
         # reconstructing the ticker.
         self.daemon_ticks.db = self.db
+        self.self_update_proposals.db = self.db
 
         # 4. Audit restore in the (now restored) live DB.
         self.audit.record(
@@ -3782,6 +3785,26 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         result["thread"] = thread
         result["comments"] = comments
         return result
+
+    # ------------------------------------------------------------------
+    # Self-update pipeline (06-12-self-update-pipeline) — governed code
+    # self-modification. Logic lives in core/self_update/; thin delegates.
+    # ------------------------------------------------------------------
+
+    def self_update_propose(self, instruction: str) -> dict:
+        """Run the governed propose flow; returns the proposal row."""
+        from kompany.core.self_update.pipeline import propose_self_update
+
+        text = (instruction or "").strip()
+        if not text:
+            raise ValueError("instruction must be a non-empty string")
+        return propose_self_update(self, text)
+
+    def self_update_list(self, limit: int = 20) -> list[dict]:
+        return self.self_update_proposals.list(limit=limit)
+
+    def self_update_show(self, proposal_id: str) -> dict | None:
+        return self.self_update_proposals.get(proposal_id)
 
     def approve_request(
         self,
