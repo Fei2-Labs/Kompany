@@ -630,6 +630,28 @@ class Database:
                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
                )"""
         )
+        # Anima persona layer (06-12-anima-persona PR1): single-row
+        # emotion state + date-keyed diary. New tables → _migrate() per
+        # the shadow_costs precedent.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS anima_state (
+                   id INTEGER PRIMARY KEY CHECK (id = 1),
+                   valence REAL NOT NULL DEFAULT 0.0,
+                   energy REAL NOT NULL DEFAULT 0.5,
+                   last_diary_date TEXT,
+                   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS anima_diary (
+                   date TEXT PRIMARY KEY,
+                   entry TEXT NOT NULL,
+                   valence REAL NOT NULL DEFAULT 0.0,
+                   energy REAL NOT NULL DEFAULT 0.5,
+                   cost REAL NOT NULL DEFAULT 0.0,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

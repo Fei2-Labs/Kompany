@@ -17,6 +17,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
 13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
+13. [Anima: The Company's Persona](#anima-the-companys-persona)
 13. [Using the REST API](#using-the-rest-api)
 14. [Using the MCP Server](#using-the-mcp-server)
 15. [Using the Python SDK](#using-the-python-sdk)
@@ -709,6 +710,22 @@ What happens on `propose`:
 What happens on **approve**: the branch is pushed to origin and a GitHub PR is opened when `gh` is available (otherwise you open it manually — the push result is on the card). **Merging stays on GitHub, in your hands.** After you merge, rebuild and reinstall with the existing scripts. Reject keeps the branch local for autopsy.
 
 The same operation is available everywhere: REST `POST /self-update/propose`, MCP `kompany_self_update_propose`, SDK `k.self_update_propose(...)`.
+
+---
+
+## Anima: The Company's Persona
+
+Anima (provisional name, tracked in the glossary) is the persona layer above the C-suite: an explicit emotional state plus a private first-person diary, driven by the daemon tick loop.
+
+- **Emotion is voice-only.** Income, completed/failed tasks, and alarm health events nudge a 2-axis state (valence, energy) in pure code — no LLM. Per the constitution's honest-assessment clause, this state shapes Anima's *voice* (diary tone) only; it is never injected into C-suite, classification, or debate prompts.
+- **Diary: once per day.** After the day's first tick, one economy-tier LLM call distills the last 24h (tasks, ledger, health events, decided approvals) into a <=200-word entry whose tone reflects the current emotion. Cost books through the normal path (`action_type="anima_diary"`). A suspended company writes no diary. Publishing the diary externally (X/Weibo/Telegram) comes in a later release behind its own approval gate.
+
+```bash
+kompany anima state    # valence, energy, derived tone
+kompany anima diary    # recent entries, newest first
+```
+
+The same operations exist on every interface: REST `GET /anima/state` + `GET /anima/diary`, MCP `kompany_anima_state` / `kompany_anima_diary`, SDK `k.anima_state()` / `k.anima_diary()`. Config flags: `anima_enabled` (whole layer) and `anima_diary_enabled` (just the daily LLM call), in YAML or `KOMPANY_ANIMA_ENABLED` / `KOMPANY_ANIMA_DIARY_ENABLED`.
 
 ---
 

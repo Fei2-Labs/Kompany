@@ -37,6 +37,10 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # codex / opencode) is missing from PATH — the engine degrades to the
     # legacy single-call path instead of crashing (harness leg PR5).
     "harness_vehicle_missing",
+    # Fires when a self-update session's diff touched a T3 (protected)
+    # path — the proposal is aborted and its branch discarded
+    # (06-12-self-update-pipeline PRD D2).
+    "self_update_t3_blocked",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

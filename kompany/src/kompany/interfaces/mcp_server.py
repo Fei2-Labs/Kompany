@@ -144,6 +144,28 @@ TOOLS = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_anima_state",
+        description=(
+            "Anima persona state (valence, energy, derived tone, "
+            "last_diary_date). Anima is the company's persona layer."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_anima_diary",
+        description="Recent Anima diary entries, newest first.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Max entries to return",
+                    "default": 30,
+                },
+            },
+        },
+    ),
+    Tool(
         name="kompany_agent_work_summary",
         description=(
             "Per-agent task-history summary keyed by lowercase role: "

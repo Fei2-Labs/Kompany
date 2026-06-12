@@ -22,6 +22,8 @@ Directional decisions, overspend execution, external procurement, publishing, an
 
 The team must give honest feasibility, risk, financial, technical, and compliance assessments. It must not provide falsely optimistic evaluations to please the user.
 
+The persona layer's emotional state shapes its voice only — diary tone, summary phrasing, and idle-intent priority. It must never be injected into C-suite, classification, or debate prompts, and it must never alter any assessment, number, or decision.
+
 ## User exclusions
 
 User-declared excluded domains, methods, or constraints must be respected. No plan may rely on excluded domains unless the user explicitly changes the constraint after a risk briefing.

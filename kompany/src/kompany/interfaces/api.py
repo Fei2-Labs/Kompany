@@ -2899,6 +2899,19 @@ async def events_stream() -> StreamingResponse:
     )
 
 
+@app.get("/anima/state")
+def anima_state() -> dict[str, Any]:
+    """Anima persona state (06-12-anima-persona PRD D5): valence,
+    energy, derived tone, last_diary_date."""
+    return get_engine().anima_state()
+
+
+@app.get("/anima/diary")
+def anima_diary(limit: int = 30) -> list[dict[str, Any]]:
+    """Recent Anima diary entries, newest first."""
+    return get_engine().anima_diary_list(limit=limit)
+
+
 @app.get("/agents/work-summary")
 def agents_work_summary() -> dict[str, dict[str, Any]]:
     """Per-agent task-history summary (06-12-panel-truthfulness #22).

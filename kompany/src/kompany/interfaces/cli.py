@@ -2109,9 +2109,11 @@ def model_source_detect(
 
 # Daemon sub-app (06-12-daemon-tick-loop PR2). Lives in cli_daemon.py —
 # cli.py is over the file-size cap, new command groups go in siblings.
+from kompany.interfaces.cli_anima import anima_app  # noqa: E402
 from kompany.interfaces.cli_daemon import daemon_app  # noqa: E402
 from kompany.interfaces.cli_self_update import self_update_app  # noqa: E402
 
+app.add_typer(anima_app, name="anima")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(self_update_app, name="self-update")
 

@@ -142,6 +142,12 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_agent_work_summary":
         return engine.agent_work_summary()
 
+    if name == "kompany_anima_state":
+        return engine.anima_state()
+
+    if name == "kompany_anima_diary":
+        return engine.anima_diary_list(limit=int(arguments.get("limit", 30)))
+
     if name == "kompany_project":
         p = engine.projects.get(arguments["project_id"])
         if not p:

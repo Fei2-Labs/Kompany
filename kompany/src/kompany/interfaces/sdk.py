@@ -325,6 +325,19 @@ class Kompany:
         """
         return self._engine.agent_work_summary()
 
+    def anima_state(self) -> dict[str, Any]:
+        """Current Anima persona state (06-12-anima-persona PRD D5).
+
+        Same dict REST ``GET /anima/state`` and MCP ``kompany_anima_state``
+        return: ``valence`` / ``energy`` / ``tone`` / ``last_diary_date`` /
+        ``updated_at`` / ``enabled``.
+        """
+        return self._engine.anima_state()
+
+    def anima_diary(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Recent Anima diary entries, newest first (REST ``GET /anima/diary``)."""
+        return self._engine.anima_diary_list(limit=limit)
+
     def self_update_propose(self, instruction: str) -> dict[str, Any]:
         """Governed self-update propose flow (06-12-self-update-pipeline).
 

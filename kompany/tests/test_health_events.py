@@ -195,6 +195,10 @@ def test_constants_match_prd():
         # derived vehicle binary is missing from PATH — the engine
         # degrades to the legacy single-call path instead of crashing.
         "harness_vehicle_missing",
+        # Added by 06-12-self-update-pipeline PR1: a self-update session's
+        # diff touched a T3 (protected) path — proposal aborted, branch
+        # discarded.
+        "self_update_t3_blocked",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

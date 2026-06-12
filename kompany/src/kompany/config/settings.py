@@ -88,6 +88,13 @@ class KompanySettings(BaseSettings):
     self_update_max_turns: int = 40
     self_update_test_cmd: str = "python -m pytest tests/ -q"
 
+    # Anima persona layer (06-12-anima-persona). ``anima_enabled``
+    # registers the emotion + diary tick intents; ``anima_diary_enabled``
+    # gates ONLY the daily economy-tier diary call (emotion stays pure
+    # code and free). Both flags off → ticker actions list unchanged.
+    anima_enabled: bool = True
+    anima_diary_enabled: bool = True
+
     # ``extra="ignore"`` is critical: a founder's machine may have any
     # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
     # custom-provider keys from earlier testing). Without this, engine
@@ -182,6 +189,10 @@ class KompanySettings(BaseSettings):
                 overrides["tick_interval_seconds"] = int(data["tick_interval_seconds"])
             if "daemon_auto_execute" in data:
                 overrides["daemon_auto_execute"] = bool(data["daemon_auto_execute"])
+            # Anima persona flags (06-12-anima-persona).
+            for flag in ("anima_enabled", "anima_diary_enabled"):
+                if flag in data:
+                    overrides[flag] = bool(data[flag])
             # data_dir from YAML (issue #21): silently ignoring this key
             # caused a real production-contamination incident — an
             # isolated config's data_dir was dropped and the engine wrote

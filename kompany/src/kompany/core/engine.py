@@ -19,6 +19,7 @@ from kompany.core.directive import (
 from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.core.subscription_fee import book_subscription_fee_if_due
+from kompany.core.anima import Anima
 from kompany.core.ticker import Ticker
 from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient
@@ -213,6 +214,27 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             tick_interval_seconds=self.settings.tick_interval_seconds,
             auto_execute=self.settings.daemon_auto_execute,
         )
+
+        # Anima persona layer (06-12-anima-persona): emotion + diary tick
+        # intents appended to the ticker's actions list (PRD D4 — the
+        # suspend gate already precedes every action). Logic lives in
+        # core/anima.py (engine.py is over the cap). The provisional
+        # glossary term is seeded idempotently (one cheap read when it
+        # already exists, PRD D1).
+        self.anima: Anima | None = None
+        if self.settings.anima_enabled:
+            self.anima = Anima(self)
+            self.ticker.actions.append(
+                ("anima_emotion", self.anima.emotion_tick)
+            )
+            if self.settings.anima_diary_enabled:
+                self.ticker.actions.append(
+                    ("anima_diary", self.anima.diary_tick)
+                )
+            try:
+                self.anima.ensure_glossary_entry()
+            except Exception:  # noqa: BLE001 — glossary seed must never block boot
+                pass
 
         self.llm = LLMClient(
             settings=self.settings,
@@ -2077,6 +2099,21 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         from kompany.core import model_source_ops
 
         return model_source_ops.detect_agent_clis()
+
+    # ----- Anima persona surface (06-12-anima-persona PRD D5)
+    # Thin wrappers — logic lives in ``core/anima.py``.
+
+    def anima_state(self) -> dict:
+        """Current persona state (valence, energy, tone, last_diary_date)."""
+        from kompany.core import anima
+
+        return anima.anima_state_op(self)
+
+    def anima_diary_list(self, limit: int = 30) -> list[dict]:
+        """Most recent diary entries, newest first."""
+        from kompany.core import anima
+
+        return anima.anima_diary_list_op(self, limit=limit)
 
     def list_credentials(self) -> list[dict]:
         return [entry.model_dump(mode="json") for entry in self.credentials.list()]
