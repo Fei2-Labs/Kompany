@@ -11,6 +11,9 @@ from kompany.core.harness_execution import (
     resolve_caps,
     select_runner,
 )
+# Extracted to core/task_outcome.py (06-12-daemon-tick-loop PR1) to keep
+# this file under the 500-line cap. The alias preserves existing imports.
+from kompany.core.task_outcome import classify_outcome as _classify_outcome
 from kompany.state.models import (
     Project,
     ProjectStatus,
@@ -18,55 +21,6 @@ from kompany.state.models import (
     TaskStatus,
 )
 
-# Phrases an agent uses when it produced a plan/asset but could not
-# actually perform an external action (no integration/credentials).
-_BLOCKED_SIGNALS = (
-    "cannot truthfully confirm",
-    "do not have access",
-    "don't have access",
-    "no access to your",
-    "unable to send",
-    "i cannot send",
-    "i can't send",
-    "do not have the ability",
-    "cannot actually",
-    "i am unable to",
-    "without access to your",
-    "requires access to your",
-    "need access to your",
-    "i have not sent",
-    "i did not send",
-    "have not actually",
-)
-
-
-def _classify_outcome(title: str, output: str) -> tuple[str, str]:
-    """Classify what really happened in a task (hybrid mode, step A).
-
-    Returns ``(outcome, founder_action)`` where outcome is one of
-    ``"completed" | "delivered" | "blocked"``.
-
-    No real integrations are wired yet, so an agent never truly
-    *executes* an external action — it produces an asset, and sometimes
-    says outright it can't act. We therefore never return ``completed``
-    here; that state is reserved for a future real-tool path. We
-    distinguish ``blocked`` (the agent flagged missing access) from
-    ``delivered`` (a usable asset the founder must act on).
-    """
-    low = (output or "").lower()
-    blocked = any(sig in low for sig in _BLOCKED_SIGNALS)
-
-    t = (title or "").lower()
-    if any(k in t for k in ("send", "outreach", "dm", "email", "message", "follow up", "follow-up")):
-        action = "Send the drafted messages yourself (your email / LinkedIn / DMs) — the team can't send without an integration."
-    elif any(k in t for k in ("checkout", "landing page", "stripe", "gumroad", "publish", "page")):
-        action = "Publish the asset: paste the copy/links into Stripe/Gumroad or your site."
-    elif any(k in t for k in ("call", "book", "schedule", "onboard")):
-        action = "Run the calls / scheduling yourself using the script above."
-    else:
-        action = "Review the asset above and execute it."
-
-    return ("blocked" if blocked else "delivered"), action
 
 class TaskSpec(BaseModel):
     """A single task specification.
@@ -117,23 +71,7 @@ class ProjectRunner:
             project_id=project_id,
         )
 
-        # Decompose only if the project has no tasks yet. Re-running an
-        # already-decomposed project (e.g. the founder re-picked it from
-        # step 5, or a second kickoff fired) must NOT create a duplicate
-        # task set — it should just run whatever pending tasks remain.
-        existing_tasks = self._engine.projects.list_tasks(project_id)
-        if not existing_tasks:
-            tasks = self._decompose(project)
-            for spec in tasks:
-                cap, turns = resolve_caps(spec.budget_cap_usd, spec.max_turns)
-                task = Task(
-                    project_id=project_id,
-                    title=spec.title,
-                    assigned_agent=spec.assigned_agent,
-                    budget_cap_usd=cap,
-                    max_turns=turns,
-                )
-                self._engine.projects.create_task(task)
+        self._ensure_tasks(project)
 
         result = self._run_existing_tasks(project, result)
 
@@ -197,6 +135,68 @@ class ProjectRunner:
                 continue
             self._execute_task(task, project, result)
 
+        return self._finalize_project(project, result)
+
+    def run_one_pending(self, project_id: str) -> str | None:
+        """Execute AT MOST one pending task of this project (ticker slice).
+
+        Daemon tick loop (06-12-daemon-tick-loop D3): the ticker advances
+        one task per tick, bounded by the same envelope guards / per-task
+        caps that ``_execute_task`` already enforces. Returns the executed
+        task's id, or ``None`` when the project is missing or has no
+        pending task. Shares ``_execute_task`` and the completion check
+        with the full run/resume paths.
+
+        Deliberately PENDING-only: unlike ``resume`` (``retry_failed=
+        True``), this slice never resets ``failed``/``active`` tasks back
+        to pending — an unattended daemon must not grind retries against
+        a task that keeps failing; retry stays a founder-initiated
+        ``resume`` decision.
+        """
+        project = self._engine.projects.get(project_id)
+        if not project:
+            return None
+        # A freshly created project has no tasks until its plan is
+        # decomposed — without this the ticker would only ever continue
+        # projects a founder session had already kicked off, never start
+        # new ones.
+        self._ensure_tasks(project)
+        for task in self._engine.projects.list_tasks(project_id):
+            status = task.status.value if isinstance(task.status, TaskStatus) else task.status
+            if status != TaskStatus.PENDING.value:
+                continue
+            result = ProjectRunResult(project_id=project_id)
+            self._execute_task(task, project, result)
+            self._finalize_project(project, result)
+            return task.id
+        return None
+
+    def _ensure_tasks(self, project: Project) -> None:
+        """Decompose the plan into tasks only when none exist yet.
+
+        Re-entering an already-decomposed project (founder re-pick, second
+        kickoff, every ticker pass) must NOT create a duplicate task set —
+        it just runs whatever pending tasks remain.
+        """
+        if self._engine.projects.list_tasks(project.id):
+            return
+        for spec in self._decompose(project):
+            cap, turns = resolve_caps(spec.budget_cap_usd, spec.max_turns)
+            self._engine.projects.create_task(
+                Task(
+                    project_id=project.id,
+                    title=spec.title,
+                    assigned_agent=spec.assigned_agent,
+                    budget_cap_usd=cap,
+                    max_turns=turns,
+                )
+            )
+
+    def _finalize_project(
+        self, project: Project, result: ProjectRunResult
+    ) -> ProjectRunResult:
+        """Funding/completion bookkeeping shared by run, resume, and the
+        ticker's one-task slice."""
         result.fully_funded = self._engine.projects.is_fully_funded(project.id)
         # Mark the project completed when EITHER it's fully funded (revenue
         # projects) OR — for a first-move directive specifically — every

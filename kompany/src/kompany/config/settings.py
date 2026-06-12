@@ -71,6 +71,14 @@ class KompanySettings(BaseSettings):
     # inbox. False restores plain ``--permission-mode`` behavior.
     harness_permission_routing: bool = True
 
+    # Daemon tick loop (06-12-daemon-tick-loop PR1): wake interval of the
+    # autonomous ticker, and the advance-work gate (PRD D3 step 3 — at
+    # most one pending task of one active project per tick). Flip
+    # ``daemon_auto_execute`` to False to keep ticking (heartbeat,
+    # housekeeping, recording) without autonomous task execution.
+    tick_interval_seconds: int = 300
+    daemon_auto_execute: bool = True
+
     # ``extra="ignore"`` is critical: a founder's machine may have any
     # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
     # custom-provider keys from earlier testing). Without this, engine
@@ -108,6 +116,16 @@ class KompanySettings(BaseSettings):
 
     @classmethod
     def load(cls, config_path: str | None = None) -> "KompanySettings":
+        # No explicit config → the founder's persisted ``<data_dir>/
+        # config.yaml`` IS the config file (full parse, not just the
+        # model_source fallback below). Without this, ``KompanyEngine()``
+        # boots (sidecar, daemon, MCP) silently ignored models / tick /
+        # flag settings the founder had saved. Live-verification finding,
+        # 06-12-daemon-tick-loop.
+        if config_path is None:
+            candidate = cls().data_dir / "config.yaml"
+            if candidate.exists():
+                config_path = str(candidate)
         overrides: dict[str, Any] = {}
         data: dict[str, Any] = {}
         if config_path and Path(config_path).exists():
@@ -150,6 +168,11 @@ class KompanySettings(BaseSettings):
             ):
                 if flag in data:
                     overrides[flag] = bool(data[flag])
+            # Daemon tick loop settings (06-12-daemon-tick-loop PR1).
+            if "tick_interval_seconds" in data:
+                overrides["tick_interval_seconds"] = int(data["tick_interval_seconds"])
+            if "daemon_auto_execute" in data:
+                overrides["daemon_auto_execute"] = bool(data["daemon_auto_execute"])
         settings = cls(**overrides)
         # ModelSource fallback (06-11-harness-execution-leg PR5b): the
         # founder surfaces persist the active source to

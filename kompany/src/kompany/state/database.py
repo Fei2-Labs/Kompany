@@ -591,6 +591,22 @@ class Database:
                 self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+        # Daemon ticks (06-12-daemon-tick-loop PR1): one row per autonomous
+        # ticker pass (PRD D3 step 5). Retention = last 500 rows, pruned by
+        # the ticker's housekeeping step. New table → _migrate() per the
+        # shadow_costs precedent.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS daemon_ticks (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   started_at TEXT NOT NULL,
+                   duration_ms INTEGER NOT NULL DEFAULT 0,
+                   actions TEXT NOT NULL DEFAULT '[]',
+                   outcome TEXT NOT NULL DEFAULT 'ok',
+                   detail TEXT,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

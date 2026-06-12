@@ -19,6 +19,7 @@ from kompany.core.directive import (
 from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.core.subscription_fee import book_subscription_fee_if_due
+from kompany.core.ticker import Ticker
 from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient
 from kompany.llm.cost_tracker import CostTracker
@@ -68,6 +69,7 @@ from kompany.state.episodes import Episodes
 from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
+from kompany.state.daemon_ticks import DaemonTickStore
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
 from kompany.state.shadow_costs import ShadowCostStore
@@ -197,6 +199,17 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             # try/except so a transient ledger error never breaks the
             # tick — see ``Watchdog._scan_runway`` for the contract.
             runway_provider=self._runway_snapshot,
+        )
+
+        # Daemon tick loop (06-12-daemon-tick-loop PR1): the autonomous
+        # heartbeat that advances work with no founder session open.
+        # Tick logic lives in core/ticker.py (engine.py is over the cap).
+        self.daemon_ticks = DaemonTickStore(self.db)
+        self.ticker = Ticker(
+            engine=self,
+            ticks=self.daemon_ticks,
+            tick_interval_seconds=self.settings.tick_interval_seconds,
+            auto_execute=self.settings.daemon_auto_execute,
         )
 
         self.llm = LLMClient(
@@ -1141,12 +1154,14 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         )
 
     async def start(self) -> None:
-        """Start engine background workers (watchdog scanner)."""
+        """Start engine background workers (watchdog scanner + ticker)."""
         self.watchdog.start()
+        self.ticker.start()
 
     async def stop(self) -> None:
         """Stop engine background workers."""
         await self.watchdog.stop()
+        await self.ticker.stop()
 
     # ------------------------------------------------------------------
     # Company templates (ready-to-play scenarios)
@@ -1957,6 +1972,9 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             },
             notifications=notifications,
             office=office,
+            # Daemon tick loop visibility (06-12 D5): recent autonomous
+            # ticks join the existing observability operation.
+            recent_ticks=self.daemon_ticks.recent(10),
         ).model_dump(mode="json")
         self.audit.record(
             "observability.snapshot",
@@ -2406,6 +2424,12 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
             settings=self.settings,
             shadow_costs=self.shadow_costs,
         )
+        # Daemon tick loop (06-12-daemon-tick-loop PR1): the tick store
+        # captured the OLD (now closed) Database at construction, and the
+        # running Ticker holds that store instance. Swap the connection
+        # in place so post-restore ticks keep recording without
+        # reconstructing the ticker.
+        self.daemon_ticks.db = self.db
 
         # 4. Audit restore in the (now restored) live DB.
         self.audit.record(

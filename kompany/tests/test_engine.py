@@ -108,6 +108,10 @@ def engine(tmp_path, monkeypatch):
     engine.credentials = CredentialVaultStore(db, settings.vault_key)
     engine.settings.remote_replay_ttl_seconds = 7 * 24 * 60 * 60
     engine.tool_authorization = ToolAuthorizationStore(db)
+    # Daemon tick loop (06-12-daemon-tick-loop PR1): the real engine
+    # always carries the tick store; restore_backup rewires its db.
+    from kompany.state.daemon_ticks import DaemonTickStore
+    engine.daemon_ticks = DaemonTickStore(db)
     engine.autonomy = __import__(
         "kompany.core.autonomy", fromlist=["AutonomyGate"]
     ).AutonomyGate()
@@ -718,6 +722,26 @@ def test_observability_snapshot_reports_project_task_progress(engine):
     assert snapshot["projects"]["items"][0]["name"] == "Build revenue page"
     assert snapshot["projects"]["items"][0]["tasks"]["completed"] == 1
     assert "Build revenue page" in snapshot["office"]["active_projects"]
+
+
+def test_observability_snapshot_includes_recent_ticks(engine):
+    engine.daemon_ticks.record(
+        started_at="2026-06-12T00:00:00+00:00",
+        duration_ms=5,
+        actions=["heartbeat", "no_work"],
+        outcome="ok",
+    )
+
+    snapshot = engine.observability_snapshot()
+
+    assert snapshot["recent_ticks"][0]["outcome"] == "ok"
+    assert snapshot["recent_ticks"][0]["actions"] == ["heartbeat", "no_work"]
+
+
+def test_observability_snapshot_recent_ticks_empty_by_default(engine):
+    snapshot = engine.observability_snapshot()
+
+    assert snapshot["recent_ticks"] == []
 
 
 def test_observability_snapshot_reports_tool_gate_summary(engine):
