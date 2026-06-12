@@ -2,3 +2,4 @@
 * text=auto
 /AGENTS.md filter=git-crypt diff=git-crypt
 /kompany-prd.md filter=git-crypt diff=git-crypt
+/.trellis/** filter=git-crypt diff=git-crypt
