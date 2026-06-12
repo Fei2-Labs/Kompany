@@ -51,3 +51,6 @@ AGENTS.*.local.md
 
 # Lazyweb — local design-brainstorm references (heavy PNGs); not part of OSS repo
 .lazyweb/
+
+# Cross-agent shared memory — internal strategy notes, never commit
+.agents/
