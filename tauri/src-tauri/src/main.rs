@@ -3,7 +3,8 @@
 // Responsibilities:
 //   1. Pick a free loopback port for the Python sidecar.
 //   2. Spawn the bundled `kompany-server` binary with `--port` and
-//      `--data-dir` pointing at the platform's app-data directory.
+//      `--data-dir` from KOMPANY_DATA_DIR, defaulting to ~/.kompany
+//      (same resolution as every other Kompany interface).
 //   3. Poll `http://127.0.0.1:<port>/health` until 200 OK (or 30s).
 //   4. Load the WebView at `http://127.0.0.1:<port>/ui/` — the SPA
 //      handles the onboarding redirect itself.
@@ -119,10 +120,18 @@ fn main() {
             let handle = app.handle().clone();
 
             // ---- Resolve data dir + sidecar binary --------------------
-            let data_dir = handle
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("app_data_dir failed: {}", e))?;
+            // Match every other interface (CLI/REST/MCP/SDK): honor
+            // KOMPANY_DATA_DIR, else default to ~/.kompany. A private
+            // app_data_dir() here split the desktop into its own database,
+            // so the MCP proxy never found server.json and headless work
+            // was invisible in the app panel.
+            let data_dir = std::env::var_os("KOMPANY_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|h| std::path::PathBuf::from(h).join(".kompany"))
+                })
+                .ok_or("cannot resolve data dir: neither KOMPANY_DATA_DIR nor HOME is set")?;
             std::fs::create_dir_all(&data_dir).ok();
 
             let binary = sidecar_binary_path(&handle)
