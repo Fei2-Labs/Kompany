@@ -146,6 +146,11 @@ class KompanySettings(BaseSettings):
             # keeps empty-key validation paths green without implying a
             # real credential exists.
             "claude_code": "no-key-required",
+            # Same deal for the generic CLI providers (issue #18): the
+            # local `codex` / `opencode` binaries carry their own saved
+            # login (ChatGPT subscription / opencode auth).
+            "codex_cli": "no-key-required",
+            "opencode_cli": "no-key-required",
             "openai": self.openai_api_key,
             "gemini": self.gemini_api_key,
             "glm": self.glm_api_key,

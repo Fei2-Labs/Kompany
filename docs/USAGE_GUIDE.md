@@ -84,6 +84,17 @@ export GLM_API_KEY=...             # For GLM (Zhipu AI)
 export KIMI_API_KEY=...            # For Moonshot/Kimi
 ```
 
+**Zero-key option:** if you have a logged-in agent CLI installed, you don't need any API key — single-shot calls can shell out to the CLI's saved subscription auth. Point your model tiers at a CLI-provider model id in the YAML config:
+
+```yaml
+models:
+  apex: claude-code:opus        # Claude Code CLI (Claude subscription)
+  primary: codex:gpt-5          # Codex CLI (ChatGPT subscription)
+  economy: opencode:openai/gpt-5-mini   # opencode CLI (provider/model passthrough)
+```
+
+Mixing is fine; any tier may also stay on a regular API model. Onboarding sets this up automatically when you pick a detected subscription as your model source.
+
 ### Verify Installation
 
 ```bash
@@ -413,7 +424,7 @@ Tasks don't have to be single LLM calls. When you configure a **model source**, 
 Configure it on any surface:
 
 - **Settings page** (web UI / desktop app) — the `MODEL SOURCE` section probes your installed CLIs, lets you pick a source (and a monthly fee for subscriptions), and shows a plain-language summary of how work will run.
-- **Onboarding** — interactive onboarding auto-detects installed agent CLIs (`claude`, `codex`, `opencode`) and offers detected subscriptions as options. Picking the Claude subscription is fully zero-key (single-shot calls route through the `claude` CLI too); picking the OpenAI subscription still asks for an API key for the C-suite's single-shot calls — only task execution rides the Codex CLI. The default stays the API-key path; nothing changes unless you opt in.
+- **Onboarding** — interactive onboarding auto-detects installed agent CLIs (`claude`, `codex`, `opencode`) and offers detected subscriptions as options. Both subscription picks are fully zero-key: the Claude subscription routes single-shot calls through the `claude` CLI (`claude-code:*` model ids), and the OpenAI subscription routes them through the `codex` CLI (model tiers set to `codex:gpt-5`) — task execution rides the same CLI. The default stays the API-key path; nothing changes unless you opt in.
 - **CLI:**
 
   ```bash

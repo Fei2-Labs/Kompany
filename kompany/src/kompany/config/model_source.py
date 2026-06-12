@@ -48,13 +48,14 @@ _VEHICLE_BY_KIND: dict[str, str] = {
 
 # Which *single-call* model ids route through the subscription's own CLI
 # provider. Mirrors ``_MODEL_PREFIX_MAP`` in ``llm/providers.py``:
-# ``claude-code:*`` ids shell out to the local ``claude`` CLI (subscription
-# auth). OpenAI subscription has no single-call CLI provider yet (codex is
-# harness-only); harness results reach the ledger via
+# ``claude-code:*`` ids shell out to the local ``claude`` CLI and
+# ``codex:*`` ids to the local ``codex`` CLI (issue #18) — both
+# subscription auth, so per-call spend is shadow-only under their
+# subscription source. Harness results reach the ledger via
 # ``CostTracker.record_external`` which branches on billing_mode directly.
 _SUBSCRIPTION_CLI_PREFIXES: dict[str, tuple[str, ...]] = {
     "claude_subscription": ("claude-code",),
-    "openai_subscription": (),
+    "openai_subscription": ("codex:",),
     "custom_api": (),
 }
 

@@ -10,6 +10,12 @@ class Provider(str, Enum):
 
     ANTHROPIC = "anthropic"
     CLAUDE_CODE = "claude_code"
+    # Local agent CLIs as single-shot providers (issue #18). Like
+    # CLAUDE_CODE they reuse the CLI's saved subscription auth — no API
+    # key. Model id convention: "<cli>:<model>" (codex:gpt-5,
+    # opencode:openai/gpt-5).
+    CODEX_CLI = "codex_cli"
+    OPENCODE_CLI = "opencode_cli"
     OPENAI = "openai"
     GEMINI = "gemini"
     GLM = "glm"
@@ -28,7 +34,11 @@ PROVIDER_BASE_URLS: dict[Provider, str] = {
 # Prefix-based auto-detection: (prefix, provider). Order matters — first
 # match wins, so "claude-code" must precede the broader "claude-" prefix.
 _MODEL_PREFIX_MAP: list[tuple[str, Provider]] = [
+    # CLI providers first: explicit "<cli>:" prefixes are operator
+    # choices and must win over any broader provider prefix.
     ("claude-code", Provider.CLAUDE_CODE),
+    ("codex:", Provider.CODEX_CLI),
+    ("opencode:", Provider.OPENCODE_CLI),
     ("claude-", Provider.ANTHROPIC),
     ("gpt-", Provider.OPENAI),
     ("o1", Provider.OPENAI),

@@ -18,6 +18,10 @@ from kompany.llm.claude_code import (
     DEFAULT_TIMEOUT_SECONDS as CLAUDE_CODE_DEFAULT_TIMEOUT,
     run_claude_code,
 )
+from kompany.llm.cli_providers import (
+    DEFAULT_TIMEOUT_SECONDS as CLI_DEFAULT_TIMEOUT,
+    run_cli_completion,
+)
 from kompany.llm.cost_tracker import CostTracker
 from kompany.llm.models import estimate_cost
 from kompany.llm.providers import Provider, PROVIDER_BASE_URLS, detect_provider
@@ -132,10 +136,11 @@ class LLMClient:
         """Determine which provider to use for a model.
 
         Resolution order:
-          1. ``claude-code:*`` model ids always route to the local
-             ``claude`` CLI. The prefix is an explicit operator choice
-             ("use my Claude subscription, not an API endpoint"), so it
-             wins even over a configured custom base_url — a custom
+          1. CLI-provider model ids (``claude-code:*``, ``codex:*``,
+             ``opencode:*``) always route to the corresponding local
+             CLI. The prefix is an explicit operator choice ("use my
+             subscription CLI, not an API endpoint"), so it wins even
+             over a configured custom base_url — a custom
              OpenAI-compatible proxy can't serve a CLI-only id anyway.
           2. If the operator wired a custom OpenAI-compatible endpoint
              (``custom_base_url`` set), route through it regardless of
@@ -152,7 +157,11 @@ class LLMClient:
           4. Final fallback: Anthropic.
         """
         detected = detect_provider(model)
-        if detected == Provider.CLAUDE_CODE:
+        if detected in (
+            Provider.CLAUDE_CODE,
+            Provider.CODEX_CLI,
+            Provider.OPENCODE_CLI,
+        ):
             return detected
         if self.settings.custom_base_url:
             return Provider.CUSTOM
@@ -591,6 +600,8 @@ class LLMClient:
         """
         if provider == Provider.CLAUDE_CODE:
             return self._call_claude_code(model, system, prompt, max_tokens)
+        if provider in (Provider.CODEX_CLI, Provider.OPENCODE_CLI):
+            return self._call_cli_provider(provider, model, system, prompt)
         if provider == Provider.ANTHROPIC:
             return self._call_anthropic(model, system, prompt, max_tokens)
         return self._call_openai_compatible(
@@ -685,6 +696,28 @@ class LLMClient:
         timeout = self.silent_timeout_seconds or CLAUDE_CODE_DEFAULT_TIMEOUT
         text, input_tokens, output_tokens = run_claude_code(
             model, system, prompt, timeout
+        )
+        return LLMResponse(
+            text=text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=0.0,
+            model=model,
+        )
+
+    def _call_cli_provider(
+        self, provider: Provider, model: str, system: str, prompt: str
+    ) -> LLMResponse:
+        """Call a locally installed agent CLI (codex / opencode) one-shot.
+
+        Subprocess mechanics live in :mod:`kompany.llm.cli_providers`.
+        Like ``_call_claude_code`` there's no max-tokens knob — the CLIs
+        don't expose one in single-shot mode.
+        """
+        cli = "codex" if provider == Provider.CODEX_CLI else "opencode"
+        timeout = self.silent_timeout_seconds or CLI_DEFAULT_TIMEOUT
+        text, input_tokens, output_tokens = run_cli_completion(
+            cli, model, system, prompt, timeout
         )
         return LLMResponse(
             text=text,

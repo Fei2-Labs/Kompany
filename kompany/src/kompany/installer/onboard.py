@@ -750,6 +750,73 @@ def _setup_claude_subscription_provider(
     return True
 
 
+def _setup_codex_subscription_provider(
+    console: Console, *, engine: Any, result: OnboardResult
+) -> bool:
+    """Zero-key provider setup when the OpenAI subscription was picked.
+
+    Mirrors :func:`_setup_claude_subscription_provider` for the ``codex``
+    CLI (issue #18): single-shot tiers route through the ``codex:*``
+    provider, so the C-suite's L2 calls ride the ChatGPT subscription
+    too — no API key prompt. The probe is a cheap PATH + ``--version``
+    check (a real ``codex exec`` round-trip would spend plan quota at
+    onboarding); auth problems surface on the first call with a clear
+    provider error. Returns ``False`` to fall back to the API-key flow.
+    """
+    import shutil
+    import subprocess
+
+    _emit_step(console, 2, "LLM provider")
+    test_mode = os.environ.get("KOMPANY_TEST_MODE", "") == "1"
+    detail: str | None = None
+    if not test_mode:
+        if shutil.which("codex") is None:
+            detail = "codex CLI not found on PATH"
+        else:
+            try:
+                proc = subprocess.run(
+                    ["codex", "--version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                if proc.returncode != 0:
+                    detail = f"codex --version exited {proc.returncode}"
+            except Exception as exc:  # noqa: BLE001
+                detail = f"{type(exc).__name__}: {exc}"
+    if detail is not None:
+        console.print(
+            f"      [yellow]codex CLI probe failed: {detail} — "
+            "falling back to API-key setup.[/yellow]"
+        )
+        result.notes.append(f"openai subscription probe failed: {detail}")
+        return False
+    console.print(
+        "      [green]✓[/green] codex CLI found "
+        "(ChatGPT subscription auth — no API key needed)"
+    )
+    result.provider = "codex_cli"
+    result.api_key_storage = None
+    result.ping_status = "skipped_test_mode" if test_mode else "ok"
+    model = "codex:gpt-5"
+    try:
+        engine.db.execute(
+            """INSERT INTO company_config (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET
+                 value = excluded.value, updated_at = datetime('now')""",
+            ("custom_model_picked", model),
+        )
+    except Exception as exc:  # noqa: BLE001 — tier persist is best-effort
+        result.notes.append(f"model tier persist failed ({exc})")
+    for attr in ("model_apex", "model_primary", "model_economy"):
+        try:
+            setattr(engine.settings, attr, model)
+        except (ValueError, TypeError):
+            pass
+    return True
+
+
 def _write_model_source(
     console: Console,
     *,
@@ -1116,8 +1183,12 @@ def run_onboard(
             cons, engine=engine, result=result
         ):
             pass  # zero-key path complete — no API key prompt
+        elif source_kind == "openai_subscription" and _setup_codex_subscription_provider(
+            cons, engine=engine, result=result
+        ):
+            pass  # zero-key path complete — codex:* tiers set
         else:
-            if source_kind == "claude_subscription":
+            if source_kind in ("claude_subscription", "openai_subscription"):
                 # CLI probe failed — degrade to the API-key flow.
                 source_kind, monthly_fee = "custom_api", None
             _step_provider(

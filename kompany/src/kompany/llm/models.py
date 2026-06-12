@@ -25,6 +25,16 @@ PRICING: dict[str, ModelPricing] = {
     "claude-code:opus": ModelPricing(15.0, 75.0),
     "claude-code:sonnet": ModelPricing(3.0, 15.0),
     "claude-code:haiku": ModelPricing(0.80, 4.0),
+    # codex CLI (ChatGPT-subscription auth, issue #18). Same discipline:
+    # shadow/estimate values use the API-equivalent OpenAI rates
+    # (gpt-5: 1.25/10.0, gpt-5-mini: 0.25/2.0 USD per MTok).
+    "codex:gpt-5": ModelPricing(1.25, 10.0),
+    "codex:gpt-5-codex": ModelPricing(1.25, 10.0),
+    "codex:gpt-5-mini": ModelPricing(0.25, 2.0),
+    # opencode CLI (issue #18). Model suffix is opencode's native
+    # ``provider/model`` form; common ids get exact API-equivalent rows.
+    "opencode:openai/gpt-5": ModelPricing(1.25, 10.0),
+    "opencode:anthropic/claude-sonnet-4-20250514": ModelPricing(3.0, 15.0),
     # OpenAI
     "gpt-4o": ModelPricing(2.50, 10.0),
     "gpt-4o-mini": ModelPricing(0.15, 0.60),
@@ -55,6 +65,11 @@ PRICING: dict[str, ModelPricing] = {
 # Prefix-based fallback: if exact model not in PRICING, try prefix match.
 # Uses representative mid-tier pricing for each provider.
 _FALLBACK_BY_PREFIX: list[tuple[str, ModelPricing]] = [
+    # CLI providers (issue #18): codex serves OpenAI models → gpt-5-tier
+    # API-equivalent; opencode routes to any provider → conservative
+    # Sonnet-tier default (same basis as _DEFAULT_FALLBACK).
+    ("codex:", ModelPricing(1.25, 10.0)),
+    ("opencode:", ModelPricing(3.0, 15.0)),
     ("claude-", ModelPricing(3.0, 15.0)),       # Sonnet-tier
     ("gpt-", ModelPricing(2.50, 10.0)),          # GPT-4o tier
     ("o1", ModelPricing(2.0, 8.0)),
