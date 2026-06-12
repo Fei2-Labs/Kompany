@@ -2334,6 +2334,17 @@ def test_cli_status_json_output(monkeypatch):
         "total_expenses": -8.0,
         "total_ai_costs": 0.125,
         "active_projects": 0,
+        # Canonical status dict (core/status_ops.py) — virtual time +
+        # daemon ticker joined every surface in 06-12 PR2.
+        "virtual_days_elapsed": 0,
+        "virtual_days_budget": 0,
+        "virtual_days_remaining": 0,
+        "ticker": {
+            "running": False,
+            "last_tick_at": None,
+            "tick_count": 0,
+            "interval_seconds": 0,
+        },
     }
 
 
@@ -2353,8 +2364,13 @@ def _call_mcp(name, arguments, engine, monkeypatch):
     """Invoke an MCP tool against a fake engine and return the parsed JSON."""
     import asyncio
 
-    from kompany.interfaces import mcp_server
+    from kompany.interfaces import mcp_proxy, mcp_server
 
+    # Force in-process dispatch: call_tool probes <data_dir>/server.json
+    # first (06-10 proxy mode), so a live desktop sidecar on the dev
+    # machine would silently receive these tool calls instead of the
+    # fake engine and fail the assertions nondeterministically.
+    monkeypatch.setattr(mcp_proxy, "discover_sidecar", lambda data_dir=None: None)
     monkeypatch.setattr(mcp_server, "_engine", engine)
     out = asyncio.run(mcp_server.call_tool(name, arguments))
     return json.loads(out[0].text)
@@ -2629,3 +2645,76 @@ def test_cli_channel_sessions_and_show(monkeypatch):
 
     missing = runner.invoke(cli_app, ["channel", "show", "nope"])
     assert missing.exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Status parity — canonical dict from core/status_ops.py on all four
+# interfaces, including the daemon ticker block (06-12 PR2).
+# ---------------------------------------------------------------------------
+
+
+def test_api_status_includes_ticker_and_virtual_days(monkeypatch):
+    fake_engine = FakeEngine()
+    monkeypatch.setattr("kompany.interfaces.api._engine", fake_engine)
+
+    body = client.get("/status").json()
+
+    # Engine fakes without a ticker report a stopped block (stable shape).
+    assert body["ticker"] == {
+        "running": False,
+        "last_tick_at": None,
+        "tick_count": 0,
+        "interval_seconds": 0,
+    }
+    assert body["virtual_days_elapsed"] == 0
+    assert body["virtual_days_budget"] == 0
+    assert body["virtual_days_remaining"] == 0
+
+
+def test_status_parity_across_all_four_interfaces(monkeypatch):
+    from types import SimpleNamespace
+
+    from kompany.interfaces.mcp_dispatch import dispatch_tool
+
+    fake_engine = FakeEngine()
+    fake_engine.ticker = SimpleNamespace(
+        running=True,
+        last_tick_at="2026-06-12T00:00:00+00:00",
+        tick_count=7,
+        tick_interval_seconds=300,
+    )
+    monkeypatch.setattr("kompany.interfaces.api._engine", fake_engine)
+    monkeypatch.setattr(
+        "kompany.interfaces.sdk.KompanyEngine", lambda config_path=None: fake_engine
+    )
+    monkeypatch.setattr(
+        "kompany.interfaces.cli._get_engine", lambda config=None: fake_engine
+    )
+
+    api_body = client.get("/status").json()
+    sdk_body = Kompany().status()
+    mcp_body = dispatch_tool(fake_engine, "kompany_status", {})
+    cli_result = runner.invoke(cli_app, ["status", "--json"])
+    assert cli_result.exit_code == 0
+    cli_body = json.loads(cli_result.stdout)
+
+    assert api_body == sdk_body == mcp_body == cli_body
+    assert api_body["ticker"] == {
+        "running": True,
+        "last_tick_at": "2026-06-12T00:00:00+00:00",
+        "tick_count": 7,
+        "interval_seconds": 300,
+    }
+
+
+def test_cli_status_renders_ticker_row(monkeypatch):
+    fake_engine = FakeEngine()
+    monkeypatch.setattr(
+        "kompany.interfaces.cli._get_engine", lambda config=None: fake_engine
+    )
+
+    result = runner.invoke(cli_app, ["status"])
+
+    assert result.exit_code == 0
+    assert "Ticker" in result.stdout
+    assert "stopped" in result.stdout

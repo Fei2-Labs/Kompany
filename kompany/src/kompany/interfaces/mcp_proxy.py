@@ -61,13 +61,24 @@ def discovery_path(data_dir: Path | None = None) -> Path:
     return (data_dir if data_dir is not None else default_data_dir()) / DISCOVERY_FILENAME
 
 
-def write_discovery_file(port: int, data_dir: Path | None = None) -> Path | None:
-    """Best-effort: publish the sidecar discovery file. Returns the path or None."""
+def write_discovery_file(
+    port: int,
+    data_dir: Path | None = None,
+    source: str = "sidecar",
+) -> Path | None:
+    """Best-effort: publish the sidecar discovery file. Returns the path or None.
+
+    ``source`` labels who owns the server process (``"sidecar"`` when
+    spawned by the Tauri shell, ``"daemon"`` for ``kompany daemon run``)
+    so status surfaces can report it. Readers must tolerate its absence
+    (files written before 06-12 don't carry it).
+    """
     path = discovery_path(data_dir)
     payload = {
         "port": int(port),
         "pid": os.getpid(),
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

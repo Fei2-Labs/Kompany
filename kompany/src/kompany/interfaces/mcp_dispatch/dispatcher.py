@@ -113,21 +113,10 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
         return engine.channel_abandon(arguments["session_id"]).to_dict()
 
     if name == "kompany_status":
-        cfo = engine.registry.get("cfo")
-        summary = cfo.get_summary()
-        active = engine.projects.list_active()
-        return {
-            "company": engine.settings.company_name,
-            "goal": engine.settings.company_goal,
-            "time_horizon": engine.settings.company_time_horizon,
-            "exclusions": engine.settings.company_exclusions,
-            "stage": engine.settings.company_stage,
-            "balance": summary["balance"],
-            "total_income": summary["total_income"],
-            "total_expenses": summary["total_expenses"],
-            "total_ai_costs": abs(summary["total_ai_costs"]),
-            "active_projects": len(active),
-        }
+        # Canonical dict shared by all four interfaces — core/status_ops.py.
+        from kompany.core.status_ops import build_status
+
+        return build_status(engine)
 
     if name == "kompany_override":
         return engine.process_override(arguments["text"])

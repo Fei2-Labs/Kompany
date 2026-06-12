@@ -380,6 +380,8 @@ class ObservabilitySnapshot(BaseModel):
     tools: dict[str, Any]
     notifications: list[NotificationEvent] = Field(default_factory=list)
     office: dict[str, Any]
+    # Daemon tick loop (06-12): newest-first autonomous tick rows.
+    recent_ticks: list[dict[str, Any]] = Field(default_factory=list)
     checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

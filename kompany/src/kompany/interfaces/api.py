@@ -50,6 +50,30 @@ def reset_engine() -> None:
     _engine = None
 
 
+@app.on_event("startup")
+async def _start_background_workers() -> None:
+    """Start engine background workers (watchdog scanner + daemon ticker).
+
+    ``KompanyEngine.start()`` existed but nothing ever awaited it in a
+    server boot, so the watchdog's proactive scanner and the tick loop
+    only ran in tests (which call ``scan_once``/``tick_once`` directly).
+    Live-verification finding, 06-12-daemon-tick-loop.
+
+    getattr-guarded: tests stub ``_engine`` with minimal fakes that have
+    no worker surface, and the hook must not force every fake to grow one.
+    """
+    start = getattr(get_engine(), "start", None)
+    if start is not None:
+        await start()
+
+
+@app.on_event("shutdown")
+async def _stop_background_workers() -> None:
+    stop = getattr(_engine, "stop", None)
+    if stop is not None:
+        await stop()
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Liveness probe for the Tauri sidecar shell.
@@ -2333,41 +2357,10 @@ def rotate_credential_key(req: CredentialKeyRotationRequest) -> dict[str, Any]:
 
 @app.get("/status")
 def get_status() -> dict[str, Any]:
-    """Get company status."""
-    from kompany.state import virtual_clock
+    """Get company status (canonical dict — see core/status_ops.py)."""
+    from kompany.core.status_ops import build_status
 
-    engine = get_engine()
-    cfo = engine.registry.get("cfo")
-    summary = cfo.get_summary()
-    active = engine.projects.list_active()
-    # Virtual clock fields default to 0 if the engine fake (in unit
-    # tests) doesn't expose a db handle.
-    try:
-        vd_elapsed = virtual_clock.get_elapsed(engine.db)
-        vd_budget = virtual_clock.get_budget(engine.db)
-    except AttributeError:
-        vd_elapsed = 0
-        vd_budget = 0
-    vd_remaining = max(0, vd_budget - vd_elapsed) if vd_budget > 0 else 0
-    return {
-        "company": engine.settings.company_name,
-        "goal": engine.settings.company_goal,
-        "time_horizon": engine.settings.company_time_horizon,
-        "exclusions": engine.settings.company_exclusions,
-        "stage": engine.settings.company_stage,
-        "balance": summary["balance"],
-        "total_income": summary["total_income"],
-        "total_expenses": summary["total_expenses"],
-        "total_ai_costs": abs(summary["total_ai_costs"]),
-        "active_projects": len(active),
-        # Virtual time (model D — 1 completed task = 1 virtual day).
-        # The dashboard's days/burn surface this, not wall time, so a
-        # paused Kompany doesn't lose runway and a productive team
-        # doesn't get penalised by clock drift.
-        "virtual_days_elapsed": vd_elapsed,
-        "virtual_days_budget": vd_budget,
-        "virtual_days_remaining": vd_remaining,
-    }
+    return build_status(get_engine())
 
 
 @app.post("/debate")

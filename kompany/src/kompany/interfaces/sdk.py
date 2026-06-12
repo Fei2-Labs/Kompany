@@ -115,22 +115,10 @@ class Kompany:
         return self._engine.observability_snapshot()
 
     def status(self) -> dict[str, Any]:
-        """Get company status."""
-        cfo = self._engine.registry.get("cfo")
-        summary = cfo.get_summary()
-        active = self._engine.projects.list_active()
-        return {
-            "company": self._engine.settings.company_name,
-            "goal": self._engine.settings.company_goal,
-            "time_horizon": self._engine.settings.company_time_horizon,
-            "exclusions": self._engine.settings.company_exclusions,
-            "stage": self._engine.settings.company_stage,
-            "balance": summary["balance"],
-            "total_income": summary["total_income"],
-            "total_expenses": summary["total_expenses"],
-            "total_ai_costs": abs(summary["total_ai_costs"]),
-            "active_projects": len(active),
-        }
+        """Get company status (canonical dict — see core/status_ops.py)."""
+        from kompany.core.status_ops import build_status
+
+        return build_status(self._engine)
 
     def projects(self) -> list[dict[str, Any]]:
         """List active projects."""

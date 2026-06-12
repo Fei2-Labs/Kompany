@@ -534,39 +534,35 @@ def status(
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ):
     """Show company status."""
+    from kompany.core.status_ops import build_status
+
     engine = _get_engine(config)
-    cfo = engine.registry.get("cfo")
-    summary = cfo.get_summary()
-    active = engine.projects.list_active()
-    payload = {
-        "company": engine.settings.company_name or "",
-        "goal": engine.settings.company_goal or "",
-        "time_horizon": engine.settings.company_time_horizon or "",
-        "exclusions": engine.settings.company_exclusions or "",
-        "stage": engine.settings.company_stage or "solo",
-        "balance": summary["balance"],
-        "total_income": summary["total_income"],
-        "total_expenses": summary["total_expenses"],
-        "total_ai_costs": abs(summary["total_ai_costs"]),
-        "active_projects": len(active),
-    }
+    payload = build_status(engine)
     if as_json:
         _emit_json(payload)
         return
 
+    ticker = payload["ticker"]
+    ticker_line = (
+        f"running (every {ticker['interval_seconds']}s, "
+        f"{ticker['tick_count']} ticks, last {ticker['last_tick_at'] or '—'})"
+        if ticker["running"]
+        else "stopped"
+    )
     table = Table(title="Kompany Status")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
-    table.add_row("Company", engine.settings.company_name or "(not initialized)")
-    table.add_row("Goal", engine.settings.company_goal or "(none)")
-    table.add_row("Time Horizon", engine.settings.company_time_horizon or "(none)")
-    table.add_row("Exclusions", engine.settings.company_exclusions or "(none)")
-    table.add_row("Stage", engine.settings.company_stage or "solo")
-    table.add_row("Balance", f"€{summary['balance']:.2f}")
-    table.add_row("Total Income", f"€{summary['total_income']:.2f}")
-    table.add_row("Total Expenses", f"€{summary['total_expenses']:.2f}")
-    table.add_row("AI Costs", f"${abs(summary['total_ai_costs']):.4f}")
-    table.add_row("Active Projects", str(len(active)))
+    table.add_row("Company", payload["company"] or "(not initialized)")
+    table.add_row("Goal", payload["goal"] or "(none)")
+    table.add_row("Time Horizon", payload["time_horizon"] or "(none)")
+    table.add_row("Exclusions", payload["exclusions"] or "(none)")
+    table.add_row("Stage", payload["stage"] or "solo")
+    table.add_row("Balance", f"€{payload['balance']:.2f}")
+    table.add_row("Total Income", f"€{payload['total_income']:.2f}")
+    table.add_row("Total Expenses", f"€{payload['total_expenses']:.2f}")
+    table.add_row("AI Costs", f"${payload['total_ai_costs']:.4f}")
+    table.add_row("Active Projects", str(payload["active_projects"]))
+    table.add_row("Ticker", ticker_line)
     console.print(table)
 
 
@@ -2075,6 +2071,13 @@ def model_source_detect(
             info.get("source_kind", ""),
         )
     console.print(table)
+
+
+# Daemon sub-app (06-12-daemon-tick-loop PR2). Lives in cli_daemon.py —
+# cli.py is over the file-size cap, new command groups go in siblings.
+from kompany.interfaces.cli_daemon import daemon_app  # noqa: E402
+
+app.add_typer(daemon_app, name="daemon")
 
 
 target_app = typer.Typer(

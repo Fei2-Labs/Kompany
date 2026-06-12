@@ -1,0 +1,279 @@
+"""Daemon process management ops — ``kompany daemon run|install|uninstall|status``.
+
+Logic home for the daemon CLI sub-app (06-12-daemon-tick-loop PR2).
+``cli.py`` renders only (interfaces spec: no business logic in an
+interface file). These operations are machine-local process management
+and deliberately CLI-only (PRD D5) — tick observability instead joins
+the existing status/observability operations on all four interfaces.
+
+Key decisions implemented here:
+
+* **D2 — discovery file is the lock.** ``run_daemon`` refuses to start
+  when ``<data_dir>/server.json`` points at a healthy live server
+  (validated via :func:`kompany.interfaces.mcp_proxy.discover_sidecar`:
+  pid alive + ``/health`` probe). Exactly one engine ever ticks.
+* **D4 — launchd (macOS MVP).** ``install_launchd`` writes
+  ``~/Library/LaunchAgents/com.kompany.daemon.plist`` with
+  KeepAlive/RunAtLoad, resolving ProgramArguments at install time:
+  bundled PyInstaller server binary if the desktop app is installed
+  (no Python dependency for founders), else the current interpreter +
+  ``kompany.interfaces.daemon_main``. ``launchctl bootstrap`` is
+  best-effort — its failure is recorded, never fatal to the install.
+
+All subprocess calls are list-form (never ``shell=True``).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import plistlib
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable
+
+from kompany.interfaces import mcp_proxy
+
+LAUNCHD_LABEL = "com.kompany.daemon"
+# Bundled desktop server binary (preferred ProgramArguments target —
+# founders without a Python install still get a 24/7 daemon).
+BUNDLED_SERVER_BINARY = Path(
+    "/Applications/Kompany.app/Contents/Resources/binaries/"
+    "kompany-server-aarch64-apple-darwin/kompany-server-aarch64-apple-darwin"
+)
+STATUS_PROBE_TIMEOUT_SECONDS = 2.0
+
+
+def _resolve_data_dir(data_dir: Path | None) -> Path:
+    return data_dir if data_dir is not None else mcp_proxy.default_data_dir()
+
+
+def _plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+
+
+def _launchctl_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _run_launchctl(args: list[str]) -> dict[str, Any]:
+    """Run one launchctl command; never raises. Returns {ok, returncode, error}."""
+    try:
+        proc = subprocess.run(
+            ["launchctl", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        return {"ok": False, "returncode": None, "error": str(exc)}
+    error = None
+    if proc.returncode != 0:
+        error = (proc.stderr or proc.stdout or "").strip() or f"launchctl exited {proc.returncode}"
+    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "error": error}
+
+
+def _launchd_loaded() -> bool:
+    """True when launchd currently has the agent loaded in the gui domain."""
+    if sys.platform != "darwin":
+        return False
+    return _run_launchctl(["print", f"{_launchctl_domain()}/{LAUNCHD_LABEL}"])["ok"]
+
+
+def _fetch_ticker(port: int) -> dict[str, Any] | None:
+    """Pull the ``ticker`` block from the running server's ``GET /status``."""
+    url = f"http://127.0.0.1:{port}/status"
+    try:
+        with urllib.request.urlopen(url, timeout=STATUS_PROBE_TIMEOUT_SECONDS) as resp:
+            if resp.status != 200:
+                return None
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    if not isinstance(body, dict):
+        return None
+    ticker = body.get("ticker")
+    return ticker if isinstance(ticker, dict) else None
+
+
+# ---------------------------------------------------------------------------
+# Operations (one per CLI sub-command)
+# ---------------------------------------------------------------------------
+
+
+def daemon_status(data_dir: Path | None = None) -> dict[str, Any]:
+    """Truthful daemon report: live server, launchd agent, ticker block."""
+    data_dir = _resolve_data_dir(data_dir)
+    info = mcp_proxy.discover_sidecar(data_dir)
+    if info is not None:
+        server = {
+            "running": True,
+            "port": info["port"],
+            "pid": info["pid"],
+            # Files written before 06-12 carry no source label; the
+            # only writer back then was the Tauri sidecar.
+            "source": info.get("source", "sidecar"),
+        }
+        ticker = _fetch_ticker(info["port"])
+    else:
+        server = {"running": False, "port": None, "pid": None, "source": "none"}
+        ticker = None
+    plist_path = _plist_path()
+    launchd = {
+        "installed": plist_path.exists(),
+        "plist_path": str(plist_path),
+        "loaded": _launchd_loaded(),
+    }
+    return {"server": server, "launchd": launchd, "ticker": ticker}
+
+
+def resolve_program_arguments() -> list[str]:
+    """ProgramArguments for the LaunchAgent, resolved at install time (D4)."""
+    if BUNDLED_SERVER_BINARY.exists():
+        return [str(BUNDLED_SERVER_BINARY), "--host", "127.0.0.1", "--port", "0"]
+    return [sys.executable, "-m", "kompany.interfaces.daemon_main"]
+
+
+def install_launchd(data_dir: Path | None = None) -> dict[str, Any]:
+    """Write + (best-effort) bootstrap the com.kompany.daemon LaunchAgent."""
+    if sys.platform != "darwin":
+        return {
+            "installed": False,
+            "plist_path": None,
+            "program_arguments": None,
+            "bootstrap": None,
+            "error": (
+                "kompany daemon install is macOS-only for now (launchd). "
+                "On other platforms run 'kompany daemon run' under your "
+                "own process supervisor."
+            ),
+        }
+    data_dir = _resolve_data_dir(data_dir)
+    logs_dir = data_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    program_arguments = resolve_program_arguments()
+    plist: dict[str, Any] = {
+        "Label": LAUNCHD_LABEL,
+        "ProgramArguments": program_arguments,
+        "KeepAlive": True,
+        "RunAtLoad": True,
+        "StandardOutPath": str(logs_dir / "daemon.out.log"),
+        "StandardErrPath": str(logs_dir / "daemon.err.log"),
+        # Pin the daemon to the data_dir chosen at install time so a
+        # login-shell-less launchd context resolves the same engine
+        # state as the founder's CLI.
+        "EnvironmentVariables": {"KOMPANY_DATA_DIR": str(data_dir)},
+    }
+    plist_path = _plist_path()
+    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    with plist_path.open("wb") as fh:
+        plistlib.dump(plist, fh)
+    # Best-effort load: a failure (e.g. already bootstrapped, SIP
+    # quirks) is reported, but the install itself stands — the agent
+    # still loads on next login via RunAtLoad.
+    bootstrap = _run_launchctl(
+        ["bootstrap", _launchctl_domain(), str(plist_path)]
+    )
+    return {
+        "installed": True,
+        "plist_path": str(plist_path),
+        "program_arguments": program_arguments,
+        "bootstrap": bootstrap,
+        "error": None,
+    }
+
+
+def uninstall_launchd() -> dict[str, Any]:
+    """Bootout + remove the LaunchAgent plist. Idempotent."""
+    plist_path = _plist_path()
+    existed = plist_path.exists()
+    if sys.platform == "darwin":
+        bootout = _run_launchctl(
+            ["bootout", f"{_launchctl_domain()}/{LAUNCHD_LABEL}"]
+        )
+    else:
+        bootout = {"ok": True, "returncode": None, "error": None}
+    try:
+        plist_path.unlink(missing_ok=True)
+    except OSError as exc:
+        return {
+            "removed": False,
+            "plist_path": str(plist_path),
+            "bootout": bootout,
+            "error": str(exc),
+        }
+    return {
+        "removed": existed,
+        "plist_path": str(plist_path),
+        "bootout": bootout,
+        "error": None,
+    }
+
+
+def run_daemon(
+    host: str = "127.0.0.1",
+    port: int = 0,
+    data_dir: Path | None = None,
+    *,
+    server_runner: Callable[..., int] | None = None,
+) -> dict[str, Any]:
+    """Boot the daemon server, unless a healthy server already owns the lock.
+
+    D2: the discovery file IS the single-server lock. A validated live
+    server (pid alive + health probe) means we refuse and tell the
+    founder where it runs; a stale/dead file is ignored by the
+    validation and we start normally. Blocks until server shutdown when
+    it does start.
+
+    Known race window (accepted, documented per PRD D2 review): between
+    this check and the new server's discovery publish (uvicorn binds →
+    watcher thread writes server.json) two near-simultaneous starts can
+    both pass the check. The window is sub-second, requires the founder
+    to race two manual starts (launchd KeepAlive never double-spawns the
+    same label), and the second writer simply overwrites server.json —
+    readers follow the healthy winner. A flock-grade lock is deliberately
+    out of scope.
+    """
+    explicit_data_dir = data_dir is not None
+    resolved_data_dir = _resolve_data_dir(data_dir)
+    # A cached "no sidecar" verdict from earlier in this process must
+    # not let two daemons race past the lock check.
+    mcp_proxy.reset_discovery_cache()
+    existing = mcp_proxy.discover_sidecar(resolved_data_dir)
+    if existing is not None:
+        source = existing.get("source", "sidecar")
+        return {
+            "started": False,
+            "port": existing["port"],
+            "pid": existing["pid"],
+            "source": source,
+            "message": (
+                f"A Kompany server is already running (source={source}, "
+                f"pid={existing['pid']}, port={existing['port']}). "
+                "One server process owns the tick loop — attach to it "
+                "instead of starting a second engine."
+            ),
+        }
+    if server_runner is None:
+        from kompany.interfaces.server_boot import run_server as server_runner
+    server_runner(
+        host=host,
+        port=port,
+        data_dir_override=str(resolved_data_dir) if explicit_data_dir else None,
+        source="daemon",
+    )
+    return {"started": True, "port": port, "pid": os.getpid(), "source": "daemon"}
+
+
+__all__ = [
+    "BUNDLED_SERVER_BINARY",
+    "LAUNCHD_LABEL",
+    "daemon_status",
+    "install_launchd",
+    "resolve_program_arguments",
+    "run_daemon",
+    "uninstall_launchd",
+]
