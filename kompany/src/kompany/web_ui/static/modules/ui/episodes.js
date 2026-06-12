@@ -124,9 +124,10 @@ function renderEpisodeDetail(p) {
   const STATUS_CLS = { completed: "ok", delivered: "deliv", blocked: "err", failed: "err" };
   const STATUS_LABEL = {
     completed: "DONE (executed)",
-    delivered: "DELIVERED — your move",
-    blocked: "BLOCKED — needs integration",
+    delivered: "DELIVERED — review",
+    blocked: "BLOCKED — needs a connection/approval",
     failed: "failed",
+    cancelled: "cancelled",
   };
   let actionCount = 0;
 
@@ -150,14 +151,14 @@ function renderEpisodeDetail(p) {
           <span class="ep-task-caret">▸</span>
         </div>
         <div class="ep-task-body">
-          ${founderAction ? `<div class="ep-task-action">▸ YOUR MOVE: ${escapeHTML(founderAction)}</div>` : ""}
+          ${founderAction ? `<div class="ep-task-action">▸ NEXT: ${escapeHTML(founderAction)}</div>` : ""}
           ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output recorded.</div>`}
         </div>
       </div>`;
   }).join("");
 
   const actionBanner = actionCount > 0
-    ? `<div class="ep-action-banner">⚠ ${actionCount} task${actionCount === 1 ? "" : "s"} need YOU to act — the team produced the assets but can't send/publish without integrations. Open each task for the handoff.</div>`
+    ? `<div class="ep-action-banner">⚠ ${actionCount} task${actionCount === 1 ? "" : "s"} waiting on a connection or approval — the team did the work; connect the account or approve the pending action and the team finishes it. Open each task for details.</div>`
     : "";
 
   return `
@@ -211,8 +212,9 @@ async function renderEmptyState(list) {
 // Drafts strip (#2): unpicked first-move proposals (and any future
 // template/team drafts) are real LLM work staged as status='draft'
 // projects. Without a home they orphan — surface them with a [ start ]
-// affordance reusing the same /activate path First Move uses. Pick-only
-// for now: abandoning drafts is #10 (no engine op yet — out of scope).
+// affordance (same /activate path First Move uses) plus a [ dismiss ]
+// affordance backed by the #10 abandon op, so stale drafts can be
+// cleared without a native dialog (two-stage inline confirm).
 function draftsStripHTML(projects) {
   const drafts = (projects || []).filter((p) => p.status === "draft");
   if (!drafts.length) return "";
@@ -220,7 +222,10 @@ function draftsStripHTML(projects) {
     <div class="episode-item active-project draft-project" data-pid="${escapeHTML(p.id)}">
       <div class="ap-line">
         <span>▹ ${escapeHTML(p.name || "(unnamed)")}</span>
-        <button type="button" class="draft-start" data-start-pid="${escapeHTML(p.id)}">[ ▶ start ]</button>
+        <span>
+          <button type="button" class="draft-start" data-start-pid="${escapeHTML(p.id)}">[ ▶ start ]</button>
+          <button type="button" class="ap-cancel draft-dismiss" data-cancel-pid="${escapeHTML(p.id)}">[ ✕ dismiss ]</button>
+        </span>
       </div>
       <div class="pid">${escapeHTML(p.id)} :: team-proposed, not started</div>
     </div>`).join("");
@@ -262,6 +267,7 @@ function activeProjectRowHTML(p) {
 
 function wireActiveProjectActions(container) {
   for (const btn of container.querySelectorAll(".ap-cancel[data-cancel-pid]")) {
+    const idleLabel = btn.textContent;
     let armed = false;
     let t = null;
     btn.addEventListener("click", async (e) => {
@@ -270,11 +276,11 @@ function wireActiveProjectActions(container) {
       if (!armed) {
         // Two-stage confirm (no native dialog — Tauri WebView blocks it).
         armed = true;
-        btn.textContent = "[ ✕ click again to abandon ]";
+        btn.textContent = "[ ✕ click again to confirm ]";
         btn.classList.add("ap-cancel-armed");
         t = setTimeout(() => {
           armed = false;
-          btn.textContent = "[ ✕ abandon ]";
+          btn.textContent = idleLabel;
           btn.classList.remove("ap-cancel-armed");
         }, 5000);
         return;
@@ -283,7 +289,7 @@ function wireActiveProjectActions(container) {
       btn.disabled = true;
       btn.textContent = "[ ✕ abandoning… ]";
       try {
-        await fetch(`/projects/${encodeURIComponent(pid)}/cancel`, {
+        await fetch(`/projects/${encodeURIComponent(pid)}/abandon`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({ reason: "abandoned from dashboard" }),
@@ -292,7 +298,7 @@ function wireActiveProjectActions(container) {
         renderEpisodes(eps || []);
       } catch (_) {
         btn.disabled = false;
-        btn.textContent = "[ ✕ abandon ]";
+        btn.textContent = idleLabel;
       }
     });
   }

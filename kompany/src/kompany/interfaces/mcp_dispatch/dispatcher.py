@@ -210,6 +210,14 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
         result = engine.execute_project(arguments["project_id"])
         return result
 
+    if name == "kompany_project_abandon":
+        try:
+            return engine.abandon_project(
+                arguments["project_id"], reason=arguments.get("reason", "")
+            )
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_resume_project":
         try:
             result = engine.resume_project(arguments["project_id"])

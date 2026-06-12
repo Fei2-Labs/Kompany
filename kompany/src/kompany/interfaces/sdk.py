@@ -173,6 +173,10 @@ class Kompany:
         """Execute a revenue project's tasks autonomously."""
         return self._engine.execute_project(project_id)
 
+    def abandon_project(self, project_id: str, reason: str = "") -> dict[str, Any]:
+        """Abandon a plan: cancel project + tasks, withdraw cards, release envelope."""
+        return self._engine.abandon_project(project_id, reason=reason)
+
     def resume_project(self, project_id: str) -> dict[str, Any]:
         """Resume a project from persisted task/checkpoint state."""
         return self._engine.resume_project(project_id)

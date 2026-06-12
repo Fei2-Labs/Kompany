@@ -3,7 +3,7 @@
 Lets the team actually SEND email instead of only drafting it. Works
 with Gmail app-passwords or any SMTP provider. This is the autonomy
 unlock: a 'send outreach' task can now resolve to truly COMPLETED
-(real message sent) instead of the DELIVERED/'YOUR MOVE' stopgap.
+(real message sent) instead of the delivered-asset stopgap.
 
 Send is an EXTERNAL_ACTION at APPROVAL tier — it never fires without
 founder approval (the action pipeline / the connect+send REST path

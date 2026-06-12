@@ -134,8 +134,10 @@ class ImapPoller:
             request = self._engine.approvals.create(
                 ApprovalRequest(
                     action_type=ACTION_CHANNEL_MESSAGE,
+                    # Triage framing (#13): the founder DECIDES what the
+                    # team does with this message — never handles it.
                     summary=(
-                        f"Email from {mail.get('from', '?')}: "
+                        f"Triage: email from {mail.get('from', '?')} — "
                         f"{mail.get('subject', '(no subject)')}"
                     ),
                     payload={

@@ -79,7 +79,10 @@ def classify_harness_outcome(
             "workspace — review it; the session is saved and re-running "
             "the task continues from where it stopped.",
         )
-    return "delivered", "Review the output above and act on it."
+    return "delivered", (
+        "Review the output — any external action it needs will be "
+        "proposed to your inbox once the matching account is connected."
+    )
 
 
 __all__ = ["classify_harness_outcome", "is_hard_failure"]

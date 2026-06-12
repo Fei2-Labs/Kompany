@@ -14,6 +14,7 @@ from kompany.core.harness_execution import (
 # Extracted to core/task_outcome.py (06-12-daemon-tick-loop PR1) to keep
 # this file under the 500-line cap. The alias preserves existing imports.
 from kompany.core.task_outcome import classify_outcome as _classify_outcome
+from kompany.core.task_outcome import resolve_outcome as _resolve_outcome
 from kompany.state.models import (
     Project,
     ProjectStatus,
@@ -376,16 +377,17 @@ class ProjectRunner:
 
             resp = agent.call(prompt=prompt, action_type="agent_task_execute")
 
-            # Honest-outcome classification (hybrid mode, step A). Agents
-            # currently have no real integrations, so they produce ASSETS
-            # (copy, lists, plans) and sometimes explicitly say they can't
-            # perform an external action. Marking all of that "completed"
-            # lied to the founder. Classify the output into:
-            #   completed → a real tool/integration actually acted (none
-            #               wired yet, so unreachable until integrations land)
-            #   blocked   → the agent says it lacks access/credentials to act
-            #   delivered → an asset was produced; the founder must act on it
-            outcome, founder_action = _classify_outcome(task.title, resp.text)
+            # Honest-outcome classification (hybrid mode, step A) + the
+            # #13 propose-instead-of-block hook: an outreach task whose
+            # email integration IS connected files a tool_action draft
+            # card (founder approves, the team sends) instead of blocking.
+            #   completed → a real tool/integration actually acted
+            #   blocked   → a capability is missing — founder_action names
+            #               the connection to make, never founder labor
+            #   delivered → an asset was produced / an action was proposed
+            outcome, founder_action = _resolve_outcome(
+                self._engine, task, project, resp.text
+            )
             status = {
                 "blocked": TaskStatus.BLOCKED,
                 "delivered": TaskStatus.DELIVERED,

@@ -667,6 +667,37 @@ def fund(
 
 
 @app.command()
+def abandon(
+    project_id: str = typer.Argument(..., help="Project (plan) to abandon"),
+    reason: str = typer.Option("", "--reason", "-r", help="Why the plan is abandoned"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Abandon a plan (#10): cancel the project, stop its unfinished
+    tasks, withdraw its open inbox cards, release the unspent envelope."""
+    engine = _get_engine(config)
+    try:
+        payload = engine.abandon_project(project_id, reason=reason)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(payload)
+        return
+    if not payload["cancelled"]:
+        console.print(f"[dim]Project {project_id} is already terminal "
+                      f"({payload['status']}) — nothing to abandon.[/dim]")
+        return
+    console.print(Panel(
+        f"Plan abandoned ({payload['previous_status']} → cancelled)\n"
+        f"Tasks stopped: {payload['tasks_stopped']} · "
+        f"Inbox cards withdrawn: {payload['approvals_withdrawn']}\n"
+        f"Envelope released to treasury: €{payload['envelope_released']:.2f}",
+        title=f"Project {project_id}",
+    ))
+
+
+@app.command()
 def spend(
     project_id: str = typer.Argument(..., help="Project charged for this expense"),
     amount: float = typer.Argument(..., help="Expense amount (EUR)"),

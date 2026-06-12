@@ -83,13 +83,14 @@ class TaskStatus(str, Enum):
     ACTIVE = "active"
     COMPLETED = "completed"   # truly executed — a real tool/integration acted
     DELIVERED = "delivered"   # asset produced; founder must act to finish it
-    BLOCKED = "blocked"       # needs an integration/credential the agent lacks
+    BLOCKED = "blocked"       # needs a connection/approval the agent lacks
     FAILED = "failed"
+    CANCELLED = "cancelled"   # project abandoned — task withdrawn, not failed
 
     @classmethod
     def terminal(cls) -> set["TaskStatus"]:
         """States a task does not leave on its own."""
-        return {cls.COMPLETED, cls.DELIVERED, cls.BLOCKED, cls.FAILED}
+        return {cls.COMPLETED, cls.DELIVERED, cls.BLOCKED, cls.FAILED, cls.CANCELLED}
 
 
 class ApprovalStatus(str, Enum):

@@ -270,6 +270,21 @@ TOOLS = [
         },
     ),
     Tool(
+        name="kompany_project_abandon",
+        description=(
+            "Abandon a plan (#10): cancel the project, stop its unfinished "
+            "tasks, withdraw its open inbox cards, release the unspent envelope."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string", "description": "Project ID to abandon"},
+                "reason": {"type": "string", "description": "Why the plan is abandoned"},
+            },
+            "required": ["project_id"],
+        },
+    ),
+    Tool(
         name="kompany_resume_project",
         description="Resume a project from persisted task/checkpoint state.",
         inputSchema={

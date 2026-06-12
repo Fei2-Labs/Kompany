@@ -516,6 +516,82 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         )
         return self.project_budget(project_id)
 
+    def abandon_project(self, project_id: str, reason: str = "") -> dict:
+        """Abandon a plan (#10) — the single logic home for all surfaces.
+
+        Effects (idempotent on an already-terminal project):
+        * project → ``cancelled`` (terminal)
+        * unfinished tasks (pending/active) → ``cancelled``
+        * pending/snoozed approval cards tied to the project → withdrawn
+        * the unspent envelope is RELEASED back to the treasury. Funding
+          is an EARMARK (``unallocated_treasury`` reserves only ACTIVE
+          projects), so leaving ``active`` releases it implicitly — no
+          ledger row is written (a refund row would double-count cash
+          that never left the balance). The released amount is audited.
+        * AI cost already spent is real and stays in the ledger.
+        """
+        row = self.db.execute(
+            "SELECT id, status FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Project '{project_id}' not found")
+        current = row["status"]
+        reason = reason or "founder abandoned the plan"
+        if current in ("completed", "cancelled", "failed"):
+            return {
+                "id": project_id, "status": current,
+                "previous_status": current, "cancelled": False,
+                "tasks_stopped": 0, "approvals_withdrawn": 0,
+                "envelope_released": 0.0, "note": "already terminal",
+            }
+
+        # Envelope release amount BEFORE flipping status (audit truth).
+        spent = self.ledger.spent_for_project(project_id)
+        project = self.projects.get(project_id)
+        funded = project.funded_amount if project else 0.0
+        released = max(0.0, funded - spent)
+
+        self.db.execute(
+            "UPDATE projects SET status = 'cancelled', "
+            "updated_at = datetime('now') WHERE id = ?", (project_id,),
+        )
+        stopped = self.db.execute(
+            "UPDATE tasks SET status = 'cancelled', "
+            "updated_at = datetime('now') "
+            "WHERE project_id = ? AND status IN ('pending', 'active')",
+            (project_id,),
+        ).rowcount
+        self.db.commit()
+
+        # Withdraw open inbox cards for this project — a dead plan must
+        # not keep asking the founder for money/decisions.
+        withdrawn = 0
+        for req in self.approvals.list_for_project(project_id):
+            if req.status.value in ("pending", "snoozed"):
+                self.approvals.cancel(
+                    req.id,
+                    reason=f"project abandoned: {reason}",
+                    by_type="system",
+                )
+                withdrawn += 1
+
+        self.audit.record(
+            "project.cancelled",
+            f"Founder abandoned the plan ({reason})",
+            detail={
+                "project_id": project_id, "previous_status": current,
+                "tasks_stopped": stopped, "approvals_withdrawn": withdrawn,
+                "envelope_released": released, "reason": reason,
+            },
+            project_id=project_id,
+        )
+        return {
+            "id": project_id, "status": "cancelled",
+            "previous_status": current, "cancelled": True,
+            "tasks_stopped": stopped, "approvals_withdrawn": withdrawn,
+            "envelope_released": released,
+        }
+
     def execute_project(self, project_id: str) -> dict:
         """Execute a revenue project's tasks autonomously."""
         if current_run_id() is None:

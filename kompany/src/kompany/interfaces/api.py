@@ -2691,50 +2691,24 @@ class CancelProjectRequest(BaseModel):
     reason: str = ""
 
 
+@app.post("/projects/{project_id}/abandon")
 @app.post("/projects/{project_id}/cancel")
 def cancel_project(
     project_id: str, req: CancelProjectRequest | None = None
 ) -> dict[str, Any]:
-    """Abandon a plan: set the project to ``cancelled`` and stop its
-    unfinished tasks.
-
-    The founder's "放弃当前计划" need (#10). AI cost already spent is
-    real and stays in the ledger — abandoning doesn't refund. Frees the
-    founder to pick another directive. Idempotent on an already-terminal
-    project.
+    """Abandon a plan (#10): project → ``cancelled``, unfinished tasks
+    stopped, open approval cards withdrawn, unspent envelope released
+    back to the treasury (earmark accounting — no ledger row needed).
+    AI cost already spent is real and stays in the ledger. Idempotent
+    on an already-terminal project. ``/cancel`` is a legacy alias of
+    ``/abandon`` — same handler, same engine op.
     """
     engine = get_engine()
-    row = engine.db.execute(
-        "SELECT id, status FROM projects WHERE id = ?", (project_id,)
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
-    current = row["status"]
-    reason = (req.reason if req else "") or "founder abandoned the plan"
-    if current in ("completed", "cancelled", "failed"):
-        return {"id": project_id, "status": current, "previous_status": current,
-                "cancelled": False, "note": "already terminal"}
-
-    engine.db.execute(
-        "UPDATE projects SET status = 'cancelled', updated_at = datetime('now') "
-        "WHERE id = ?", (project_id,),
-    )
-    # Stop unfinished tasks (pending/active) so nothing keeps running.
-    stopped = engine.db.execute(
-        "UPDATE tasks SET status = 'cancelled', updated_at = datetime('now') "
-        "WHERE project_id = ? AND status IN ('pending', 'active')",
-        (project_id,),
-    ).rowcount
-    engine.db.commit()
-    engine.audit.record(
-        "project.cancelled",
-        f"Founder abandoned the plan ({reason})",
-        detail={"project_id": project_id, "previous_status": current,
-                "tasks_stopped": stopped, "reason": reason},
-        project_id=project_id,
-    )
-    return {"id": project_id, "status": "cancelled", "previous_status": current,
-            "cancelled": True, "tasks_stopped": stopped}
+    reason = (req.reason if req else "") or ""
+    try:
+        return engine.abandon_project(project_id, reason=reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/projects/{project_id}/activate")
