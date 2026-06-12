@@ -244,7 +244,9 @@ class DirectiveProposalMixin:
         provider = self._active_provider_name()
 
         if skip_llm or force_heuristic:
-            directives = self._heuristic_first_directives(agreed)
+            directives = self._filter_by_founder_rules(
+                self._heuristic_first_directives(agreed)
+            )
             persisted = self._persist_proposed_directives(
                 directives, source="team_proposal_first_week_heuristic"
             )
@@ -257,7 +259,9 @@ class DirectiveProposalMixin:
             }
 
         try:
-            directives = self._llm_first_directives(agreed)
+            directives = self._filter_by_founder_rules(
+                self._llm_first_directives(agreed)
+            )
         except Exception as exc:  # noqa: BLE001 — surfaced to UI
             from kompany.interfaces.api import _classify_ping_error
 
@@ -427,8 +431,36 @@ class DirectiveProposalMixin:
     # Internal — LLM, heuristic, persistence
     # ------------------------------------------------------------------
 
+    def _filter_by_founder_rules(
+        self, directives: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Founder hard rules (#6) — deterministic proposal-time filter.
+
+        Drops any proposed directive whose title/rationale/week_plan
+        matches an ``exclude_capability`` rule, so the team never debates
+        (or persists) work the founder will never allow. Backstops the
+        NEVER clause appended to the CEO prompt."""
+        from kompany.core import founder_config
+
+        rules = getattr(self, "get_founder_rules", lambda: None)()
+        kept, dropped = founder_config.filter_directive_dicts(directives, rules)
+        if dropped:
+            try:
+                self.audit.record(
+                    "founder_rules.directives_filtered",
+                    f"Founder hard rules dropped {len(dropped)} proposed directive(s)",
+                    detail={
+                        "dropped_titles": [d.get("title") for d in dropped],
+                        "excluded": founder_config.excluded_capabilities(rules),
+                    },
+                )
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+        return kept
+
     def _llm_first_directives(self, agreed) -> list[dict[str, Any]]:
         from kompany.core.debate import CLAIMS_SCHEMA_HINT  # noqa: F401
+        from kompany.core.founder_config import never_propose_clause
 
         ceo = self.registry.get(
             "ceo", company_state=self.get_company_state()
@@ -443,6 +475,11 @@ class DirectiveProposalMixin:
             ),
             deadline=str(agreed.deadline or "not set"),
             company_goal=self.settings.company_goal or "(none provided)",
+        )
+        # Founder hard rules (#6): excluded capabilities are stated up
+        # front so the team doesn't waste tokens proposing them.
+        prompt += never_propose_clause(
+            getattr(self, "get_founder_rules", lambda: None)()
         )
         resp = ceo.call_structured(
             prompt=prompt,

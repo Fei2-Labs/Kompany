@@ -1092,6 +1092,80 @@ def detect_clis_setting() -> dict:
     return get_engine().detect_agent_clis()
 
 
+class FounderProfileRequest(BaseModel):
+    """Body for ``PUT /founder/profile`` (#7).
+
+    Partial payloads merge over the stored profile; ``clear=true``
+    removes it entirely.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    address: str | None = None
+    pronouns: str | None = None
+    comms_style: str | None = None
+    language: str | None = None
+    working_hours: str | None = None
+    timezone: str | None = None
+    risk_tolerance: str | None = None
+    clear: bool = False
+
+
+class FounderRulesRequest(BaseModel):
+    """Body for ``PUT /founder/rules`` (#6).
+
+    ``hard`` is a list of ``{kind, match, action}`` entries (kind ∈
+    exclude_capability | budget_cap | forbid_paid_category); ``soft``
+    is free text. Top-level merge; ``clear=true`` removes both.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    hard: list[dict] | None = None
+    soft: str | None = None
+    clear: bool = False
+
+
+@app.get("/founder/profile")
+def get_founder_profile_setting() -> dict | None:
+    """Founder profile (or null). Same dict shape as SDK/MCP."""
+    return get_engine().get_founder_profile()
+
+
+@app.put("/founder/profile")
+def set_founder_profile_setting(req: FounderProfileRequest) -> dict:
+    """Merge-set (or clear) the founder profile."""
+    payload: dict | None = None
+    if not req.clear:
+        payload = {
+            k: v for k, v in req.model_dump().items()
+            if k != "clear" and v is not None
+        }
+    try:
+        return get_engine().set_founder_profile(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/founder/rules")
+def get_founder_rules_setting() -> dict | None:
+    """Founder rules {hard, soft} (or null). Same dict shape as SDK/MCP."""
+    return get_engine().get_founder_rules()
+
+
+@app.put("/founder/rules")
+def set_founder_rules_setting(req: FounderRulesRequest) -> dict:
+    """Merge-set (or clear) the founder rules."""
+    payload: dict | None = None
+    if not req.clear:
+        payload = {
+            k: v for k, v in req.model_dump().items()
+            if k != "clear" and v is not None
+        }
+    try:
+        return get_engine().set_founder_rules(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class IntegrationInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
     integration_id: str

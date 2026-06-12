@@ -44,3 +44,29 @@ class AutonomyGate:
             # queue. Founder-tunable auto-approve rules come later (#4).
             return False
         return autonomy_tier == "auto"
+
+    def check_rules(
+        self,
+        rules: dict | None,
+        *,
+        tool_name: str,
+        side_effect: str = "read",
+        estimated_cost_usd: float = 0.0,
+        description: str = "",
+    ) -> str | None:
+        """Founder hard-rule gate (#6) — execution-time enforcement.
+
+        Returns a founder-readable refusal reason (excluded capability /
+        per-action budget cap exceeded / forbidden paid category), or
+        ``None`` when the action passes. Deterministic — consulted by
+        both the inline ``execute_tool`` path and ``propose_action``.
+        """
+        from kompany.core.founder_config import check_tool_rules
+
+        return check_tool_rules(
+            rules,
+            tool_name=tool_name,
+            side_effect=side_effect,
+            estimated_cost_usd=estimated_cost_usd,
+            description=description,
+        )

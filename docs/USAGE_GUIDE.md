@@ -17,6 +17,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
 13. [Tools & Actions](#tools--actions)
+13. [Founder Profile & Rules](#founder-profile--rules)
 13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
 14. [Channels: Talk to Your Company Anywhere](#channels-talk-to-your-company-anywhere)
 13. [Anima: The Company's Persona](#anima-the-companys-persona)
@@ -478,6 +479,32 @@ kompany approve <approval-id>       # executes the send for real
 ```
 
 Same operations everywhere: REST `GET /tools` + `POST /tools/propose`, MCP `kompany_tools_list` / `kompany_tools_propose`, SDK `k.tools_list()` / `k.tools_propose(...)`.
+
+---
+
+## Founder Profile & Rules
+
+Two founder-level configs shape how the team talks to you and what it may do. Both live in the company database, are editable in the Settings page (FOUNDER PROFILE / FOUNDER RULES sections), can be set in an optional onboarding step, and are exposed on every interface.
+
+**Founder profile** (presentation) — how the team addresses + communicates with you. Fields: `address`, `pronouns`, `comms_style`, `language`, `working_hours`, `timezone`, `risk_tolerance` (all optional). The profile is injected into every agent's system prompt. Style shapes phrasing only — it never softens an honest assessment.
+
+**Founder rules** (enforcement) — hybrid hard + soft:
+
+- **Hard rules** are structured `{kind, match, action}` entries, enforced deterministically at two points: excluded capabilities are filtered out of every plan/proposal *before* the team spends tokens discussing them, and every tool call is gated at execution time.
+  - `exclude_capability` — `match` is a keyword (e.g. `phone_call`); matching tasks/tools are dropped/refused.
+  - `budget_cap` — `match` is a per-action USD cap (e.g. `10`); any single action estimated above it is refused.
+  - `forbid_paid_category` — `match` is a category keyword (e.g. `ads`); PAID tools matching it are refused.
+- **Soft preferences** are free text (`"prefer async over meetings"`), injected into agent prompts. Best-effort, not enforced.
+
+```bash
+kompany founder profile show
+kompany founder profile set --json '{"address": "Clare", "comms_style": "terse, direct", "language": "zh"}'
+kompany founder rules show
+kompany founder rules set --json '{"hard": [{"kind": "exclude_capability", "match": "phone_call", "action": "skip"}], "soft": "prefer async over meetings"}'
+kompany founder rules set --clear
+```
+
+Partial payloads merge over the stored config; `--clear` removes it. Same operations everywhere: REST `GET/PUT /founder/profile` + `GET/PUT /founder/rules`, MCP `kompany_founder_profile_show/set` + `kompany_founder_rules_show/set`, SDK `k.founder_profile()` / `k.set_founder_profile(...)` / `k.founder_rules()` / `k.set_founder_rules(...)`.
 
 ---
 

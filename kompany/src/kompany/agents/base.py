@@ -63,6 +63,29 @@ class BaseAgent(ABC):
             return prompt
         return f"{prompt}\n\nAgent soul:\n{ctx}"
 
+    def founder_context(self) -> str:
+        """Founder profile + soft-rules prompt block (#6/#7).
+
+        Built from ``settings.founder_profile`` (address / comms style /
+        language / …) and ``settings.founder_rules['soft']`` — ONE
+        shared helper, pure string formatting, no LLM. Constitution
+        invariant: comms style shapes PHRASING only; it must never
+        soften or alter the substance of an honest assessment.
+        """
+        from kompany.core.founder_config import founder_context_block
+
+        return founder_context_block(
+            getattr(self.settings, "founder_profile", None),
+            getattr(self.settings, "founder_rules", None),
+        )
+
+    def with_founder_context(self, prompt: str) -> str:
+        """Append the founder context block to a system prompt."""
+        ctx = self.founder_context()
+        if not ctx:
+            return prompt
+        return f"{prompt}\n\n{ctx}"
+
     @abstractmethod
     def system_prompt(self) -> str:
         """Return the agent's system prompt."""
@@ -83,7 +106,7 @@ class BaseAgent(ABC):
         model = self.settings.get_model_for_tier(self.model_tier)
         resp = self.llm.call(
             model=model,
-            system=self.system_prompt(),
+            system=self.with_founder_context(self.system_prompt()),
             prompt=prompt,
             agent_name=self.display_name,
             directive_id=directive_id,
@@ -109,7 +132,7 @@ class BaseAgent(ABC):
         model = self.settings.get_model_for_tier(self.model_tier)
         resp = self.llm.call_structured(
             model=model,
-            system=self.system_prompt(),
+            system=self.with_founder_context(self.system_prompt()),
             prompt=prompt,
             output_schema=output_schema,
             agent_name=self.display_name,

@@ -51,6 +51,13 @@ class KompanySettings(BaseSettings):
     company_exclusions: str = ""
     currency: str = "EUR"
 
+    # Founder profile + rules (#6/#7). Source of truth is the
+    # ``company_config`` DB rows (core/founder_config.py); the engine
+    # mirrors them here at boot/set so agents — which only see settings
+    # — can build the founder-context prompt block without a DB handle.
+    founder_profile: dict | None = None
+    founder_rules: dict | None = None
+
     # Model tiers
     model_apex: str = "claude-opus-4-20250514"
     model_primary: str = "claude-sonnet-4-20250514"

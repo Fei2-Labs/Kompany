@@ -237,6 +237,36 @@ class ProjectRunner:
         return result
 
     def _decompose(self, project: Project) -> list[TaskSpec]:
+        """Decompose, then apply the founder's hard-rule post-filter (#6).
+
+        Deterministic: any TaskSpec whose title/prompt matches an
+        ``exclude_capability`` founder rule is dropped before a task row
+        is ever created — regardless of whether the CEO LLM honored the
+        NEVER clause in its prompt. Drops are audited (best-effort).
+        """
+        from kompany.core import founder_config
+
+        rules = getattr(self._engine, "get_founder_rules", lambda: None)()
+        specs = self._decompose_unfiltered(project, rules)
+        kept, dropped = founder_config.filter_task_specs(specs, rules)
+        if dropped:
+            try:
+                self._engine.audit.record(
+                    "founder_rules.tasks_filtered",
+                    f"Founder hard rules dropped {len(dropped)} task(s)",
+                    detail={
+                        "dropped_titles": [d.title for d in dropped],
+                        "excluded": founder_config.excluded_capabilities(rules),
+                    },
+                    project_id=project.id,
+                )
+            except Exception:  # noqa: BLE001 — best-effort
+                pass
+        return kept
+
+    def _decompose_unfiltered(
+        self, project: Project, rules: dict | None = None
+    ) -> list[TaskSpec]:
         """Use CEO to decompose a project's revenue paths into tasks.
 
         Two project shapes flow through here:
@@ -318,6 +348,12 @@ class ProjectRunner:
             f"a small/routine task, up to 5.00 only for genuinely complex "
             f"work) and max_turns (agentic loop turns, default 30).\n"
         )
+        # Founder hard rules (#6): excluded capabilities go into the
+        # prompt so no tokens are wasted planning them; the deterministic
+        # post-filter in _decompose backstops the LLM regardless.
+        from kompany.core.founder_config import never_propose_clause
+
+        prompt += never_propose_clause(rules)
 
         resp = ceo.call_structured(
             prompt=prompt,

@@ -873,6 +873,60 @@ def _step_template(
 
 
 # ---------------------------------------------------------------------------
+# Step 2.8 — founder profile (optional, issues #6/#7)
+# ---------------------------------------------------------------------------
+
+
+def _step_founder_profile(
+    console: Console,
+    *,
+    yes: bool,
+    engine: Any,
+    result: OnboardResult,
+) -> None:
+    """Optional founder profile collection — skippable, non-fatal.
+
+    Mirrors the optional first-directive step: headless runs skip it,
+    interactive runs get one Confirm. The profile is editable later in
+    Settings or via ``kompany founder profile set``.
+    """
+    _emit_step(console, 2, "Founder profile (optional)")
+    if yes:
+        console.print("      [dim]skipped (headless — set it later in Settings)[/dim]")
+        return
+    if not Confirm.ask(
+        "      Tell the team how to address + talk to you?", default=False
+    ):
+        console.print("      [dim]skipped — edit later in Settings[/dim]")
+        return
+    payload: dict[str, Any] = {}
+    address = Prompt.ask("      Address you as", default="").strip()
+    if address:
+        payload["address"] = address
+    style = Prompt.ask(
+        "      Comms style (e.g. terse, direct, no fluff)", default=""
+    ).strip()
+    if style:
+        payload["comms_style"] = style
+    language = Prompt.ask("      Language (e.g. zh / en)", default="").strip()
+    if language:
+        payload["language"] = language
+    if not payload:
+        console.print("      [dim]nothing entered; skipping[/dim]")
+        return
+    setter = getattr(engine, "set_founder_profile", None)
+    if setter is None:
+        return
+    try:
+        setter(payload)
+    except Exception as exc:  # noqa: BLE001 — optional step never blocks
+        result.notes.append(f"founder profile not saved: {exc}")
+        console.print(f"      [yellow]founder profile not saved: {exc}[/yellow]")
+        return
+    console.print("      [green]✓[/green] founder profile saved")
+
+
+# ---------------------------------------------------------------------------
 # Step 4 — first directive (optional)
 # ---------------------------------------------------------------------------
 
@@ -1083,6 +1137,12 @@ def run_onboard(
                 kind=source_kind,
                 monthly_fee=monthly_fee,
             )
+
+        # ----- Step 2.8 (founder profile, optional) -------------------
+        # Issues #6/#7: skippable, mirrors the optional first-directive
+        # step. Editable later in Settings or `kompany founder`.
+        if not reused:
+            _step_founder_profile(cons, yes=yes, engine=engine, result=result)
 
         # ----- Step 3 (template) -------------------------------------
         _step_template(

@@ -973,6 +973,61 @@ TOOLS = [
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
+    # Founder profile + rules (#6/#7).
+    Tool(
+        name="kompany_founder_profile_show",
+        description=(
+            "Show the founder profile (address, comms_style, language, "
+            "working_hours, timezone, risk_tolerance) or null when unset."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_founder_profile_set",
+        description=(
+            "Merge-set the founder profile (partial fields merge over the "
+            "stored profile). Pass clear=true to remove it."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "address": {"type": "string", "description": "How to address the founder"},
+                "pronouns": {"type": "string"},
+                "comms_style": {"type": "string", "description": "Preferred tone, e.g. 'terse, direct'"},
+                "language": {"type": "string", "description": "e.g. zh / en"},
+                "working_hours": {"type": "string"},
+                "timezone": {"type": "string"},
+                "risk_tolerance": {"type": "string"},
+                "clear": {"type": "boolean", "description": "Remove the profile", "default": False},
+            },
+        },
+    ),
+    Tool(
+        name="kompany_founder_rules_show",
+        description=(
+            "Show the founder rules ({hard, soft}) or null when unset. "
+            "Hard rules are enforced (proposal filter + execution gate); "
+            "soft is best-effort prompt text."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_founder_rules_set",
+        description=(
+            "Merge-set the founder rules. hard: list of {kind, match, "
+            "action} (kind: exclude_capability | budget_cap | "
+            "forbid_paid_category); soft: free-text preferences. Pass "
+            "clear=true to remove all rules."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "hard": {"type": "array", "items": {"type": "object"}, "description": "[{kind, match, action}]"},
+                "soft": {"type": "string", "description": "Free-text preferences"},
+                "clear": {"type": "boolean", "description": "Remove all founder rules", "default": False},
+            },
+        },
+    ),
 ]
 
 

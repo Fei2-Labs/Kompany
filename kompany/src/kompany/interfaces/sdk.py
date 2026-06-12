@@ -319,6 +319,39 @@ class Kompany:
         """Probe PATH for agent CLIs that unlock zero-key model sources."""
         return self._engine.detect_agent_clis()
 
+    def founder_profile(self) -> dict[str, Any] | None:
+        """Founder profile dict, or ``None`` when unset (#7).
+
+        Same shape as REST ``GET /founder/profile`` and MCP
+        ``kompany_founder_profile_show``: address / pronouns /
+        comms_style / language / working_hours / timezone /
+        risk_tolerance (only the fields the founder set).
+        """
+        return self._engine.get_founder_profile()
+
+    def set_founder_profile(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge-set the founder profile; ``None`` clears it.
+
+        A partial payload merges over the stored profile. Raises
+        ``ValueError`` on validation failure (unknown field).
+        Returns ``{"profile": dict|None}``.
+        """
+        return self._engine.set_founder_profile(payload)
+
+    def founder_rules(self) -> dict[str, Any] | None:
+        """Founder rules dict ``{hard, soft}``, or ``None`` when unset (#6)."""
+        return self._engine.get_founder_rules()
+
+    def set_founder_rules(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge-set the founder rules; ``None`` clears them.
+
+        ``payload`` carries ``hard`` (list of ``{kind, match, action}``,
+        kind ∈ exclude_capability | budget_cap | forbid_paid_category)
+        and/or ``soft`` (free text). Top-level merge; ``ValueError`` on
+        validation failure. Returns ``{"rules": dict|None}``.
+        """
+        return self._engine.set_founder_rules(payload)
+
     def agent_work_summary(self) -> dict[str, dict[str, Any]]:
         """Per-agent task-history summary keyed by lowercase role.
 

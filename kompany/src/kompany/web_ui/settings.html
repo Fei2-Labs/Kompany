@@ -102,8 +102,40 @@
       <div class="set-result" id="email-result" hidden></div>
     </div>
 
+    <div class="frame" data-label="SETTINGS // founder profile">
+      <h2 class="set-h">// FOUNDER PROFILE</h2>
+      <p class="set-note">How the team addresses + talks to you. Style shapes phrasing only — it never softens an honest assessment.</p>
+      <div class="set-row"><label for="fp-address">Address you as</label><input id="fp-address" placeholder="Clare / boss / founder"></div>
+      <div class="set-row"><label for="fp-pronouns">Pronouns (optional)</label><input id="fp-pronouns" placeholder="she/her"></div>
+      <div class="set-row"><label for="fp-style">Comms style</label><input id="fp-style" placeholder="terse, direct, no fluff"></div>
+      <div class="set-row"><label for="fp-language">Language</label><input id="fp-language" placeholder="zh / en"></div>
+      <div class="set-row"><label for="fp-hours">Working hours (optional)</label><input id="fp-hours" placeholder="09:00-18:00"></div>
+      <div class="set-row"><label for="fp-tz">Timezone (optional)</label><input id="fp-tz" placeholder="Europe/Stockholm"></div>
+      <div class="set-row"><label for="fp-risk">Risk tolerance (optional)</label><input id="fp-risk" placeholder="conservative / balanced / aggressive"></div>
+      <div class="set-control">
+        <button type="button" id="fp-save" class="onb-btn onb-btn-submit">[ ▸ SAVE PROFILE ]</button>
+      </div>
+      <div class="set-result" id="fp-result" hidden></div>
+    </div>
+
+    <div class="frame" data-label="SETTINGS // founder rules">
+      <h2 class="set-h">// FOUNDER RULES</h2>
+      <p class="set-note">Hard rules are enforced — excluded capabilities are filtered out of every plan and blocked at execution; budget caps bound any single action; forbidden paid categories are refused. Soft preferences are injected into agent prompts (best-effort).</p>
+      <div class="set-row">
+        <label for="fr-soft">Soft preferences</label>
+        <textarea id="fr-soft" rows="3" placeholder="prefer async over meetings; weekly summary on Fridays"></textarea>
+      </div>
+      <div class="set-meta">Hard rules — match is a keyword (exclude / paid category) or a per-action USD cap (budget cap).</div>
+      <div id="fr-rows"></div>
+      <div class="set-control">
+        <button type="button" id="fr-add" class="onb-btn onb-btn-discuss">[ + add hard rule ]</button>
+        <button type="button" id="fr-save" class="onb-btn onb-btn-submit">[ ▸ SAVE RULES ]</button>
+      </div>
+      <div class="set-result" id="fr-result" hidden></div>
+    </div>
+
     <div class="frame set-soon" data-label="SETTINGS // more">
-      <p class="set-note">Credentials, founder profile + rules are coming here (backlog #6–#8).</p>
+      <p class="set-note">Credentials are coming here (backlog #8).</p>
     </div>
   </div>
 
@@ -369,6 +401,102 @@
       } catch (e) { emShow("test failed: " + e.message, false); }
     });
     emLoad();
+
+    // ---- Founder profile (#7) ----
+    // Tauri WebView: no native dialogs — inline results only.
+    const FP_FIELDS = {
+      address: "fp-address", pronouns: "fp-pronouns", comms_style: "fp-style",
+      language: "fp-language", working_hours: "fp-hours",
+      timezone: "fp-tz", risk_tolerance: "fp-risk",
+    };
+    const fpResult = document.getElementById("fp-result");
+    function fpShow(msg, ok) {
+      fpResult.hidden = false; fpResult.textContent = msg;
+      fpResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    async function fpLoad() {
+      try {
+        const p = await fetch("/founder/profile", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        for (const [key, id] of Object.entries(FP_FIELDS)) {
+          document.getElementById(id).value = (p && p[key]) || "";
+        }
+      } catch (_) { fpShow("failed to load founder profile", false); }
+    }
+    document.getElementById("fp-save").addEventListener("click", async () => {
+      const body = {};
+      let any = false;
+      for (const [key, id] of Object.entries(FP_FIELDS)) {
+        const v = document.getElementById(id).value.trim();
+        if (v) { body[key] = v; any = true; }
+      }
+      if (!any) body.clear = true; // all fields empty = remove the profile
+      try {
+        const r = await fetch("/founder/profile", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (r.ok) fpShow(body.clear ? "✓ profile cleared" : "✓ profile saved", true);
+        else fpShow("✗ " + (d.detail || "save failed"), false);
+      } catch (e) { fpShow("save failed: " + e.message, false); }
+    });
+    fpLoad();
+
+    // ---- Founder rules (#6) ----
+    const frRows = document.getElementById("fr-rows");
+    const frSoft = document.getElementById("fr-soft");
+    const frResult = document.getElementById("fr-result");
+    function frShow(msg, ok) {
+      frResult.hidden = false; frResult.textContent = msg;
+      frResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    function frAddRow(rule) {
+      const row = document.createElement("div");
+      row.className = "set-row fr-rule";
+      row.innerHTML = `
+        <select class="fr-kind">
+          <option value="exclude_capability">exclude capability</option>
+          <option value="budget_cap">budget cap (USD/action)</option>
+          <option value="forbid_paid_category">forbid paid category</option>
+        </select>
+        <input class="fr-match" placeholder="phone_call / 10 / ads">
+        <button type="button" class="onb-btn fr-remove">[ × ]</button>`;
+      row.querySelector(".fr-kind").value = (rule && rule.kind) || "exclude_capability";
+      row.querySelector(".fr-match").value = (rule && rule.match) || "";
+      row.querySelector(".fr-remove").addEventListener("click", () => row.remove());
+      frRows.appendChild(row);
+    }
+    async function frLoad() {
+      try {
+        const rules = await fetch("/founder/rules", { headers: { Accept: "application/json" } }).then((r) => r.json());
+        frRows.innerHTML = "";
+        frSoft.value = (rules && rules.soft) || "";
+        for (const rule of (rules && rules.hard) || []) frAddRow(rule);
+      } catch (_) { frShow("failed to load founder rules", false); }
+    }
+    document.getElementById("fr-add").addEventListener("click", () => frAddRow());
+    document.getElementById("fr-save").addEventListener("click", async () => {
+      const hard = [];
+      for (const row of frRows.querySelectorAll(".fr-rule")) {
+        const match = row.querySelector(".fr-match").value.trim();
+        if (!match) continue; // empty match rows are dropped, not errors
+        hard.push({ kind: row.querySelector(".fr-kind").value, match, action: "skip" });
+      }
+      const soft = frSoft.value.trim();
+      const body = (hard.length || soft) ? { hard, soft } : { clear: true };
+      try {
+        const r = await fetch("/founder/rules", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        if (r.ok) frShow(body.clear ? "✓ rules cleared" : `✓ rules saved (${hard.length} hard)`, true);
+        else frShow("✗ " + (d.detail || "save failed"), false);
+      } catch (e) { frShow("save failed: " + e.message, false); }
+    });
+    frLoad();
   </script>
 </body>
 </html>

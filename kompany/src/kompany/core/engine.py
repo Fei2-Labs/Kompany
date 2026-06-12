@@ -367,6 +367,13 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
                     row = None
                 if row and row["value"]:
                     setattr(self.settings, attr, row["value"])
+        # Founder profile + rules (#6/#7): mirror the company_config JSON
+        # rows into settings so every agent prompt (BaseAgent reads only
+        # settings) carries the founder context from boot.
+        from kompany.core import founder_config
+
+        self.settings.founder_profile = founder_config.get_founder_profile(self)
+        self.settings.founder_rules = founder_config.get_founder_rules(self)
 
     def get_company_state(self) -> dict:
         """Get current company state for agent context."""
@@ -2198,6 +2205,33 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         from kompany.core import model_source_ops
 
         return model_source_ops.detect_agent_clis()
+
+    # ----- Founder profile + rules (#6/#7)
+    # Thin wrappers — logic lives in ``core/founder_config.py``.
+
+    def get_founder_profile(self) -> dict | None:
+        """Founder profile dict (address/comms prefs); ``None`` = unset."""
+        from kompany.core import founder_config
+
+        return founder_config.get_founder_profile(self)
+
+    def set_founder_profile(self, payload: dict | None) -> dict:
+        """Merge-set (or clear, with ``None``) the founder profile."""
+        from kompany.core import founder_config
+
+        return founder_config.set_founder_profile(self, payload)
+
+    def get_founder_rules(self) -> dict | None:
+        """Founder rules dict (``{hard, soft}``); ``None`` = unset."""
+        from kompany.core import founder_config
+
+        return founder_config.get_founder_rules(self)
+
+    def set_founder_rules(self, payload: dict | None) -> dict:
+        """Merge-set (or clear, with ``None``) the founder rules."""
+        from kompany.core import founder_config
+
+        return founder_config.set_founder_rules(self, payload)
 
     # ----- Anima persona surface (06-12-anima-persona PRD D5)
     # Thin wrappers — logic lives in ``core/anima.py``.
@@ -4140,6 +4174,31 @@ class KompanyEngine(TargetReviewMixin, DirectiveProposalMixin):
         if entry is None:
             raise ValueError(f"unknown tool: {tool_name}")
         tool = entry["tool"]
+        # Founder hard rules (#6): a blocked action never even reaches
+        # the inbox — refuse with the founder-readable reason.
+        try:
+            parsed_for_rules = (
+                tool.input_schema(**inputs) if tool.input_schema else inputs
+            )
+            rule_cost = tool.estimate_cost(parsed_for_rules).total_usd
+        except Exception:  # noqa: BLE001 — estimate failure ≠ rule bypass
+            rule_cost = 0.0
+        refusal = self.autonomy.check_rules(
+            self.get_founder_rules(),
+            tool_name=tool_name,
+            side_effect=tool.side_effect.value,
+            estimated_cost_usd=rule_cost,
+            description=tool.description,
+        )
+        if refusal:
+            self.audit.record(
+                "tool_action.refused",
+                f"Founder rule refused proposed action: {tool_name}",
+                detail={"tool_name": tool_name, "reason": refusal},
+                directive_id=directive_id,
+                project_id=project_id,
+            )
+            raise ValueError(refusal)
         payload: dict = {
             "tool_name": tool_name,
             "inputs": inputs,

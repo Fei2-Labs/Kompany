@@ -270,4 +270,49 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
     if name == "kompany_detect_clis":
         return engine.detect_agent_clis()
 
+    # Founder profile + rules (#6/#7).
+    if name == "kompany_founder_profile_show":
+        return engine.get_founder_profile()
+
+    if name == "kompany_founder_profile_set":
+        payload = None
+        if not arguments.get("clear"):
+            payload = {
+                key: arguments[key]
+                for key in (
+                    "address",
+                    "pronouns",
+                    "comms_style",
+                    "language",
+                    "working_hours",
+                    "timezone",
+                    "risk_tolerance",
+                )
+                if arguments.get(key) is not None
+            }
+            if not payload:
+                return {"error": "pass profile fields to set, or clear=true to remove"}
+        try:
+            return engine.set_founder_profile(payload)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+    if name == "kompany_founder_rules_show":
+        return engine.get_founder_rules()
+
+    if name == "kompany_founder_rules_set":
+        payload = None
+        if not arguments.get("clear"):
+            payload = {
+                key: arguments[key]
+                for key in ("hard", "soft")
+                if arguments.get(key) is not None
+            }
+            if not payload:
+                return {"error": "pass hard/soft to set rules, or clear=true to remove"}
+        try:
+            return engine.set_founder_rules(payload)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     raise UnknownToolError(name)

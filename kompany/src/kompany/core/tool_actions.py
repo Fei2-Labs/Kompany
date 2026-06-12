@@ -120,6 +120,23 @@ def execute_tool(engine: Any, tool_name: str, inputs: dict) -> dict[str, Any]:
     tool: Tool = entry["tool"]
     parsed = tool.input_schema(**inputs) if tool.input_schema else inputs
     estimate = tool.estimate_cost(parsed)
+    # Founder hard rules (#6): excluded capability / per-action budget
+    # cap / forbidden paid category → refuse with a clear reason.
+    get_rules = getattr(engine, "get_founder_rules", lambda: None)
+    refusal = engine.autonomy.check_rules(
+        get_rules(),
+        tool_name=tool_name,
+        side_effect=tool.side_effect.value,
+        estimated_cost_usd=estimate.total_usd,
+        description=tool.description,
+    )
+    if refusal:
+        engine.audit.record(
+            "tool_action.refused",
+            f"Founder rule refused inline tool: {tool_name}",
+            detail={"tool_name": tool_name, "reason": refusal},
+        )
+        return {"ok": False, "refused": True, "detail": refusal}
     if not engine.autonomy.check_tool(
         tool.side_effect.value,
         tool.autonomy_tier.value,
