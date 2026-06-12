@@ -125,6 +125,17 @@ class _CapturingLLM:
         action_type=None,
     ) -> LLMResponse:
         self.last_prompt = prompt
+        if getattr(output_schema, "__name__", "") == "AnswerResponse":
+            parsed = output_schema(text="ok")
+            resp = LLMResponse(
+                text=parsed.model_dump_json(),
+                input_tokens=10,
+                output_tokens=5,
+                cost_usd=0.0,
+                model="claude-test",
+            )
+            resp.parsed = parsed
+            return resp
         parsed = DirectiveClassification(
             directive_type="informational",
             reasoning="status",
@@ -215,11 +226,11 @@ def test_ceo_answer_prompt_points_target_changes_to_onboarding_when_present(tmp_
             "  Change/re-specify path: /ui/onboarding.html (current product uses onboarding; settings does not edit company targets yet)\n"
         ),
     )
-    assert llm.last_freeform_prompt is not None
-    assert "If the founder asks how to change or re-specify targets" in llm.last_freeform_prompt
-    assert "/ui/onboarding.html" in llm.last_freeform_prompt
-    assert "settings does not edit company targets yet" in llm.last_freeform_prompt
-    assert "If mission/targets are present, do NOT imply they are missing or lost." in llm.last_freeform_prompt
+    assert llm.last_prompt is not None
+    assert "If the founder asks how to change or re-specify targets" in llm.last_prompt
+    assert "/ui/onboarding.html" in llm.last_prompt
+    assert "settings does not edit company targets yet" in llm.last_prompt
+    assert "If mission/targets are present, do NOT imply they are missing or lost." in llm.last_prompt
 
 
 def test_ceo_answer_prompt_points_target_setup_to_onboarding_when_missing(tmp_path) -> None:
@@ -234,7 +245,7 @@ def test_ceo_answer_prompt_points_target_setup_to_onboarding_when_missing(tmp_pa
             "  Set/re-specify path: /ui/onboarding.html (current product uses onboarding; settings does not edit company targets yet)\n"
         ),
     )
-    assert llm.last_freeform_prompt is not None
-    assert "/ui/onboarding.html" in llm.last_freeform_prompt
-    assert "If the founder asks how to change or re-specify targets" in llm.last_freeform_prompt
-    assert "If active work count is zero, say that plainly" in llm.last_freeform_prompt
+    assert llm.last_prompt is not None
+    assert "/ui/onboarding.html" in llm.last_prompt
+    assert "If the founder asks how to change or re-specify targets" in llm.last_prompt
+    assert "If active work count is zero, say that plainly" in llm.last_prompt

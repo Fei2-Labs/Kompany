@@ -88,11 +88,14 @@ def test_full_chain_onboard_revise_approve_runway_episode(engine) -> None:
         assert event["kind"] == KIND_RUNWAY_ALERT
 
     # ----- Step 6: materialize one episode → carries the full trio --------
-    # Find one of the draft projects the template spawned + flip it to completed.
-    proj_row = engine.db.execute(
-        "SELECT id FROM projects ORDER BY rowid LIMIT 1"
-    ).fetchone()
-    project_id = proj_row["id"]
+    # Targets agreement deliberately wipes the template's stale drafts
+    # (they were proposed against the PREVIOUS numbers — see
+    # target_review.py), so create a fresh project to complete instead.
+    from kompany.state.models import Project, ProjectType
+
+    project = Project(name="post-agreement project", type=ProjectType.OPERATIONAL)
+    engine.projects.create(project)
+    project_id = project.id
     engine.db.execute(
         "UPDATE projects SET status = 'completed' WHERE id = ?", (project_id,)
     )

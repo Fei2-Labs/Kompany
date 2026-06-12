@@ -121,7 +121,7 @@ def test_concurrent_sessions_isolate_cost_and_turns(tmp_path, monkeypatch):
     class ConcurrentCEO:
         def classify(self, raw_input, directive_id=None, targets_summary=None,
                      glossary_summary=None, session_context=None,
-                     clarify_capped=False):
+                     clarify_capped=False, **kwargs):
             return make_classification()
 
     fake = ConcurrentCEO()

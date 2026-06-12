@@ -270,8 +270,11 @@ def test_trace_run_reconstructs_directive_chain(tmp_path):
                 approval_tier="auto",
             )
 
-        def answer(self, question, company_context, session_context=None, directive_id=None):
-            return SimpleNamespace(text=f"ANSWER :: {question}")
+        def answer(self, question, company_context, session_context=None, directive_id=None, **kwargs):
+            from kompany.agents.ceo import AnswerResponse
+
+            parsed = AnswerResponse(text=f"ANSWER :: {question}")
+            return SimpleNamespace(text=parsed.text, parsed=parsed)
 
     original_registry = engine.registry
 
@@ -348,8 +351,11 @@ def test_distinct_directives_get_distinct_run_ids(tmp_path):
                 approval_tier="auto",
             )
 
-        def answer(self, question, company_context, session_context=None, directive_id=None):
-            return SimpleNamespace(text=f"ANSWER :: {question}")
+        def answer(self, question, company_context, session_context=None, directive_id=None, **kwargs):
+            from kompany.agents.ceo import AnswerResponse
+
+            parsed = AnswerResponse(text=f"ANSWER :: {question}")
+            return SimpleNamespace(text=parsed.text, parsed=parsed)
 
     original_registry = engine.registry
 
