@@ -2190,3 +2190,111 @@ body.onboarding-body { padding-bottom: 40px; }
 }
 .set-row input::placeholder { color: rgba(0, 255, 65, 0.35); }
 .set-row input:focus { outline: none; border-color: #00ff41; }
+
+/* ---------------------------------------------------------------------
+ * Mobile / phone breakpoint (issue #14 — operate from your phone).
+ * The founder's mobile jobs are: glance at status, act on INBOX
+ * approvals, decide escalations. So on small screens:
+ *   - the page scrolls normally (the desktop one-viewport flex layout
+ *     is undone) and panels stack single-column;
+ *   - INBOX is first in the stack, STAFF (status) second, EPISODES last;
+ *   - every action button gets a >=44px touch target;
+ *   - multi-column grids (episodes, feasibility review, onboarding
+ *     templates/targets) collapse to one column.
+ * No hover-only affordances exist on the action paths (approve/reject/
+ * GO are real <button>s with click handlers); :hover rules are purely
+ * decorative and harmless on touch.
+ * ------------------------------------------------------------------ */
+@media (max-width: 720px) {
+  body { padding: 16px 12px 80px 12px; }
+
+  /* Dashboard: revert the single-viewport flex shell to normal page
+     scrolling. Extra bottom padding clears the fixed directive bar +
+     collapsed channel strip. */
+  .dashboard-body {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    display: block;
+    padding: 16px 12px 130px 12px;
+  }
+
+  /* Stack STAFF + right-col single-column; INBOX (right-col) first. */
+  .dashboard-body .layout,
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  .layout > .right-col { order: -1; }
+  .dashboard-body .layout { margin-bottom: 16px; }
+  .dashboard-body .frame { margin-bottom: 16px; }
+
+  /* Re-cap inner lists so a long inbox/staff list scrolls inside its
+     panel instead of pushing EPISODES off into infinity. */
+  .dashboard-body .inbox-list { max-height: 60dvh; overflow-y: auto; }
+  .dashboard-body .agents-list { max-height: 40dvh; overflow-y: auto; }
+  .dashboard-body .timeline { max-height: 320px; }
+  .dashboard-body .episodes-list { max-height: 240px; }
+  .dashboard-body .episodes-payload { max-height: 320px; }
+
+  .frame { padding: 14px 12px; }
+
+  /* STAFF rows: drop the decorative ascii column, keep id/status/latency. */
+  .agent-row { grid-template-columns: 56px 1fr 64px; }
+  .agent-row .ascii { display: none; }
+
+  /* EPISODES: list above payload instead of side-by-side. */
+  .episodes-row { grid-template-columns: 1fr; }
+
+  /* Touch targets: approval keys + confirm buttons >= 44px tall. */
+  .key,
+  .fr-btn,
+  .onb-btn,
+  .channel-gate-actions .key {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+  .inbox-entry { font-size: 13px; }
+  .inbox-entry .actions { gap: 8px; }
+  .channel-toggle,
+  .channel-head .timeline-fab,
+  .timeline-fab {
+    min-height: 34px;
+    padding: 6px 12px;
+  }
+
+  /* Fixed bottom strips: tighter gutters, comfy input height. */
+  .directive-bar { padding: 12px; font-size: 16px; }
+  #directive-input { min-height: 32px; }
+  .channel-panel { padding: 0 12px; }
+
+  /* Feasibility review trio stacks. */
+  .fr-grid { grid-template-columns: 1fr; }
+
+  /* Onboarding: shell fits the phone, template/target grids stack. */
+  .onboarding-shell { width: 100%; }
+  .onb-templates { grid-template-columns: 1fr; }
+  .onb-targets-grid { grid-template-columns: 1fr; }
+
+  /* Settings: frames stack (already single-column), inputs/selects span
+     the full width, controls wrap with the button on its own line. */
+  .set-wrap { padding: 0 4px; margin: 12px auto; }
+  .set-control { flex-direction: column; align-items: stretch; }
+  .set-control select,
+  .set-row input,
+  .set-control input {
+    width: 100%;
+  }
+  .set-control select { min-height: 44px; }
+}
+
+/* iOS: 16px inputs prevent the auto-zoom-on-focus jump. */
+@media (max-width: 720px) {
+  .set-row input,
+  .set-control select,
+  #directive-input,
+  #onboarding-form input,
+  #onboarding-form textarea {
+    font-size: 16px;
+  }
+}

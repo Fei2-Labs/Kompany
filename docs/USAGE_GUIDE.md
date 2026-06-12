@@ -16,6 +16,7 @@ This guide covers everything you need to operate Kompany, from initializing your
 10. [Executing Projects](#executing-projects)
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
 12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+13. [Operate from Your Phone](#operate-from-your-phone)
 13. [Multiple Brands: Workspaces](#multiple-brands-workspaces)
 13. [Tools & Actions](#tools--actions)
 13. [Founder Profile & Rules](#founder-profile--rules)
@@ -570,6 +571,45 @@ One billing consequence to know: because the heartbeat doesn't run while suspend
 ### Install details (macOS)
 
 `kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` with `KeepAlive` and `RunAtLoad`, pins `KOMPANY_DATA_DIR` to the data directory chosen at install time, and logs to `<data_dir>/logs/daemon.out.log` / `daemon.err.log`. The launch command prefers the server binary bundled inside `/Applications/Kompany.app` (no Python install needed); without the desktop app it falls back to your current Python interpreter. On non-macOS platforms `install` exits with a clear macOS-only message — run `kompany daemon run` under your own process supervisor instead.
+
+---
+
+## Operate from Your Phone
+
+The web UI is responsive: on a phone the dashboard stacks single-column with the **INBOX (approvals) on top**, the staff/status panel second, and episodes last; approve/reject/GO are full-size touch buttons. Your phone jobs are exactly the founder's three manual jobs — approve money, decide escalations, connect accounts — plus a status glance. Heavy authoring stays on the desktop.
+
+The one thing your phone needs is a network path to the machine running the server. Honest options, in order of preference:
+
+### Same Wi-Fi (LAN)
+
+By default the server binds to `127.0.0.1` — reachable only from the machine itself. To reach it from a phone on the same network, bind to the LAN:
+
+```bash
+kompany daemon run --host 0.0.0.0 --port 8000   # daemon (default --port 0 = OS picks)
+# or for a foreground session:
+kompany serve --host 0.0.0.0 --port 8000
+```
+
+Then open `http://<your-machine's-LAN-IP>:8000/ui/` on the phone (find the IP with `ipconfig getifaddr en0` on macOS).
+
+**Security warning:** the engine's REST API uses a localhost-trust model — the approval and directive endpoints have **no authentication** (only the read-only `/dashboard` page is gated by `web_dashboard_token`). Binding to `0.0.0.0` exposes those endpoints to everyone on that network. Only do this on a network you trust (home Wi-Fi), never on café/office/public networks, and never port-forward it to the internet.
+
+### Remote (away from home): use a private overlay network
+
+For access from anywhere, do **not** expose the port publicly. Install [Tailscale](https://tailscale.com) (or ZeroTier) on both the server machine and your phone — you get a private, encrypted, authenticated network between your own devices. Then either bind to the Tailscale interface IP or just use `--host 0.0.0.0` (the Tailscale address is still only reachable by your devices):
+
+```bash
+kompany daemon run --host 0.0.0.0 --port 8000
+# phone (on Tailscale): http://<tailscale-ip-of-server>:8000/ui/
+```
+
+This is the recommended remote path: zero public exposure, no reverse-proxy or TLS setup, works on cellular.
+
+### Note on the launchd daemon
+
+`kompany daemon install` currently pins the LaunchAgent to `127.0.0.1`. For phone access run the daemon in the foreground with `--host` as above, or put `kompany daemon run --host 0.0.0.0` under your own supervisor.
+
+There is no separate mobile app or mobile-specific view — the responsive `/ui/` is the mobile surface. (The engine also has an `INTAKE_TOKEN`/`mobile_remote_token`-gated `POST /intake` endpoint for sending directives remotely — see Using the REST API — but approvals live in the web UI.)
 
 ---
 
