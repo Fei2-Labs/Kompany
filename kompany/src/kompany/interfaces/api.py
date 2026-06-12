@@ -2051,6 +2051,132 @@ def remote_telegram(update: dict[str, Any]) -> dict[str, Any]:
     return engine.handle_remote_command(request_from_telegram_update(update))
 
 
+# ---------------------------------------------------------------------------
+# Browser intake hook (issue #23) — bookmarklet/extension → Kompany.
+# ---------------------------------------------------------------------------
+
+
+class IntakeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    selection: str = ""
+    note: str = ""
+    kind: str = "auto"  # "auto" | "ops" | "dev"
+
+
+# In-process flood/replay guard. Per-process state is fine: there is exactly
+# one engine/server per machine (one-server rule) and the guard only has to
+# stop a stuck bookmarklet/extension from hammering the CEO.
+_INTAKE_RATE_LIMIT = 10  # requests per window
+_INTAKE_RATE_WINDOW = 60.0  # seconds
+_INTAKE_DEDUPE_WINDOW = 300.0  # seconds
+_intake_request_times: list[float] = []
+_intake_seen: dict[tuple[str, str], float] = {}
+
+
+def _intake_reset_guards() -> None:
+    """Test seam: clear rate-limit/dedupe state between cases."""
+    _intake_request_times.clear()
+    _intake_seen.clear()
+
+
+def _intake_compose_text(req: IntakeRequest) -> str:
+    lines = [f"Intake from browser: {req.note or req.url}"]
+    lines.append(f"URL: {req.url}")
+    if req.selection:
+        lines.append(f"Selection: {req.selection}")
+    return "\n".join(lines)
+
+
+def _intake_file_github_issue(title: str, body: str) -> dict[str, Any]:
+    """Best-effort ``gh issue create``. Never raises — absence/failure is data."""
+    import subprocess
+
+    try:
+        proc = subprocess.run(
+            ["gh", "issue", "create", "--title", title, "--body", body],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return {"filed": False, "error": "gh not installed"}
+    except Exception as exc:  # noqa: BLE001 — best-effort by contract
+        return {"filed": False, "error": f"{type(exc).__name__}: {exc}"}
+    if proc.returncode != 0:
+        return {"filed": False, "error": (proc.stderr or proc.stdout).strip()[:500]}
+    return {"filed": True, "issue_url": proc.stdout.strip()}
+
+
+@app.post("/intake")
+def browser_intake(
+    req: IntakeRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Browser → Kompany intake (issue #23). Token-guarded, localhost-only.
+
+    A bookmarklet/extension POSTs ``{url, selection?, note?, kind?}``.
+    ``kind=ops`` (and ``auto``) routes the composed text through
+    ``engine.process_directive`` — the CEO classifier IS the router, so ops
+    work dispatches exactly like any founder directive. ``kind=dev`` never
+    hits the CEO: it appends a bullet to ``<data_dir>/dev-queue.md`` and
+    files a GitHub issue best-effort via ``gh``.
+
+    Interface-parity exception: this is REST-only by design. Browser
+    transport is REST-native; the CLI equivalent already exists as
+    ``kompany directive`` itself, so no engine op / MCP tool is added.
+    """
+    engine = get_engine()
+    settings = engine.settings
+    expected = getattr(settings, "intake_token", "") or getattr(
+        settings, "mobile_remote_token", ""
+    )
+    if not expected:
+        raise HTTPException(status_code=503, detail="intake is not configured (set INTAKE_TOKEN)")
+    supplied = (authorization or "").removeprefix("Bearer ").strip()
+    if not supplied or not compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="invalid intake token")
+
+    if req.kind not in {"auto", "ops", "dev"}:
+        raise HTTPException(status_code=422, detail="kind must be auto|ops|dev")
+
+    now = time.monotonic()
+    # Rate limit: sliding window.
+    _intake_request_times[:] = [t for t in _intake_request_times if now - t < _INTAKE_RATE_WINDOW]
+    if len(_intake_request_times) >= _INTAKE_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="intake rate limit exceeded (10/min)")
+    _intake_request_times.append(now)
+    # Dedupe identical url+note within the window.
+    key = (req.url, req.note)
+    last = _intake_seen.get(key)
+    if last is not None and now - last < _INTAKE_DEDUPE_WINDOW:
+        return {"status": "duplicate", "message": "identical intake seen within 5 minutes"}
+    _intake_seen[key] = now
+
+    text = _intake_compose_text(req)
+    if req.kind in {"auto", "ops"}:
+        result = _process_directive_graceful(text, None)
+        return {"status": "routed", "kind": "ops", "result": result}
+
+    # kind == "dev" — founder's queue, never the CEO.
+    data_dir = Path(getattr(settings, "data_dir", Path("~/.kompany").expanduser()))
+    queue_path = data_dir / "dev-queue.md"
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    bullet = f"- {req.note or 'Browser intake'} — {req.url}"
+    if req.selection:
+        bullet += f" — {req.selection[:200]}"
+    with queue_path.open("a", encoding="utf-8") as fh:
+        fh.write(bullet + "\n")
+    title = (req.note or f"Browser intake: {req.url}")[:120]
+    github = _intake_file_github_issue(title, text)
+    return {
+        "status": "queued",
+        "kind": "dev",
+        "queue_path": str(queue_path),
+        "github": github,
+    }
+
+
 @app.post("/remote/replays/cleanup")
 def cleanup_remote_replays(req: RemoteReplayCleanupRequest | None = None) -> dict[str, Any]:
     """Delete expired remote replay records."""

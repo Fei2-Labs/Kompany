@@ -27,6 +27,9 @@ class KompanySettings(BaseSettings):
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
     mobile_remote_token: str = Field(default="", alias="MOBILE_REMOTE_TOKEN")
+    # Browser intake hook (issue #23). Falls back to mobile_remote_token
+    # when unset so founders with mobile remote configured need no extra step.
+    intake_token: str = Field(default="", alias="INTAKE_TOKEN")
     web_dashboard_token: str = Field(default="", alias="WEB_DASHBOARD_TOKEN")
     dashboard_session_ttl_seconds: int = Field(
         default=12 * 60 * 60,
