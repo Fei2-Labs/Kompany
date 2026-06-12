@@ -182,6 +182,28 @@ class KompanySettings(BaseSettings):
                 overrides["tick_interval_seconds"] = int(data["tick_interval_seconds"])
             if "daemon_auto_execute" in data:
                 overrides["daemon_auto_execute"] = bool(data["daemon_auto_execute"])
+            # data_dir from YAML (issue #21): silently ignoring this key
+            # caused a real production-contamination incident — an
+            # isolated config's data_dir was dropped and the engine wrote
+            # to ~/.kompany. Honor it (env KOMPANY_DATA_DIR still wins,
+            # pydantic-settings env precedence is unchanged).
+            if (
+                "data_dir" in data
+                and data["data_dir"]
+                and not os.environ.get("KOMPANY_DATA_DIR")
+            ):
+                # Init kwargs beat env in pydantic-settings, so guard
+                # explicitly: KOMPANY_DATA_DIR remains the strongest
+                # override (the daemon plist and all interfaces rely on it).
+                overrides["data_dir"] = Path(str(data["data_dir"])).expanduser()
+            # Self-update pipeline knobs (06-12-self-update-pipeline).
+            for key in (
+                "self_update_budget_cap_usd",
+                "self_update_max_turns",
+                "self_update_test_cmd",
+            ):
+                if key in data:
+                    overrides[key] = data[key]
             # Self-update pipeline settings (06-12-self-update-pipeline).
             if "self_update_budget_cap_usd" in data:
                 overrides["self_update_budget_cap_usd"] = float(

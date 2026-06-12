@@ -152,3 +152,35 @@ def test_settings_load_yaml_without_model_source(tmp_path):
     config.write_text("company:\n  name: TestCo\n")
     settings = KompanySettings.load(str(config))
     assert settings.model_source is None
+
+
+def test_settings_load_honors_data_dir_from_yaml(tmp_path, monkeypatch):
+    """Issue #21: a YAML data_dir was silently ignored (production
+    contamination incident 2026-06-12). Env override still wins."""
+    monkeypatch.delenv("KOMPANY_DATA_DIR", raising=False)
+    cfg = tmp_path / "config.yaml"
+    target = tmp_path / "isolated-data"
+    cfg.write_text(f"data_dir: {target}\n")
+    from kompany.config.settings import KompanySettings
+
+    s = KompanySettings.load(str(cfg))
+    assert s.data_dir == target
+
+    monkeypatch.setenv("KOMPANY_DATA_DIR", str(tmp_path / "env-wins"))
+    s2 = KompanySettings.load(str(cfg))
+    assert s2.data_dir == tmp_path / "env-wins"
+
+
+def test_settings_load_self_update_knobs_from_yaml(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "self_update_budget_cap_usd: 5.5\n"
+        "self_update_max_turns: 99\n"
+        "self_update_test_cmd: pytest -k smoke\n"
+    )
+    from kompany.config.settings import KompanySettings
+
+    s = KompanySettings.load(str(cfg))
+    assert s.self_update_budget_cap_usd == 5.5
+    assert s.self_update_max_turns == 99
+    assert s.self_update_test_cmd == "pytest -k smoke"
