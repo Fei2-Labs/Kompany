@@ -167,7 +167,8 @@ def _wire_runner(monkeypatch, runner):
     monkeypatch.setattr(
         pipeline,
         "select_runner",
-        lambda settings, health_events=None, permission_mode=None: runner,
+        lambda settings, health_events=None, permission_mode=None,
+        llm_client=None: runner,
     )
 
 
@@ -347,7 +348,7 @@ def test_pipeline_requests_accept_edits_mode(engine, monkeypatch):
     captured = {}
     runner = FakeRunner(writes={"docs/x.md": "hi"})
 
-    def spy(settings, health_events=None, permission_mode=None):
+    def spy(settings, health_events=None, permission_mode=None, llm_client=None):
         captured["permission_mode"] = permission_mode
         return runner
 

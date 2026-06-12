@@ -17,6 +17,7 @@ from kompany.core.harness import (
     ClaudeCodeRunner,
     CodexRunner,
     HarnessRunner,
+    NativeRunner,
     OpencodeRunner,
 )
 from kompany.core.run_context import current_run_id
@@ -30,6 +31,8 @@ DEFAULT_MAX_TURNS = 30
 
 # Vehicle → PATH binary, for the graceful-degrade check (PRD acceptance:
 # "Missing CLI for chosen source → health event + degrade, no crash").
+# "native" has no entry on purpose: the Kompany-owned loop needs no CLI
+# binary, so the which() degrade check is skipped for it.
 VEHICLE_BINARIES: dict[str, str] = {
     "claude_code": "claude",
     "codex": "codex",
@@ -130,6 +133,7 @@ def select_runner(
     settings: Any,
     health_events: Any = None,
     permission_mode: str | None = None,
+    llm_client: Any = None,
 ) -> HarnessRunner | None:
     """Derive the loop vehicle from the active ModelSource (PRD D1).
 
@@ -139,6 +143,16 @@ def select_runner(
     ``harness_vehicle_missing`` health event is recorded once per engine
     run via ``health_events``, when provided). The vehicle string is
     engine-internal; it must never surface to the founder.
+
+    NativeRunner override (issue #20, PRD D1): when
+    ``native_runner_enabled`` is on AND the source is ``custom_api`` AND
+    the caller threaded an ``llm_client``, the derived vehicle is
+    "native" instead of opencode. The override lives HERE, not in
+    ``ModelSource.vehicle`` — the config model stays a pure
+    kind→vehicle mapping with no knowledge of feature flags or engine
+    wiring; selection is the one place that combines source + settings +
+    runtime dependencies. Subscription kinds keep their CLIs (physical
+    constraint: subscription compute is only reachable through them).
     """
     if settings is None:
         return None
@@ -148,6 +162,12 @@ def select_runner(
     if not getattr(settings, "harness_execution_enabled", True):
         return None
     vehicle = source.vehicle
+    if (
+        source.kind == "custom_api"
+        and getattr(settings, "native_runner_enabled", False)
+        and llm_client is not None
+    ):
+        vehicle = "native"
     binary = VEHICLE_BINARIES.get(vehicle)
     if binary is not None and shutil.which(binary) is None:
         _warn_vehicle_missing(health_events, vehicle, binary, source.kind)
@@ -167,6 +187,8 @@ def select_runner(
         return CodexRunner(model=model)
     if vehicle == "opencode":
         return OpencodeRunner(model=model)
+    if vehicle == "native":
+        return NativeRunner(model=model, llm_client=llm_client)
     return None
 
 

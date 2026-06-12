@@ -81,6 +81,12 @@ class KompanySettings(BaseSettings):
     # inbox. False restores plain ``--permission-mode`` behavior.
     harness_permission_routing: bool = True
 
+    # NativeRunner vehicle (issue #20, 06-12-native-runner). When ON and
+    # the active ModelSource is custom_api, harness sessions run the
+    # Kompany-owned loop instead of the opencode CLI. Default OFF — the
+    # rented vehicles stay the default until native proves itself.
+    native_runner_enabled: bool = False
+
     # Daemon tick loop (06-12-daemon-tick-loop PR1): wake interval of the
     # autonomous ticker, and the advance-work gate (PRD D3 step 3 — at
     # most one pending task of one active project per tick). Flip
@@ -223,6 +229,7 @@ class KompanySettings(BaseSettings):
             for flag in (
                 "harness_execution_enabled",
                 "harness_permission_routing",
+                "native_runner_enabled",
             ):
                 if flag in data:
                     overrides[flag] = bool(data[flag])

@@ -11,6 +11,7 @@ from __future__ import annotations
 from kompany.core.harness.budget import BudgetMeter
 from kompany.core.harness.claude_code_runner import ClaudeCodeRunner
 from kompany.core.harness.codex_runner import CodexRunner
+from kompany.core.harness.native_runner import NativeRunner
 from kompany.core.harness.opencode_runner import OpencodeRunner
 from kompany.core.harness.protocol import (
     EventCallback,
@@ -37,6 +38,7 @@ __all__ = [
     "HarnessEvent",
     "HarnessResult",
     "HarnessRunner",
+    "NativeRunner",
     "OpencodeRunner",
     "RunAbort",
     "assert_workspace_safe",

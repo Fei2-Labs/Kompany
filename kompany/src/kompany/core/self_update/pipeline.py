@@ -62,6 +62,7 @@ def propose_self_update(engine: Any, instruction: str) -> dict:
         settings,
         health_events=getattr(engine, "health_events", None),
         permission_mode="acceptEdits",
+        llm_client=getattr(engine, "llm", None),
     )
     if runner is None:
         return store.update(
