@@ -20,6 +20,10 @@ class LedgerCategory(str, Enum):
     AI_COST = "ai_cost"
     ALLOCATION = "allocation"
     REFUND = "refund"
+    # Monthly ModelSource subscription fee — the real recurring expense
+    # for subscription billing (06-11-harness-execution-leg D2). Booked
+    # idempotently per calendar month by ``engine.heartbeat_once``.
+    SUBSCRIPTION_FEE = "subscription_fee"
 
 
 class LedgerEntry(BaseModel):
@@ -418,6 +422,15 @@ class Task(BaseModel):
     completed_at: datetime | None = None
     result: dict[str, Any] | None = None
     parent_task_id: str | None = None
+    # Harness execution leg (06-11-harness-execution-leg PR4). Per-task
+    # caps assigned at decomposition time (PRD D3) and the vehicle session
+    # identity persisted after each run so an engine restart can resume
+    # the same session (PRD D4 state bridge). All optional + defaulted so
+    # pre-PR4 rows and call sites stay legal.
+    budget_cap_usd: float | None = None
+    max_turns: int | None = None
+    harness_session_id: str | None = None
+    harness_vehicle: str | None = None
 
 
 class Decision(BaseModel):

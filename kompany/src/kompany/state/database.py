@@ -56,7 +56,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     completed_at TEXT,
     result TEXT,
-    parent_task_id TEXT
+    parent_task_id TEXT,
+    budget_cap_usd REAL,
+    max_turns INTEGER,
+    harness_session_id TEXT,
+    harness_vehicle TEXT
 );
 
 CREATE TABLE IF NOT EXISTS health_events (
@@ -548,6 +552,45 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_channel_turns_run_id "
             "ON channel_turns(run_id)"
         )
+
+        # Shadow costs (06-11-harness-execution-leg PR3): API-equivalent
+        # value of LLM calls made under a subscription ModelSource. NEVER
+        # joins the ledger / never affects balance — queryable record for
+        # quota pacing and worth-it retrospectives (PRD D2). New table →
+        # _migrate() per the channel_sessions precedent.
+        self.conn.execute(
+            """CREATE TABLE IF NOT EXISTS shadow_costs (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   run_id TEXT,
+                   model TEXT NOT NULL,
+                   tokens_in INTEGER NOT NULL DEFAULT 0,
+                   tokens_out INTEGER NOT NULL DEFAULT 0,
+                   shadow_value_usd REAL NOT NULL DEFAULT 0.0,
+                   description TEXT NOT NULL DEFAULT '',
+                   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_shadow_costs_run_id "
+            "ON shadow_costs(run_id)"
+        )
+
+        # Harness execution leg (06-11-harness-execution-leg PR4):
+        # additive task columns — per-task caps assigned at decomposition
+        # time (PRD D3) and the vehicle session identity for resume after
+        # engine restart (PRD D4). Inline schema covers fresh databases;
+        # ALTER upgrades pre-PR4 ones. Idempotent per the approval_requests
+        # precedent.
+        for col, defn in [
+            ("budget_cap_usd", "REAL"),
+            ("max_turns", "INTEGER"),
+            ("harness_session_id", "TEXT"),
+            ("harness_vehicle", "TEXT"),
+        ]:
+            try:
+                self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:

@@ -72,13 +72,20 @@ class Ledger:
         description: str,
         directive_id: str | None = None,
         run_id: str | None = None,
+        project_id: str | None = None,
     ) -> LedgerEntry:
-        """Record an AI/LLM cost as a real operational expense."""
+        """Record an AI/LLM cost as a real operational expense.
+
+        ``project_id`` (optional) tags the expense against a project's
+        budget envelope — used by harness vehicle results booked through
+        ``CostTracker.record_external``.
+        """
         return self.record(
             amount=-abs(amount_usd),
             description=f"AI: {description}",
             category=LedgerCategory.AI_COST,
             directive_id=directive_id,
+            project_id=project_id,
             approved_by="auto",
             run_id=run_id,
         )

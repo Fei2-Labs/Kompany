@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from kompany.core.run_context import current_run_id
-from kompany.llm.models import estimate_cost
+from kompany.llm.models import resolve_cost
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +33,29 @@ _MAX_RUN_TOTALS = 1024
 class CostTracker:
     """Tracks AI costs and records them to the company ledger."""
 
-    def __init__(self, ledger=None, event_hub: Any = None):
+    def __init__(
+        self,
+        ledger=None,
+        event_hub: Any = None,
+        settings: Any = None,
+        shadow_costs: Any = None,
+    ):
         self.ledger = ledger
         # Optional :class:`EventHub`. When set, every successful ledger
         # write publishes a ``llm.spend`` envelope. None in standalone
         # tests / pure-CLI use; the engine wires it on construction.
         self.event_hub = event_hub
+        # Optional settings accessor (06-11-harness-execution-leg PR3).
+        # When wired (the engine passes ``KompanySettings``), the active
+        # ``settings.model_source`` decides billing: api → real ledger
+        # expense (today's behavior), subscription → shadow value only.
+        # ``None`` (or no ``model_source``) preserves pre-PR3 behavior
+        # exactly. Read live on every record() so a Settings change
+        # takes effect without rebuilding the tracker.
+        self.settings = settings
+        # Optional :class:`~kompany.state.shadow_costs.ShadowCostStore`.
+        # Destination for subscription-mode spend; never the ledger.
+        self.shadow_costs = shadow_costs
         # Process-lifetime running total. Kept for any consumer that wants a
         # coarse "how much has this engine instance spent" number; it is NOT
         # safe to attribute to a single directive under concurrency.
@@ -67,10 +84,33 @@ class CostTracker:
         ``llm.spend`` payload (e.g. ``"target_feasibility"``,
         ``"debate_round_1"``). When the caller omits it we fall back to
         ``"other"`` so the payload shape stays uniform.
+
+        Billing-mode branching (06-11-harness-execution-leg D2): when the
+        active ModelSource bills by subscription AND ``model`` routes
+        through that subscription's CLI provider (``claude-code:*`` for
+        claude_subscription), the real ledger expense is **0** — the
+        monthly fee is the real cost; the per-call API-equivalent value
+        is recorded as a shadow entry instead. Returns the *real* cost
+        booked against the ledger (0.0 on the shadow path).
         """
-        cost = estimate_cost(model, input_tokens, output_tokens)
-        self.session_total += cost
+        source = self._active_model_source()
+        overrides = source.price_overrides if source is not None else None
+        cost = resolve_cost(model, input_tokens, output_tokens, overrides)
         rid = run_id if run_id is not None else current_run_id()
+
+        if source is not None and source.is_subscription_call(model):
+            self._record_shadow(
+                model=model,
+                tokens_in=input_tokens,
+                tokens_out=output_tokens,
+                shadow_value=cost,
+                description=description,
+                run_id=rid,
+                action_type=action_type or "other",
+            )
+            return 0.0
+
+        self.session_total += cost
         if rid is not None:
             self._run_totals[rid] = self._run_totals.get(rid, 0.0) + cost
             self._prune_run_totals()
@@ -101,6 +141,145 @@ class CostTracker:
         )
 
         return cost
+
+    def record_external(
+        self,
+        model: str,
+        cost_usd: float,
+        tokens_in: int,
+        tokens_out: int,
+        description: str,
+        run_id: str | None = None,
+        project_id: str | None = None,
+        is_estimate: bool = False,
+    ) -> float:
+        """Record a cost reported by an external harness vehicle.
+
+        Second approved cost entry point (after :meth:`record`, which
+        serves ``LLMClient`` single-shot calls). Harness runners
+        (claude/codex/opencode loops — see ``core/harness/``) report a
+        per-session cost; PR4's ProjectRunner wiring books it here so the
+        cost-as-expense invariant holds for agentic sessions too.
+
+        ``cost_usd`` is the vehicle-reported figure (authoritative for the
+        claude vehicle's ``total_cost_usd``). Vehicles that report tokens
+        only (codex) may pass ``cost_usd=0`` with token counts — the cost
+        is then derived from the pricing tables and flagged as an
+        estimate. ``is_estimate=True`` flags a caller-side estimate the
+        same way (suffix in the ledger description).
+
+        Billing-mode branching mirrors :meth:`record`: api → real ledger
+        expense; subscription → shadow entry, balance untouched. A
+        harness session always runs on the active source's own vehicle,
+        so subscription mode needs no per-model routing check here.
+        Returns the real cost booked (0.0 on the shadow path).
+        """
+        source = self._active_model_source()
+        rid = run_id if run_id is not None else current_run_id()
+        cost = float(cost_usd or 0.0)
+        derived = False
+        if cost <= 0.0 and (tokens_in or tokens_out):
+            overrides = source.price_overrides if source is not None else None
+            cost = resolve_cost(model, tokens_in, tokens_out, overrides)
+            derived = True
+
+        if source is not None and source.billing_mode == "subscription":
+            self._record_shadow(
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                shadow_value=cost,
+                description=description,
+                run_id=rid,
+                action_type="harness_result",
+            )
+            return 0.0
+
+        desc = description
+        if is_estimate or derived:
+            desc = f"{description} [estimate]"
+        self.session_total += cost
+        if rid is not None:
+            self._run_totals[rid] = self._run_totals.get(rid, 0.0) + cost
+            self._prune_run_totals()
+        balance_after: float | None = None
+        if self.ledger:
+            self.ledger.record_ai_cost(
+                amount_usd=cost,
+                description=desc,
+                run_id=rid,
+                project_id=project_id,
+            )
+            try:
+                balance_after = float(self.ledger.get_balance())
+            except Exception:  # pragma: no cover — defensive
+                balance_after = None
+
+        self._publish_spend(
+            action_type="harness_result",
+            model=model,
+            input_tokens=tokens_in,
+            output_tokens=tokens_out,
+            cost_usd=cost,
+            run_id=rid,
+            balance_after=balance_after,
+        )
+        return cost
+
+    def _active_model_source(self) -> Any:
+        """Return ``settings.model_source`` if wired, else ``None``."""
+        if self.settings is None:
+            return None
+        return getattr(self.settings, "model_source", None)
+
+    def _record_shadow(
+        self,
+        *,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        shadow_value: float,
+        description: str,
+        run_id: str | None,
+        action_type: str,
+    ) -> None:
+        """Book subscription-mode spend as shadow value, never expense.
+
+        Writes a ``shadow_costs`` row (queryable; never touches balance)
+        and emits the ``llm.spend`` SSE envelope with ``shadow: true`` so
+        the live UI stream stays continuous. ``session_total`` and the
+        per-run totals stay untouched — they feed real-expense accounting
+        (``DirectiveResult.total_ai_cost``, budget envelopes).
+        """
+        if self.shadow_costs is not None:
+            self.shadow_costs.record(
+                model=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                shadow_value_usd=shadow_value,
+                description=description,
+                run_id=run_id,
+            )
+        balance_after: float | None = None
+        if self.ledger:
+            try:
+                balance_after = float(self.ledger.get_balance())
+            except Exception:  # pragma: no cover — defensive
+                balance_after = None
+        # cost_usd carries the REAL marginal cost (0.0) so existing UI
+        # spend meters stay truthful; the API-equivalent goes out as
+        # shadow_value_usd for shadow-aware consumers.
+        self._publish_spend(
+            action_type=action_type,
+            model=model,
+            input_tokens=tokens_in,
+            output_tokens=tokens_out,
+            cost_usd=0.0,
+            run_id=run_id,
+            balance_after=balance_after,
+            shadow=True,
+            shadow_value_usd=shadow_value,
+        )
 
     def run_total(self, run_id: str | None = None) -> float:
         """Return the AI cost accumulated for a single run.
@@ -148,10 +327,15 @@ class CostTracker:
         cost_usd: float,
         run_id: str | None,
         balance_after: float | None,
+        shadow: bool = False,
+        shadow_value_usd: float | None = None,
     ) -> None:
         """Publish a ``llm.spend`` envelope on the wired event hub.
 
         Silent no-op when no hub is wired (CLI / unit-test paths).
+        ``shadow`` marks subscription-mode spend that never touched the
+        balance; ``shadow_value_usd`` then carries the API-equivalent
+        value (``cost_usd`` stays the real marginal cost, 0.0).
         """
         if self.event_hub is None:
             return
@@ -163,6 +347,8 @@ class CostTracker:
             "cost_usd": float(cost_usd or 0.0),
             "run_id": run_id,
             "ledger_balance_after": balance_after,
+            "shadow": bool(shadow),
+            "shadow_value_usd": shadow_value_usd,
         }
         try:
             self.event_hub.publish("llm.spend", payload)

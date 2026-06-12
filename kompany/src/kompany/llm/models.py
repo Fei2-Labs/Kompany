@@ -91,3 +91,34 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
         input_tokens * pricing.input_per_mtok / 1_000_000
         + output_tokens * pricing.output_per_mtok / 1_000_000
     )
+
+
+def resolve_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    overrides: dict[str, tuple[float, float]] | None = None,
+) -> float:
+    """Estimate USD cost, consulting founder ``price_overrides`` first.
+
+    ``overrides`` maps model id → (input_usd, output_usd) per **million**
+    tokens (the ``ModelSource.price_overrides`` shape). An exact-match
+    override wins over everything; otherwise this delegates to
+    :func:`estimate_cost`, whose documented 3-step resolution order
+    (exact PRICING → prefix fallback → default) is unchanged for all
+    non-override callers.
+
+    TODO(models.dev): auto-pull official per-token pricing into PRICING
+    as later work (PRD 06-11-harness-execution-leg scopes auto-pull
+    loosely) — founder fill/override via ``overrides`` is the guaranteed
+    path for private deployments.
+    """
+    if overrides:
+        override = overrides.get(model)
+        if override is not None:
+            input_per_mtok, output_per_mtok = override
+            return (
+                input_tokens * input_per_mtok / 1_000_000
+                + output_tokens * output_per_mtok / 1_000_000
+            )
+    return estimate_cost(model, input_tokens, output_tokens)

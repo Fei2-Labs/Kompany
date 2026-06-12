@@ -10,6 +10,8 @@ import yaml
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from kompany.config.model_source import ModelSource
+
 
 class KompanySettings(BaseSettings):
     """Settings loaded from env vars, then YAML defaults."""
@@ -51,6 +53,24 @@ class KompanySettings(BaseSettings):
     model_primary: str = "claude-sonnet-4-20250514"
     model_economy: str = "claude-haiku-4-20250414"
 
+    # Active ModelSource (06-11-harness-execution-leg PR3). MVP keeps a
+    # single active source. ``None`` preserves pre-PR3 behavior exactly:
+    # api billing for everything, built-in PRICING table, no monthly fee.
+    model_source: ModelSource | None = None
+
+    # Harness execution feature flag (06-11-harness-execution-leg PR4).
+    # Default ON per the PRD DoD — but the harness path only activates
+    # when a ``model_source`` is configured too; ``model_source=None``
+    # always means the legacy single-call path regardless of this flag.
+    # Flip to False to force the single-call fallback for all tasks.
+    harness_execution_enabled: bool = True
+
+    # Harness permission routing (06-11-harness-execution-leg PR5, PRD
+    # D5): claude-vehicle sessions route permission prompts through the
+    # ``kompany_permission_gate`` MCP tool into the founder approval
+    # inbox. False restores plain ``--permission-mode`` behavior.
+    harness_permission_routing: bool = True
+
     # ``extra="ignore"`` is critical: a founder's machine may have any
     # number of unrelated env vars or .env entries (e.g. SWEDEAPI_*
     # custom-provider keys from earlier testing). Without this, engine
@@ -89,6 +109,7 @@ class KompanySettings(BaseSettings):
     @classmethod
     def load(cls, config_path: str | None = None) -> "KompanySettings":
         overrides: dict[str, Any] = {}
+        data: dict[str, Any] = {}
         if config_path and Path(config_path).exists():
             with open(config_path) as f:
                 data = yaml.safe_load(f) or {}
@@ -115,4 +136,38 @@ class KompanySettings(BaseSettings):
                 overrides["custom_api_key"] = custom["api_key"]
             if "base_url" in custom:
                 overrides["custom_base_url"] = custom["base_url"]
-        return cls(**overrides)
+            # Active model source from YAML (kind, billing_mode,
+            # monthly_fee_usd, price_overrides). Validation errors
+            # surface at load time — a misconfigured source must not
+            # silently fall back to api billing.
+            source = data.get("model_source")
+            if source:
+                overrides["model_source"] = ModelSource.model_validate(source)
+            # Harness execution flags (06-11-harness-execution-leg).
+            for flag in (
+                "harness_execution_enabled",
+                "harness_permission_routing",
+            ):
+                if flag in data:
+                    overrides[flag] = bool(data[flag])
+        settings = cls(**overrides)
+        # ModelSource fallback (06-11-harness-execution-leg PR5b): the
+        # founder surfaces persist the active source to
+        # ``<data_dir>/config.yaml`` (model_source_ops). Engines usually
+        # boot with ``config_path=None``, so read that file back here —
+        # an explicit config that already set ``model_source`` wins.
+        if settings.model_source is None and "model_source" not in data:
+            default_cfg = settings.data_dir / "config.yaml"
+            if default_cfg.exists():
+                try:
+                    extra = yaml.safe_load(default_cfg.read_text()) or {}
+                except (OSError, yaml.YAMLError):
+                    extra = {}
+                source = extra.get("model_source") if isinstance(extra, dict) else None
+                if source:
+                    # Validation errors surface at load time — a
+                    # misconfigured source must not silently fall back
+                    # to api billing (same contract as the explicit
+                    # config path above).
+                    settings.model_source = ModelSource.model_validate(source)
+        return settings
