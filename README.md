@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="Kompany Logo" width="180" />
+  <img src="docs/assets/logo/logo-wordmark.svg" alt="Kompany Logo" width="380" />
 </p>
 
 <p align="center">
@@ -113,6 +113,9 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
   - [Using with Claude Code](#using-with-claude-code)
 - [Directive Types](#directive-types)
 - [Autonomy Tiers](#autonomy-tiers)
+- [Channels — Telegram, Email, Outbox](#channels--telegram-email-outbox)
+- [Anima — the Company Persona](#anima--the-company-persona)
+- [Self-Update Pipeline](#self-update-pipeline)
 - [Multi-Agent Debates](#multi-agent-debates)
 - [Stage Profiles](#stage-profiles)
 - [Multi-Provider LLM Support](#multi-provider-llm-support)
@@ -519,6 +522,10 @@ python -m kompany.interfaces.mcp_server
 
 #### Available Tools
 
+The server exposes **88 typed `kompany_*` tools** covering directives,
+approvals, projects, ledger, debates, glossary, health, backups,
+credentials, channels, templates, and runtime control. The everyday core:
+
 | Tool | Parameters | Description |
 |---|---|---|
 | `kompany_init` | `name`\*, `product`\*, `balance` (default: 0.0), `stage` (default: "solo") | Initialize a new company |
@@ -660,6 +667,43 @@ Every directive is classified by the CEO into one of four types:
 
 ---
 
+## Channels — Telegram, Email, Outbox
+
+The engine is reachable beyond the CLI/desktop through channel adapters
+(`kompany channels …`). Adapters never reason — they only translate
+transport messages to and from the engine, which does all the thinking:
+
+- **Telegram (inbound):** chat with your company from your phone; messages
+  route through the same CEO channel as `kompany directive`.
+- **Email triage (inbound):** the team reads a connected inbox and turns
+  actionable mail into directives or approval items.
+- **Outbox (outbound, drafts-only):** agents draft posts/replies (X/Weibo
+  planned); nothing is published without the founder releasing it. Real
+  sending (e.g. SMTP email) is an `EXTERNAL_ACTION` at APPROVAL tier — it
+  never fires without explicit founder approval.
+
+## Anima — the Company Persona
+
+A persona layer above the C-suite that makes the company feel alive without
+contaminating its judgment:
+
+- **Emotion state** (valence/energy) is updated by pure code from real events
+  — income, task completions/failures, health alerts — and decays toward
+  neutral. No LLM calls.
+- **Daily diary:** at most one economy-tier LLM call per day distills the last
+  24h into a short first-person entry (cost booked to the ledger like
+  everything else).
+- **Hard invariant:** emotion shapes Anima's *voice only*. It is never
+  injected into C-suite, classification, or debate prompts — your CFO's
+  budget check doesn't get moody.
+
+## Self-Update Pipeline
+
+The company can propose improvements to itself (`kompany self-update …`).
+Proposals are tiered by blast radius, run in an isolated workspace, must
+pass the test suite, and land as diffs in the approval inbox — the founder
+reviews and applies; nothing self-modifies silently.
+
 ## Multi-Agent Debates
 
 Strategic directives can trigger a full multi-agent debate:
@@ -740,42 +784,33 @@ Cost tracking works across all providers — each model has pricing data for acc
 ```
 kompany/
 ├── src/kompany/
-│   ├── __init__.py               # Package entry
-│   ├── __main__.py               # python -m kompany support
-│   ├── config/
-│   │   └── settings.py           # Pydantic Settings (env vars + YAML)
-│   ├── core/
-│   │   ├── engine.py             # KompanyEngine — single entry point
-│   │   ├── directive.py          # Directive model & classification enums
+│   ├── config/                   # Pydantic Settings, model-source config, workspaces
+│   ├── core/                     # KompanyEngine + engine_parts/ (approvals, governance,
+│   │   │                         #   distill, learning, channel routing, …)
+│   │   ├── harness/              # Task execution vehicles: Claude Code, Codex,
+│   │   │   │                     #   opencode, and the Kompany-native agentic loop
+│   │   │   └── …                 #   + budget caps, safety, workspace isolation
+│   │   ├── harness_execution/    # Executor, monitor, permission gate, outcomes
+│   │   ├── self_update/          # Self-update pipeline (tiers, workspace, effects)
 │   │   ├── debate.py             # Multi-agent debate engine
-│   │   ├── debate_models.py      # Debate protocol schemas
-│   │   ├── autonomy.py           # Autonomy gate (approval logic)
-│   │   └── runner.py             # Project execution engine
-│   ├── llm/
-│   │   ├── client.py             # Multi-provider LLM client + cost tracking
-│   │   ├── providers.py          # Provider enum, base URLs, auto-detection
-│   │   ├── cost_tracker.py       # Per-call cost accounting
-│   │   └── models.py             # Model pricing & tier config
-│   ├── agents/
-│   │   ├── base.py               # BaseAgent abstract class
-│   │   ├── registry.py           # Agent factory & stage-based filtering
-│   │   ├── ceo.py … cv.py        # 11 C-suite agents
-│   │   ├── souls/                # Personality YAML files
-│   │   └── subagents/            # 5 execution subagents
-│   ├── state/
-│   │   ├── database.py           # SQLite connection + schema
-│   │   ├── ledger.py             # Financial transactions
-│   │   ├── projects.py           # Project CRUD
-│   │   ├── memory.py             # Agent per-session learning
-│   │   ├── journal.py            # Decision log
-│   │   └── models.py             # Pydantic state models
-│   └── interfaces/
-│       ├── cli.py                # Typer CLI (8 commands)
-│       ├── api.py                # FastAPI REST API (onboarding, status, debate, projects, targets, ...)
-│       ├── mcp_server.py         # MCP Server (8 tools)
-│       └── sdk.py                # Python SDK
-├── tests/                        # 850+ tests
-├── pyproject.toml                # Package definition
+│   │   ├── anima.py              # Company persona (emotion + diary)
+│   │   ├── ticker.py / watchdog.py / daemon_ops.py   # 24/7 tick loop
+│   │   └── workflow_runner.py / step_executor.py     # Workflow YAML runtime
+│   ├── llm/                      # Multi-provider client, cost ledger/preview/tracker
+│   ├── agents/                   # 11 C-suite + 5 subagents + YAML souls + SoulAgent
+│   ├── channels/                 # Telegram, email-in, outbox adapters (no LLM here)
+│   ├── integrations/             # Real-action tools (SMTP email, approval-gated)
+│   ├── plugins/                  # Plugin contract (5 ABCs) + entry-point loader
+│   ├── state/                    # SQLite stores: ledger, projects, approvals, episodes,
+│   │                             #   credentials vault, glossary, health, targets, …
+│   ├── templates/                # 7 starter template seeds
+│   ├── workflows/                # 3 reference workflow YAMLs
+│   ├── web_ui/                   # Onboarding/settings/design web UI
+│   └── interfaces/               # CLI (Typer, incl. anima/channels/daemon/founder/
+│                                 #   self-update/workspace), REST API, MCP server
+│                                 #   (88 typed tools), SDK, daemon
+├── tests/                        # 1,500+ tests
+├── pyproject.toml
 └── README.md
 ```
 
