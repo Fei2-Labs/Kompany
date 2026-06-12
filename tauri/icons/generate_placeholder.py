@@ -19,15 +19,37 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 def render(out: Path, size: int = 1024) -> None:
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 255))
+    # Brighter base (issue #9): vertical teal-charcoal gradient instead
+    # of flat black, so the icon reads on dark docks/launchers.
+    img = Image.new("RGBA", (size, size), (16, 42, 38, 255))
     draw = ImageDraw.Draw(img)
+    top = (24, 66, 58)
+    bottom = (8, 24, 22)
+    for y in range(size):
+        t = y / size
+        draw.line(
+            [(0, y), (size, y)],
+            fill=(
+                int(top[0] + (bottom[0] - top[0]) * t),
+                int(top[1] + (bottom[1] - top[1]) * t),
+                int(top[2] + (bottom[2] - top[2]) * t),
+                255,
+            ),
+        )
 
-    # Neon green border, mimicking the cyberpunk UI frame.
+    # Neon green border, mimicking the cyberpunk UI frame — doubled
+    # with a soft outer glow line for visibility at small sizes.
     border = int(size * 0.045)
     draw.rectangle(
         [(border, border), (size - border, size - border)],
         outline=(0, 255, 65, 255),
         width=border // 4 or 4,
+    )
+    glow = int(size * 0.03)
+    draw.rectangle(
+        [(glow, glow), (size - glow, size - glow)],
+        outline=(0, 160, 50, 160),
+        width=2,
     )
 
     # Big "K" centered. Try a couple of common font paths; fall back
