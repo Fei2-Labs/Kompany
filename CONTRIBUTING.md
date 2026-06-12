@@ -25,10 +25,12 @@ merged before the CLA is signed. Rationale:
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Make your changes
-4. Run tests: `cd kompany && source .venv/bin/activate && python -m pytest tests/ -v`
-5. Commit with a clear message
-6. Push and open a PR against `main`
+3. Set up the dev environment (first time only):
+   `cd kompany && python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[api,mcp,dev]"`
+4. Make your changes
+5. Run tests: `cd kompany && source .venv/bin/activate && python -m pytest tests/ -v`
+6. Commit with a clear message
+7. Push and open a PR against `main` (the CLA bot will prompt you on your first PR)
 
 ### What We're Looking For
 

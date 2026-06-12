@@ -832,12 +832,13 @@ custom_llm:
 
 ```bash
 cd kompany
+python3 -m venv .venv          # first time only
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[api,mcp,dev]"   # api extra is required: API tests import fastapi
 python -m pytest tests/ -v
 ```
 
-All 850+ tests should pass.
+All 1500+ tests should pass (about 80 seconds on a laptop).
 
 ---
 
