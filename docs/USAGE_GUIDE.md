@@ -15,14 +15,15 @@ This guide covers everything you need to operate Kompany, from initializing your
 9. [Viewing the Ledger](#viewing-the-ledger)
 10. [Executing Projects](#executing-projects)
 11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
-12. [Using the REST API](#using-the-rest-api)
-13. [Using the MCP Server](#using-the-mcp-server)
-14. [Using the Python SDK](#using-the-python-sdk)
-15. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
-16. [Cost Management](#cost-management)
-17. [Agent Memory](#agent-memory)
-18. [Best Practices](#best-practices)
-19. [Troubleshooting](#troubleshooting)
+12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+13. [Using the REST API](#using-the-rest-api)
+14. [Using the MCP Server](#using-the-mcp-server)
+15. [Using the Python SDK](#using-the-python-sdk)
+16. [Using as a Claude Code Skill](#using-as-a-claude-code-skill)
+17. [Cost Management](#cost-management)
+18. [Agent Memory](#agent-memory)
+19. [Best Practices](#best-practices)
+20. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -450,6 +451,50 @@ Three kinds of cards land in the INBOX from harness execution:
 ### If the CLI Is Missing
 
 If the CLI for your chosen source isn't on PATH (say you picked the Claude subscription but `claude` isn't installed), nothing crashes: the engine records a `harness_vehicle_missing` health event with an install hint, and tasks fall back to the legacy single-shot, text-only mode until you install the CLI or switch the source in Settings.
+
+---
+
+## Running 24/7: The Kompany Daemon
+
+The CLI and desktop app only act while you have them open. The **daemon** keeps the same engine running around the clock, so the company advances work, books fees, and queues notifications with nobody watching.
+
+```bash
+kompany daemon run         # run the server in the foreground (Ctrl-C to stop)
+kompany daemon install     # install as a launchd LaunchAgent (macOS) — survives reboots
+kompany daemon status      # live server + launchd + ticker report
+kompany daemon uninstall   # unload and remove the LaunchAgent
+```
+
+These four commands are deliberately CLI-only — they manage a process on *this* machine. Tick visibility lives on the existing surfaces instead: `kompany status` (and `GET /status`, `kompany_status`, `k.status()`) carries a `ticker` block (`running`, `last_tick_at`, `tick_count`, `interval_seconds`), and `kompany observability` shows the most recent ticks.
+
+### One engine, shared by app and daemon
+
+Exactly one Kompany server runs per data directory — the discovery file `<data_dir>/server.json` is the lock:
+
+- `kompany daemon run` refuses to start when a healthy server already owns it (and tells you its pid and port).
+- The desktop app **attaches**: if it finds a healthy running server (typically the daemon), it points its window at that server instead of launching a second one — and leaves it running when you close the app. With no server running, the app spawns its own exactly as before.
+
+So the app's live activity panel always shows daemon-driven work, and the daemon keeps working after the app quits.
+
+### What a tick does
+
+Every `tick_interval_seconds` (default 300 — every 5 minutes) the engine wakes for one **tick**, its autonomous heartbeat:
+
+1. **Heartbeat** — checks pending approvals and active projects, books the monthly subscription fee (at most once per calendar month), and prepares notifications.
+2. **Advance work** — runs at most **one** pending task of one active project, under every existing safety rail: per-task budget caps, the project's budget envelope, and the approval inbox. A project waiting on a pending budget top-up or budget-increase approval is skipped (the team never grinds against a closed gate), and failed tasks are never auto-retried — re-running those stays your decision. Set `daemon_auto_execute: false` (top-level YAML key) to keep ticking without autonomous task execution.
+3. **Housekeeping** — prunes tick history (the last 500 ticks are kept) and trims old episodes.
+
+Spend stays bounded with nobody watching: one task slice per tick × per-task caps × envelope hard caps, and anything gated waits in your INBOX.
+
+### The brake: suspend
+
+`kompany suspend` is the daemon brake. While suspended, every tick records itself as idle and does nothing else — no heartbeat, no task execution. `kompany resume` wakes everything up.
+
+One billing consequence to know: because the heartbeat doesn't run while suspended, **the monthly subscription fee is not booked during suspension** — it books (idempotently, at most once per calendar month) on the first tick after you resume.
+
+### Install details (macOS)
+
+`kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` with `KeepAlive` and `RunAtLoad`, pins `KOMPANY_DATA_DIR` to the data directory chosen at install time, and logs to `<data_dir>/logs/daemon.out.log` / `daemon.err.log`. The launch command prefers the server binary bundled inside `/Applications/Kompany.app` (no Python install needed); without the desktop app it falls back to your current Python interpreter. On non-macOS platforms `install` exits with a clear macOS-only message — run `kompany daemon run` under your own process supervisor instead.
 
 ---
 

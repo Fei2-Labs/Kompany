@@ -31,9 +31,9 @@ Users see summary-level information by default, with drill-down access to full d
 ## live activity stream
 The engine publishes agent activity over SSE with an advisory `activity_kind` field so visual frontends can render what kind of work is happening.
 
-**Meaning:** Agent status events carry an `activity_kind` derived from the role (coding, marketing, …; `idle` when not working). Harness execution adds `activity_kind: "harness"`: while a task runs as a real CLI session, every normalized session event is republished on the EventHub as a `harness.event` whose payload carries `project_id`, `task_id`, `agent_role`, `kind` (e.g. `session_started`, `turn`, `tool_use`, `text`, `cost_delta`, `permission_denied`), and `summary` (a short human-readable line).
+**Meaning:** Agent status events carry an `activity_kind` derived from the role (coding, marketing, …; `idle` when not working). Harness execution adds `activity_kind: "harness"`: while a task runs as a real CLI session, every normalized session event is republished on the EventHub as a `harness.event` whose payload carries `project_id`, `task_id`, `agent_role`, `kind` (e.g. `session_started`, `turn`, `tool_use`, `text`, `cost_delta`, `permission_denied`), and `summary` (a short human-readable line). The daemon tick loop adds `activity_kind: "tick"`: every autonomous tick publishes a `daemon.tick` event whose payload carries `activity_kind: "tick"`, `outcome` (`ok` / `idle_suspended` / `error`), `actions` (the list of what the tick did, e.g. `heartbeat`, `advanced_task:<id>`, `skipped_pending_approval:<project_id>`, `no_work`), and `duration_ms`.
 
-**Implication:** `activity_kind: "harness"` is purely additive to the SSE activity contract — existing consumers, including the kompany-world (repo-B) sprite-world UI, keep working unchanged and can opt in to render live harness activity.
+**Implication:** `activity_kind: "harness"` and `activity_kind: "tick"` are purely additive to the SSE activity contract — existing consumers, including the kompany-world (repo-B) sprite-world UI, keep working unchanged and can opt in to render live harness activity or the daemon's heartbeat pulse.
 
 ## remote access
 Telegram bot serves as a remote interface adapter for mobile control, alongside the existing local interfaces.

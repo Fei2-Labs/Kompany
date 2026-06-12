@@ -1,14 +1,20 @@
 // Kompany desktop shell.
 //
 // Responsibilities:
-//   1. Pick a free loopback port for the Python sidecar.
-//   2. Spawn the bundled `kompany-server` binary with `--port` and
+//   1. Attach-if-running (06-12-daemon-tick-loop D2): if
+//      `<data_dir>/server.json` points at a healthy live server (e.g.
+//      the `kompany daemon` LaunchAgent), point the WebView at it and
+//      spawn nothing — exactly one engine process ever ticks, and the
+//      panel sees daemon-driven activity live.
+//   2. Otherwise pick a free loopback port for the Python sidecar and
+//      spawn the bundled `kompany-server` binary with `--port` and
 //      `--data-dir` from KOMPANY_DATA_DIR, defaulting to ~/.kompany
 //      (same resolution as every other Kompany interface).
 //   3. Poll `http://127.0.0.1:<port>/health` until 200 OK (or 30s).
 //   4. Load the WebView at `http://127.0.0.1:<port>/ui/` — the SPA
 //      handles the onboarding redirect itself.
-//   5. On window close: kill the sidecar, exit the app.
+//   5. On window close: kill the sidecar we spawned (never an attached
+//      foreign server), exit the app.
 //
 // We intentionally keep all business logic in the Python side — the
 // Rust shell is a thin process supervisor.
@@ -98,6 +104,46 @@ fn wait_for_health(port: u16, timeout: Duration) -> bool {
     false
 }
 
+/// Discover a healthy already-running Kompany server via the discovery
+/// file `<data_dir>/server.json` (written by the Python side: Tauri
+/// sidecar or `kompany daemon run`). The discovery file is the
+/// single-server lock (PRD 06-12 D2) — same validation idea as the
+/// Python reader (`interfaces/mcp_proxy._validate_sidecar`): parse
+/// `{port, pid}`, then probe `/health` and require Kompany's exact
+/// `{"status": "ok"}` shape so a recycled port serving some other local
+/// app is never mistaken for our server. The health probe doubles as
+/// the liveness check (a dead pid can't answer), which keeps this
+/// portable without a libc dependency.
+fn discover_running_server(data_dir: &std::path::Path) -> Option<(u16, i64)> {
+    let raw = std::fs::read_to_string(data_dir.join("server.json")).ok()?;
+    let info: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let port = info.get("port")?.as_u64()?;
+    if !(1..65536).contains(&port) {
+        return None;
+    }
+    let port = port as u16;
+    let pid = info.get("pid")?.as_i64()?;
+    if pid <= 0 {
+        return None;
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .ok()?;
+    let resp = client
+        .get(format!("http://127.0.0.1:{}/health", port))
+        .send()
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = serde_json::from_str(&resp.text().ok()?).ok()?;
+    if body.get("status").and_then(|s| s.as_str()) != Some("ok") {
+        return None;
+    }
+    Some((port, pid))
+}
+
 fn spawn_sidecar(
     binary_path: &std::path::Path,
     port: u16,
@@ -113,13 +159,49 @@ fn spawn_sidecar(
         .spawn()
 }
 
+/// Open the main WebView window against a healthy server on `port`.
+///
+/// The close handler only kills what we stashed in `SidecarHandle` —
+/// in attach mode that state is empty, so an attached foreign server
+/// (e.g. the launchd daemon) is never touched on app exit.
+fn open_main_window(handle: &AppHandle, port: u16) -> Result<(), String> {
+    let url = format!("http://127.0.0.1:{}/ui/", port);
+    let webview_url =
+        WebviewUrl::External(url.parse().map_err(|e| format!("invalid url: {}", e))?);
+    let window = WebviewWindowBuilder::new(handle, "main", webview_url)
+        .title("Kompany")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(900.0, 600.0)
+        .resizable(true)
+        .visible(true)
+        .build()
+        .map_err(|e| format!("window build failed: {}", e))?;
+
+    // CloseRequested → kill the sidecar we spawned (if any) then exit.
+    let close_handle = handle.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { .. } = event {
+            if let Some(state) = close_handle.try_state::<SidecarHandle>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    if let Some(mut child) = guard.take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                }
+            }
+            close_handle.exit(0);
+        }
+    });
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SidecarHandle(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // ---- Resolve data dir + sidecar binary --------------------
+            // ---- Resolve data dir --------------------------------------
             // Match every other interface (CLI/REST/MCP/SDK): honor
             // KOMPANY_DATA_DIR, else default to ~/.kompany. A private
             // app_data_dir() here split the desktop into its own database,
@@ -134,10 +216,24 @@ fn main() {
                 .ok_or("cannot resolve data dir: neither KOMPANY_DATA_DIR nor HOME is set")?;
             std::fs::create_dir_all(&data_dir).ok();
 
+            // ---- Attach to an existing healthy server (06-12 D2) -------
+            // One server process ever: if the discovery file points at a
+            // live Kompany server (typically the `kompany daemon`
+            // LaunchAgent), use it instead of spawning a second engine.
+            // SidecarHandle stays empty, so app exit leaves it running.
+            if let Some((port, pid)) = discover_running_server(&data_dir) {
+                eprintln!(
+                    "kompany: attaching to existing server on port {} (pid {}), not spawning a sidecar",
+                    port, pid
+                );
+                open_main_window(&handle, port)?;
+                return Ok(());
+            }
+
+            // ---- Spawn path (unchanged): binary + port + health --------
             let binary = sidecar_binary_path(&handle)
                 .ok_or("kompany-server sidecar binary not found in resources")?;
 
-            // ---- Pick port + spawn ------------------------------------
             let mut port = pick_free_port().map_err(|e| format!("port pick failed: {}", e))?;
             let mut child = match spawn_sidecar(&binary, port, &data_dir) {
                 Ok(c) => c,
@@ -162,36 +258,7 @@ fn main() {
                 *state.0.lock().unwrap() = Some(child);
             }
 
-            // ---- Open the WebView --------------------------------------
-            let url = format!("http://127.0.0.1:{}/ui/", port);
-            let webview_url = WebviewUrl::External(
-                url.parse().map_err(|e| format!("invalid url: {}", e))?,
-            );
-            let window = WebviewWindowBuilder::new(&handle, "main", webview_url)
-                .title("Kompany")
-                .inner_size(1200.0, 800.0)
-                .min_inner_size(900.0, 600.0)
-                .resizable(true)
-                .visible(true)
-                .build()
-                .map_err(|e| format!("window build failed: {}", e))?;
-
-            // CloseRequested → kill sidecar then exit.
-            let close_handle = handle.clone();
-            window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { .. } = event {
-                    if let Some(state) = close_handle.try_state::<SidecarHandle>() {
-                        if let Ok(mut guard) = state.0.lock() {
-                            if let Some(mut child) = guard.take() {
-                                let _ = child.kill();
-                                let _ = child.wait();
-                            }
-                        }
-                    }
-                    close_handle.exit(0);
-                }
-            });
-
+            open_main_window(&handle, port)?;
             Ok(())
         })
         .build(tauri::generate_context!())

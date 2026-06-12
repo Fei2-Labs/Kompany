@@ -56,6 +56,13 @@ The engine runs a configurable heartbeat loop so the system operates autonomousl
 
 **Implication:** The user can disable heartbeat entirely for passive mode. Heartbeat is what makes Kompany a living company rather than a command-response tool.
 
+## daemon process
+One server process per data directory runs the engine 24/7; the discovery file is the lock and launchd keeps it alive.
+
+**Meaning:** The ticker lives inside the engine's background workers (started by `engine.start()`, Watchdog-style), so any host that boots the server — the Tauri sidecar or `kompany daemon run` — ticks for free. `<data_dir>/server.json` (port, pid, source) is the single-server lock: `kompany daemon run` refuses to start when a healthy server already owns it, and the desktop app attaches its WebView to a discovered healthy server instead of spawning a second sidecar (and never kills a server it didn't spawn). `kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` (KeepAlive, RunAtLoad, `KOMPANY_DATA_DIR` pinned at install time, logs to `<data_dir>/logs/daemon.{out,err}.log`), preferring the server binary bundled in the desktop app and falling back to the current interpreter; `uninstall` boots it out and removes the plist. macOS-only for now; other platforms run `kompany daemon run` under their own supervisor.
+
+**Implication:** Exactly one engine ever ticks — MCP proxy, panel SSE, and daemon always talk to the same process, with no second lock mechanism. Daemon process management is deliberately CLI-only; tick observability joins the existing status/observability operations on all interfaces.
+
 ## deployment
 Initially runs as a local long-running process; containerized cloud deployment deferred to multi-tenant phase.
 

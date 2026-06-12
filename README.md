@@ -41,6 +41,7 @@ Kompany gives you an autonomous C-suite that **operates** — classifying direct
 2. **AI Costs Are Real Costs** — Every LLM call is an operational expense tracked in the company ledger. The balance can go negative. This increases the revenue target, never cancels the mission.
 3. **Goal Persistence** — A negative balance doesn't cancel anything. If the company is -€2 after running agents and needs €4,450 for a Mac Studio, the revenue project target is €4,452.
 4. **Real Work, Not Just Words** — Project tasks run as real multi-turn execution sessions via the Claude Code CLI, Codex CLI, or opencode — on your own subscription or API key — with per-task budget caps and an approval inbox gating side effects.
+5. **Always On** — A 24/7 daemon (`kompany daemon install`, launchd-managed) ticks every 5 minutes: heartbeat, then at most one task advanced per tick under the same budget caps and approval gates. The desktop app attaches to the running daemon — one engine, around the clock. `kompany suspend` is the brake.
 
 ## How It Works
 

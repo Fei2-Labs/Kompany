@@ -14,6 +14,13 @@ Project tasks execute as real multi-turn agentic sessions in per-project workspa
 
 **Implication:** "Completed" requires evidence — a workspace diff or real tool results, never keyword guessing. Denied tool use classifies the task as blocked with the pending approval as the founder's next step. Sessions persist their id on the task, so a re-run continues from where it stopped instead of restarting.
 
+## daemon tick loop
+The engine ticks autonomously on a fixed interval, advancing real work in strictly bounded slices when no founder session is open.
+
+**Meaning:** Every `tick_interval_seconds` (default 300) the ticker runs, in order: the runtime gate (suspended → record an idle tick, nothing else), the existing heartbeat (pending approvals, active projects, monthly subscription fee booking — deferred while suspended, booked on the first tick after resume), advance work (at most one pending task of one active project, skipping projects with a pending envelope top-up or budget-increase approval; failed tasks are never auto-retried — retry stays a founder-initiated resume), and housekeeping (keep the last 500 tick records, trim old episodes). Each tick is recorded in `daemon_ticks` and published as a `daemon.tick` SSE event.
+
+**Implication:** Unattended spend is founder-bounded by construction: one task slice per tick × per-task budget caps × envelope hard caps, with the approval inbox still gating everything it gated before. The founder brake is `kompany suspend` — no separate kill mechanism. Tick visibility joins the existing status/observability surfaces (`ticker` block, recent ticks) rather than a new operation.
+
 ## financial monitoring
 CFO should continuously monitor the financial health of every running project and trigger alerts when actuals diverge from projections.
 
