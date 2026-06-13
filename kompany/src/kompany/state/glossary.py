@@ -26,7 +26,7 @@ to hold the active list + the last-updated timestamp. The container's
 helpers (``find`` / ``add`` / ``update`` / ``remove`` / ``add_or_update``)
 preserve insertion order while keeping term lookups case-insensitive.
 
-See ``.trellis/tasks/05-19-glossary-and-drift-detection/prd.md`` for the
+See the internal design spec for the
 design and the user-visible drift workflow.
 """
 

@@ -30,7 +30,7 @@ Adopt a hard **500-line cap** for Python source files under
   preferred for `KompanyEngine`).
 
 The rule is enforced by reviewer judgment + the spec entry in
-`.trellis/spec/python/coding-conventions.md` (a hard rule visible at
+`the internal design spec` (a hard rule visible at
 every task start via `before-dev` skill).
 
 ## Why 500 and not 1000 / 1500 / 2000
@@ -125,5 +125,5 @@ queued in the OSS-launch backlog).
 - Liu et al. 2023, *Lost in the Middle: How Language Models Use
   Long Contexts* — https://arxiv.org/abs/2307.03172
 - Robert C. Martin, *Clean Code* — Chapter 1 (vertical formatting).
-- `.trellis/spec/python/coding-conventions.md` (hard rule entry).
+- `the internal design spec` (hard rule entry).
 - `.agents/memory/engineering-file-size-limit.md`.

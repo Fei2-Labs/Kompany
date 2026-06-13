@@ -3,7 +3,7 @@
 Extends the single-shot provider (``kompany/llm/claude_code.py``) from
 "LLM call" to "agentic run": tools on, stream-json events, session resume,
 native budget cap. Flags and event schema follow the verified research at
-``.trellis/tasks/06-11-harness-execution-leg/research/claude-headless-interface.md``
+the internal design spec
 (claude CLI 2.1.173).
 
 Notes from research baked in here:

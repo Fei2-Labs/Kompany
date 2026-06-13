@@ -10,7 +10,7 @@
  * use in style.css is `rgba(var(--*-rgb), <alpha>)`. Re-skinning = swap the
  * triples; the hundreds of alpha variants follow for free.
  *
- * See .trellis/tasks/05-27-theme-system/prd.md + glossary "Visual style & theming".
+ * See the internal design spec + glossary "Visual style & theming".
  */
 
 /* ---- defaults shared by every theme (overridable per theme) ---- */

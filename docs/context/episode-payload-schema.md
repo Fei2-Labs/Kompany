@@ -7,7 +7,7 @@ future approval-thread RPG, future resilience watchdog).
 
 > **Authoritative model**: import from
 > `kompany.state.episode_payload.EpisodePayloadV1`. The schema is locked by
-> [`05-18-episode-schema-freeze`](../../.trellis/tasks/05-18-episode-schema-freeze/prd.md).
+> the internal design spec.
 > Adding a new top-level key is a **breaking change** and requires bumping
 > `schema_version`. Forward-compatible extensions live under `ext`
 > namespaced by task slug.

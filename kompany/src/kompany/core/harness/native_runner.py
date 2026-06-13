@@ -1,6 +1,6 @@
 """NativeRunner — Kompany-owned agentic loop as a HarnessRunner vehicle.
 
-Issue #20 (PRD: ``.trellis/tasks/06-12-native-runner``). Same protocol as
+Issue #20 (PRD: the internal design spec). Same protocol as
 the rented vehicles (claude/codex/opencode), but the loop is ours:
 LLMClient structured tool-calls (D2), workspace-scoped file/shell tools
 only (D3 — no registry tools in-loop), transcript JSONL persistence with

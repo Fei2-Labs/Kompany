@@ -194,8 +194,8 @@ def _existing_install_state(data_dir: Path) -> dict[str, Any]:
     # onboarding, not a reusable install. Treat as partial so the
     # resolve step prompts overwrite (or auto-overwrites under --yes)
     # rather than silently skipping template apply + feasibility review.
-    # See orphan handoff .trellis/handoffs/2026-05-22-12-21.md for the
-    # incident that surfaced this bug: an empty-config DB was treated
+    # This guards against the incident that surfaced this bug: an
+    # empty-config DB was treated
     # as "reused", and the frontend then misreported the missing
     # feasibility review as "blank template or quota error".
     if state["db_exists"] and state["template_id"] is None and not state["partial"]:

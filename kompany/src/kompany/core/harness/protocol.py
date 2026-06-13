@@ -4,7 +4,7 @@ Egress harness layer: a harness CLI (claude / codex / opencode) acts as
 Kompany's execution backend for agent tasks. Vehicle adapters are an
 internal implementation detail — the founder picks a ModelSource, never a
 runner (PRD D1). This is distinct from the ingress rule in
-``.trellis/spec/guides/harness-compatibility.md`` (harness as caller of
+the internal design spec (harness as caller of
 Kompany interfaces); see the "Scope note: ingress vs egress" there.
 
 The API is synchronous (the engine is sync). Streaming happens through the

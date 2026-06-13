@@ -5,7 +5,7 @@ task was forgotten, a retry exhausted, or a previously-silent run came
 back to life. Rows are first-class and persist for episode
 materialization, replay, and operator review.
 
-See ``.trellis/tasks/05-18-resilience-foundation/prd.md`` for the
+See the internal design spec for the
 design and ``kompany/state/database.py`` for the schema migration.
 """
 

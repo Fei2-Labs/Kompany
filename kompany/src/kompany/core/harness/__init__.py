@@ -3,7 +3,7 @@
 A harness CLI here is Kompany's execution backend for agent tasks, derived
 internally from the founder's ModelSource (never founder-facing). Distinct
 from the ingress harness-compatibility rule for ``interfaces/`` — see the
-scope note in ``.trellis/spec/guides/harness-compatibility.md``.
+scope note in the internal design spec.
 """
 
 from __future__ import annotations

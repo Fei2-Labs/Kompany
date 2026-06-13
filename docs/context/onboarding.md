@@ -157,4 +157,4 @@ $ uvx kompany onboard --yes
   `@app.command() def onboard(...)`.
 - Unit tests: `kompany/tests/test_onboard.py`.
 - Integration tests: `kompany/tests/integration/test_onboard_flow.py`.
-- Spec: `.trellis/tasks/05-19-one-line-install/prd.md`.
+- Spec: `the internal design spec`.

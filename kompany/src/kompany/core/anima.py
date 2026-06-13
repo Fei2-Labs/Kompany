@@ -14,7 +14,7 @@ PRD ``06-12-anima-persona``. Two tick intents appended to the engine's
 CONSTITUTION honest-assessment clause (D2 hard invariant): emotion
 shapes Anima's VOICE only. Nothing in this module is ever injected into
 C-suite / classification / debate prompts, and nothing outside this
-module reads the tone strings. See ``.trellis/spec/agents/anima.md``.
+module reads the tone strings. See the internal design spec.
 """
 
 from __future__ import annotations

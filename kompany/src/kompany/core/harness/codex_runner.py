@@ -3,7 +3,7 @@
 OpenAI-subscription ModelSources ride this vehicle (PRD D1): ChatGPT-login
 compute cannot leave the codex CLI. Flags and event schema follow the
 verified research at
-``.trellis/tasks/06-11-harness-execution-leg/research/multi-backend-runners.md``
+the internal design spec
 (codex 0.133.0).
 
 Research notes baked in:

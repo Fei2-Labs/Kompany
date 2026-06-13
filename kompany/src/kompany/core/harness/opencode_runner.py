@@ -3,7 +3,7 @@
 Custom API-key ModelSources ride this vehicle (PRD D1): opencode routes to
 any models.dev provider, so one adapter covers OpenAI/Google/GLM/Kimi/local.
 Flags and event schema follow the verified research at
-``.trellis/tasks/06-11-harness-execution-leg/research/multi-backend-runners.md``
+the internal design spec
 (opencode 1.1.42; shapes from ``run.ts`` / ``types.gen.ts``).
 
 Research notes baked in:

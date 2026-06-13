@@ -8,7 +8,7 @@ like ``claude-code:sonnet``; the suffix after ``:`` is passed to
 
 This module owns only the subprocess mechanics. Cost recording stays in
 :class:`kompany.llm.client.LLMClient` (single entry point — see
-``.trellis/spec/agents/llm-calls.md``).
+the internal design spec).
 """
 
 from __future__ import annotations

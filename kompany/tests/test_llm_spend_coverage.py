@@ -39,6 +39,11 @@ _SRC_ROOT = Path(__file__).resolve().parent.parent / "src" / "kompany"
 _ALLOWED_PROVIDER_FILES = {
     # The provider abstraction itself.
     "llm/client.py",
+    # client.py split into a package under ADR-0003; provider dispatch now
+    # lives in client_parts/ but is still the provider abstraction layer.
+    "llm/client_parts/_provider_mixin.py",
+    "llm/client_parts/_watchdog_mixin.py",
+    "llm/client_parts/_types.py",
     "llm/providers.py",
     "llm/models.py",
     "llm/cost_tracker.py",

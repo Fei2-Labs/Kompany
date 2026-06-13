@@ -17,8 +17,8 @@ lives in ``core/harness/`` and is out of scope here.
 
 This module owns only the subprocess mechanics. Cost recording stays in
 :class:`kompany.llm.client.LLMClient` (single entry point — see
-``.trellis/spec/agents/llm-calls.md``). Flag/shape sources: research doc
-``.trellis/tasks/06-11-harness-execution-leg/research/multi-backend-runners.md``
+the internal design spec). Flag/shape sources: research doc
+the internal design spec
 (codex 0.133.0 / opencode 1.1.42, verified 2026-06-11).
 """
 
