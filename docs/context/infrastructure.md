@@ -73,7 +73,7 @@ Initially runs as a local long-running process; containerized cloud deployment d
 ## multi-tenancy
 Multi-user support is deferred but architecturally unblocked.
 
-**Meaning:** Current design is single-user, single-company. Each company already uses its own SQLite database file, which is natural tenant isolation. No global singletons or hardcoded paths — KompanyEngine accepts configuration at instantiation. Real multi-tenancy (user registration, authentication, billing) is deferred until a later phase.
+**Meaning:** Current design is single-user, single-company. Each company already uses its own SQLite database file, which is natural tenant isolation. No global singletons or hardcoded paths — KompanyEngine accepts configuration at instantiation. Real multi-tenancy (user registration, authentication, billing) is deferred to a later phase.
 
 **Implication:** Priority is making the single-user experience exceptional. Do not introduce multi-tenant complexity prematurely, but avoid design decisions that would block it later.
 
