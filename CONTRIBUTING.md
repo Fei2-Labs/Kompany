@@ -44,3 +44,21 @@ merged before the CLA is signed. Rationale:
 ### Support the Project
 
 If you find Kompany useful, consider [buying me a coffee](https://buymeacoffee.com/clarezoe).
+
+## Repo hygiene — public vs private
+
+This is the **public** repo. It holds only what a user needs to run/build
+Kompany and what a contributor needs to understand/extend it: code, tests,
+usage docs, engine architecture docs, technical ADRs.
+
+Business strategy, pricing, fundraising, roadmap, customer data, and the
+maintainer's private dev tooling live in a **separate private repo** and
+must never be committed here. A `pre-commit` hook enforces this:
+
+```bash
+git config core.hooksPath .githooks   # enable once per clone
+```
+
+It blocks staged content matching a high-signal denylist (`scripts/check-sensitive.sh`)
+and runs `gitleaks` on staged changes. A genuine false positive can pass
+with `ALLOW_SENSITIVE=1 git commit …`.

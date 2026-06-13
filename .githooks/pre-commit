@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Kompany public-repo pre-commit guard.
+set -e
+root="$(git rev-parse --show-toplevel)"
+
+# 1. Block competitor-sensitive content.
+bash "$root/scripts/check-sensitive.sh"
+
+# 2. Secret scan on staged content (if gitleaks installed).
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks git --staged --no-banner --redact -c "$root/.gitleaks.toml" "$root" \
+    || { echo "BLOCKED: gitleaks found a secret in staged content." >&2; exit 1; }
+fi
