@@ -19,7 +19,7 @@ to sign a lightweight CLA (one-time, via the CLA bot comment on your
 first PR). You keep your copyright; you grant Kompany the right to
 license your contribution under the project's licenses. PRs cannot be
 merged before the CLA is signed. Rationale:
-[ADR-0004](docs/adr/0004-agpl-relicense.md).
+[Why AGPL?](docs/why-agpl.md).
 
 ### Pull Requests
 

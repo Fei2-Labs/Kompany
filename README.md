@@ -929,19 +929,15 @@ major bump (`kompany 0.x → 0.y`) blocks `pip install -U kompany` until
 a compatible Pro release ships. Intentional design — see
 [ADR-0002](docs/adr/0002-plugin-contract-design.md).
 
-**Early Backer grant.** Anyone who paid the Kompany 299 CNY presale
-before the public OSS launch was automatically promoted to the
-Kompany Early Backer tier — Core source (AGPL-3.0, same as everyone)
-plus 12 months of Pro source access, Cloud credit when Cloud ships,
-private Discord, and one roadmap-input call. Full terms:
-[`docs/early-backer-grant.md`](docs/early-backer-grant.md).
+**Early Backer grant.** Supporters who backed Kompany before the public
+OSS launch were promoted to the Kompany Early Backer tier — Core source
+(AGPL-3.0, same as everyone) plus a window of Pro source access, Cloud
+credit when Cloud ships, a private channel, and a roadmap-input call.
 
 **Why this model.** The agent runtime is forkable in a week — gating it
 would be performative. Real moat lives in curated workflows + Cloud
 ops, which are content + operational, not gated by code obfuscation.
-Decision context:
-[`docs/context/open-core-model.md`](docs/context/open-core-model.md) +
-[ADR-0001](docs/adr/0001-open-core-with-plugin-contract.md).
+Why AGPL specifically: [`docs/why-agpl.md`](docs/why-agpl.md).
 
 ---
 

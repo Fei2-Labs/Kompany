@@ -154,4 +154,4 @@ Deferred (additive bumps when needed):
 - Loader: `kompany/src/kompany/plugins/loader.py`
 - Tests: `kompany/tests/test_plugins_contract.py`
 - Decision: [ADR-0002](../adr/0002-plugin-contract-design.md)
-- Boundary: [`open-core-model.md`](open-core-model.md)
+- Boundary: the README "Open Core — Core / Pro / Cloud" section

@@ -2,7 +2,7 @@
 
 **Status:** Accepted (2026-05-22)
 **Deciders:** Founder (solo), via grill-with-docs session (8 questions, all confirmed)
-**Implements:** Decision recorded in [ADR-0001](0001-open-core-with-plugin-contract.md) ("open-core via plugin contract").
+**Implements:** the open-core boundary (see the "Open Core" section in the README and [`docs/why-agpl.md`](../why-agpl.md)).
 
 ## Context
 
@@ -113,6 +113,6 @@ Beyond per-decision alternatives above:
 - Contract module: `kompany/src/kompany/plugins/` (`__init__.py`, `contract.py`, `loader.py`)
 - Tests: `kompany/tests/test_plugins_contract.py` (14 cases, freezes public surface)
 - Reference docs: [`docs/context/plugin-contract.md`](../context/plugin-contract.md)
-- Boundary parent: [ADR-0001](0001-open-core-with-plugin-contract.md), [`open-core-model.md`](../context/open-core-model.md)
+- Boundary: the README "Open Core — Core / Pro / Cloud" section
 - Glossary: Kompany Core, Kompany Pro, plugin contract, SoulAgent
 - Decision substrate: grill-with-docs session 2026-05-22 (8 questions, all locked)

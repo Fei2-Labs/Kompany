@@ -17,7 +17,7 @@ accept the following terms for your present and future contributions:
    Contribution and derivative works — including the right to
    distribute it under the Project's open-source license (AGPL-3.0)
    **and** under commercial licenses (the Project is dual-licensed; see
-   [ADR-0004](adr/0004-agpl-relicense.md)).
+   [Why AGPL?](why-agpl.md)).
 
 3. **Patent license.** You grant the Maintainer and recipients of the
    Project a perpetual, worldwide, non-exclusive, royalty-free,

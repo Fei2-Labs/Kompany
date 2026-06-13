@@ -28,8 +28,8 @@ Product vision (RPG interface), user interaction (directive / query / override),
 ## [Execution Rules](docs/context/execution-rules.md)
 Runtime invariants for agent routing, cost tracking, time handling, and governed behavior changes.
 
-## [Open-Core Model](docs/context/open-core-model.md)
-AGPL-3.0 (dual-licensed; see ADR-0004) boundary: Core (engine + plugin contract) is open; Pro (workflow library + agent souls + integrations) is private repo; Cloud is future SaaS. Early Backer tier for 10 presale buyers (299 CNY each, undelivered as of 2026-05-22). See [ADR-0001](docs/adr/0001-open-core-with-plugin-contract.md).
+## Open-Core Model
+AGPL-3.0 (dual-licensed) boundary: Core (engine + plugin contract) is open; Pro (workflow library + agent souls + integrations) is a separate private package; Cloud is a future SaaS. Rationale: [`docs/why-agpl.md`](docs/why-agpl.md) and the README "Open Core" section.
 
 ## [Plugin Contract](docs/context/plugin-contract.md)
 Stable Core↔Pro surface at `kompany.plugins.*` (v1.0.0). Five ABCs: Tool / AgentSoul / Integration / Workflow / Template. Discovery via Python entry points; compat via pip dep pinning. See [ADR-0002](docs/adr/0002-plugin-contract-design.md).

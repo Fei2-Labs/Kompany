@@ -64,5 +64,3 @@ one case: AGPL (publish your modifications) or commercial license.
 
 **Does AGPL apply to my company data / vault / mission?** No. Your
 data is yours; the license covers the engine source code only.
-
-Decision record: [ADR-0004](adr/0004-agpl-relicense.md).
