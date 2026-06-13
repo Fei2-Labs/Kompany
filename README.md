@@ -130,20 +130,21 @@ All agents communicate through direct function calls via `KompanyEngine`. CoS co
 
 ## Quick Start (Desktop App)
 
-The fastest way to try Kompany is the desktop bundle. Double-click,
-fill out the in-window onboarding form, and you're live — no Python
-install, no terminal, no browser.
+Kompany ships as a desktop bundle — double-click, fill out the in-window
+onboarding form, and you're live, no Python install or terminal needed.
 
-| Platform | Download                          | First-launch                               |
+> **No prebuilt binaries yet.** Pre-built installers are not published to
+> GitHub Releases at this stage. Build the bundle locally with
+> `./kompany/build_desktop.sh` from a checkout — it produces the platform
+> artifact below. See [`docs/context/distribution.md`](docs/context/distribution.md)
+> for toolchain prerequisites. (Or skip the desktop app entirely and use
+> the [CLI / source install](#installation).)
+
+| Platform | Artifact (built locally)          | First-launch                               |
 |----------|-----------------------------------|--------------------------------------------|
-| macOS    | `Kompany.dmg` (drag to Applications) | Right-click the app icon → **Open** the first time (v1 ships unsigned). |
+| macOS    | `Kompany.dmg` (drag to Applications) | Right-click the app icon → **Open** the first time (built app is unsigned). |
 | Windows  | `Kompany.msi`                     | SmartScreen → **More info** → **Run anyway**. |
 | Linux    | `Kompany.AppImage`                | `chmod +x Kompany.AppImage && ./Kompany.AppImage` |
-
-> Releases are not yet published to GitHub Releases. To build the
-> installer locally, run `./kompany/build_desktop.sh` from a checkout.
-> See [`docs/context/distribution.md`](docs/context/distribution.md) for
-> the toolchain prerequisites.
 
 On first launch a cyberpunk onboarding wizard walks you through six
 steps in the same window:
