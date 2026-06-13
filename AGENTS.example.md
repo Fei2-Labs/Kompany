@@ -32,4 +32,4 @@ For installed/runtime behavior of the Kompany product itself, see
 
 Kompany Core is AGPL-3.0 and dual-licensed; external contributions
 require a one-time CLA (the bot prompts on your first PR). See
-[CONTRIBUTING.md](CONTRIBUTING.md) and `docs/adr/0004-agpl-relicense.md`.
+[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/why-agpl.md](docs/why-agpl.md).
