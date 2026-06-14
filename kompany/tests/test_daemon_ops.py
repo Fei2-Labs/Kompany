@@ -244,7 +244,12 @@ def test_install_writes_plist_with_interpreter_fallback(
     assert plist["RunAtLoad"] is True
     assert plist["StandardOutPath"] == str(data_dir / "logs" / "daemon.out.log")
     assert plist["StandardErrPath"] == str(data_dir / "logs" / "daemon.err.log")
-    assert plist["EnvironmentVariables"] == {"KOMPANY_DATA_DIR": str(data_dir)}
+    env = plist["EnvironmentVariables"]
+    assert env["KOMPANY_DATA_DIR"] == str(data_dir)
+    # PATH must be set so CLI-harness modes find their binaries under launchd.
+    assert "PATH" in env
+    assert str(Path.home() / ".local" / "bin") in env["PATH"].split(":")
+    assert "/opt/homebrew/bin" in env["PATH"].split(":")
     assert (data_dir / "logs").is_dir()
     # Best-effort bootstrap, list-form command.
     assert result["bootstrap"]["ok"] is True
@@ -407,3 +412,17 @@ def test_run_daemon_ignores_stale_cached_verdict(tmp_path, monkeypatch):
     daemon_ops.run_daemon(data_dir=tmp_path, server_runner=lambda **kwargs: 0)
 
     assert resets == [True]
+
+
+def test_resolve_daemon_path_includes_user_and_homebrew_bins(monkeypatch):
+    """launchd's minimal PATH omits ~/.local/bin + Homebrew; resolve_daemon_path
+    must prepend them (deduped, order-preserving) so claude/codex/opencode
+    resolve under the daemon."""
+    monkeypatch.setenv("PATH", "/usr/bin:/bin:/opt/homebrew/bin")
+    path = daemon_ops.resolve_daemon_path()
+    parts = path.split(":")
+    assert parts[0] == str(Path.home() / ".local" / "bin")
+    assert "/opt/homebrew/bin" in parts
+    assert "/usr/local/bin" in parts
+    assert "/usr/bin" in parts  # base PATH preserved
+    assert len(parts) == len(set(parts))  # no duplicates

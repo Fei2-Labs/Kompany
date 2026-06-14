@@ -137,6 +137,32 @@ def resolve_program_arguments() -> list[str]:
     return [sys.executable, "-m", "kompany.interfaces.daemon_main"]
 
 
+def resolve_daemon_path() -> str:
+    """PATH for the LaunchAgent's EnvironmentVariables.
+
+    launchd gives a login-shell-less agent a minimal PATH
+    (``/usr/bin:/bin:/usr/sbin:/sbin``), so in ``claude_subscription`` /
+    CLI-harness modes the engine can't find the ``claude`` / ``codex`` /
+    ``opencode`` binaries (they live in ``~/.local/bin`` or Homebrew) →
+    ``LLMUnavailable: CLI not found on PATH`` and the daemon ticks but does
+    no LLM work. Prepend the user-local + Homebrew bins so the daemon
+    resolves the same CLIs as the founder's interactive shell.
+    """
+    candidates = [
+        str(Path.home() / ".local" / "bin"),
+        "/opt/homebrew/bin",  # Apple-silicon Homebrew
+        "/usr/local/bin",     # Intel Homebrew / common user installs
+    ]
+    base = os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin").split(":")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for d in candidates + base:
+        if d and d not in seen:
+            seen.add(d)
+            ordered.append(d)
+    return ":".join(ordered)
+
+
 def install_launchd(data_dir: Path | None = None) -> dict[str, Any]:
     """Write + (best-effort) bootstrap the com.kompany.daemon LaunchAgent."""
     if sys.platform != "darwin":
@@ -164,8 +190,13 @@ def install_launchd(data_dir: Path | None = None) -> dict[str, Any]:
         "StandardErrPath": str(logs_dir / "daemon.err.log"),
         # Pin the daemon to the data_dir chosen at install time so a
         # login-shell-less launchd context resolves the same engine
-        # state as the founder's CLI.
-        "EnvironmentVariables": {"KOMPANY_DATA_DIR": str(data_dir)},
+        # state as the founder's CLI. PATH is set so CLI-harness modes
+        # (claude_subscription etc.) can find their binaries — launchd's
+        # default PATH omits ~/.local/bin and Homebrew.
+        "EnvironmentVariables": {
+            "KOMPANY_DATA_DIR": str(data_dir),
+            "PATH": resolve_daemon_path(),
+        },
     }
     plist_path = _plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
