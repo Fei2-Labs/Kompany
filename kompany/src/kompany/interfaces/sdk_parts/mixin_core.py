@@ -67,17 +67,31 @@ class KompanyCoreOps:
         """
         return _ChannelNamespace(self._engine)
 
-    def debate(self, question: str) -> dict[str, Any]:
-        """Run a full multi-agent debate on a strategic question."""
+    def debate(
+        self, question: str, decision_type: str | None = None
+    ) -> dict[str, Any]:
+        """Run a full multi-agent debate on a strategic question.
+
+        ADR-0006: pass ``decision_type`` (go_to_market|pricing|hiring|infra|
+        legal|fundraising|product_scope|general) to convene the right
+        executives and prime round 1 with frame challenges + recalled
+        learnings. Omit it for the legacy stage-only debate.
+        """
         stage = self._engine.settings.company_stage or "solo"
         # Resolve from the sdk module namespace so tests can monkeypatch
         # ``kompany.interfaces.sdk.DebateEngine``.
         from kompany.interfaces import sdk as _sdk
 
-        debate_engine = _sdk.DebateEngine(self._engine.registry, stage=stage)
+        debate_engine = _sdk.DebateEngine(
+            self._engine.registry,
+            stage=stage,
+            memory=self._engine.memory,
+            episodes=self._engine.episodes,
+        )
         result = debate_engine.run(
             question=question,
             company_state=self._engine.get_company_state(),
+            decision_type=decision_type,
         )
         return {
             "question": result.question,

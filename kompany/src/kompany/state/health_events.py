@@ -41,6 +41,12 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # path — the proposal is aborted and its branch discarded
     # (06-12-self-update-pipeline PRD D2).
     "self_update_t3_blocked",
+    # Concurrent resilient runtime (ADR-0005). A lane that cannot make
+    # progress because the model is exhausted fails LOUDLY: silent success
+    # is the worst failure mode of an autonomous system, so the dispatcher
+    # records one of these instead of reporting an idle "ok" tick.
+    "lane_timeout",
+    "lane_stalled",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

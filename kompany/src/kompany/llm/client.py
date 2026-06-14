@@ -48,6 +48,7 @@ class LLMClient(ProviderMixin, WatchdogMixin):
         audit_log: Any = None,
         watchdog: Any = None,
         silent_timeout_seconds: float | None = None,
+        fallback_models: list[str] | None = None,
     ):
         self.settings = settings
         self.cost_tracker = cost_tracker
@@ -66,6 +67,11 @@ class LLMClient(ProviderMixin, WatchdogMixin):
             if silent_timeout_seconds is not None
             else float(DEFAULT_LLM_SILENT_TIMEOUT_SECONDS)
         )
+        # Model-fallback pool (ADR-0005 lane-worker contract): when the
+        # primary model is exhausted after the watchdog's own retry, the
+        # call retries once per fallback model before raising
+        # ``LLMUnavailable``. None/empty = no fallback (legacy behaviour).
+        self.fallback_models = list(fallback_models or [])
         self._anthropic_client = None
         self._openai_clients: dict[Provider, Any] = {}
 

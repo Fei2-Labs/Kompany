@@ -180,9 +180,19 @@ class Ticker:
         return ["heartbeat"]
 
     def _action_advance(self) -> list[str]:
-        """Advance AT MOST one pending task of the oldest eligible project."""
+        """Advance AT MOST one pending task of the oldest eligible project.
+
+        ADR-0005: when the engine wires a lane dispatcher, delegate to it
+        so several independent lanes can advance per tick. With the single
+        default ``main`` lane the dispatcher reproduces this method's
+        oldest-eligible-project, one-task-per-tick behaviour exactly — the
+        legacy path below stays in place for engines without a dispatcher.
+        """
         if not self.auto_execute:
             return []
+        dispatcher = getattr(self._engine, "lane_dispatcher", None)
+        if dispatcher is not None:
+            return dispatcher.dispatch_once()
         actions: list[str] = []
         blocked = self._projects_awaiting_budget_approval()
         candidates = sorted(

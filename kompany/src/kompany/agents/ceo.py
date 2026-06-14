@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from kompany.agents.base import BaseAgent
+from kompany.core.directive import DecisionType
 
 
 class AnswerResponse(BaseModel):
@@ -57,6 +58,17 @@ class DirectiveClassification(BaseModel):
     clarify_question: str = Field(
         default="",
         description="when route=clarify, the ONE concrete question to ask back",
+    )
+    # Decision-quality routing (ADR-0006). Best-effort tag of WHAT KIND of
+    # strategic decision this is, so the debate engine can convene the right
+    # executives and retrieve relevant precedents. None / "general" when it
+    # doesn't fit a specific bucket; only meaningful for strategic+debate.
+    decision_type: DecisionType | None = Field(
+        default=None,
+        description=(
+            "go_to_market|pricing|hiring|infra|legal|fundraising|"
+            "product_scope|general — best-effort; null/general if unclear"
+        ),
     )
 
 
@@ -192,7 +204,19 @@ class CEOAgent(BaseAgent):
             f"- STRATEGIC: questions about direction, approach, should-we decisions\n"
             f"- OPERATIONAL: setting up, configuring, creating something internal\n"
             f"- INFORMATIONAL: asking about status, balance, runway, progress\n\n"
-            f"For approval_tier: auto (<€5, research), ceo (€5-50), master (>€50 or irreversible)"
+            f"For approval_tier: auto (<€5, research), ceo (€5-50), master (>€50 or irreversible)\n\n"
+            f"For decision_type (best-effort — only meaningful for STRATEGIC "
+            f"decisions): tag WHAT KIND of decision this is so the right "
+            f"executives can be convened:\n"
+            f"- go_to_market: launch/channel/positioning/audience decisions\n"
+            f"- pricing: price points, packaging, discounts, monetization\n"
+            f"- hiring: adding/structuring the team or roles\n"
+            f"- infra: architecture, tooling, platform, build-vs-buy\n"
+            f"- legal: contracts, compliance, IP, regulatory\n"
+            f"- fundraising: raising capital, runway, investor strategy\n"
+            f"- product_scope: what to build / cut / prioritize\n"
+            f"- general: strategic but none of the above\n"
+            f"Use null or general when it does not clearly fit a bucket."
         )
         resp = self.call_structured(
             prompt=prompt,

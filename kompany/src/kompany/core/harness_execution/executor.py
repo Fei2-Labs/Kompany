@@ -420,6 +420,14 @@ def _finish_task(
     }
     engine.projects.update_task_status(task.id, status, result=task_result)
 
+    # ADR-0007: C-suite review gate for outward-facing deliverables. Same
+    # contract as the legacy path (core/runner.py): NON-blocking, the task
+    # status is untouched; the gate only fences the actual outward action.
+    from kompany.core.csuite_review import gate_completed_task
+
+    persisted = engine.projects.get_task(task.id) or task
+    gate_completed_task(engine, persisted, project, outcome)
+
     # Virtual clock model D: 1 finished task = 1 virtual day (see the
     # legacy path in core/runner.py for the rationale).
     from kompany.state import virtual_clock

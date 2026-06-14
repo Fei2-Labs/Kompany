@@ -199,6 +199,11 @@ def test_constants_match_prd():
         # diff touched a T3 (protected) path — proposal aborted, branch
         # discarded.
         "self_update_t3_blocked",
+        # Added by ADR-0005 (concurrent autonomous runtime): a lane's
+        # model pool was exhausted mid-dispatch (loud failure, never
+        # silent success) / a lane lease went stale.
+        "lane_timeout",
+        "lane_stalled",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

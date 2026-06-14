@@ -38,6 +38,9 @@ CLAIMS_SCHEMA_HINT = (
 
 if TYPE_CHECKING:
     from kompany.agents.registry import AgentRegistry
+    from kompany.core.debate_prep import PreDebateContext
+    from kompany.state.episodes import Episodes
+    from kompany.state.memory import AgentMemory
 
 
 # Stage → (active agent roles, number of rounds)
@@ -58,7 +61,13 @@ _NON_DEBATERS = {"ceo", "cos"}
 class DebateEngine:
     """Orchestrates multi-agent debates."""
 
-    def __init__(self, registry: AgentRegistry, stage: str = "solo"):
+    def __init__(
+        self,
+        registry: AgentRegistry,
+        stage: str = "solo",
+        memory: "AgentMemory | None" = None,
+        episodes: "Episodes | None" = None,
+    ):
         self._registry = registry
         self._stage = stage
         roles, self._num_rounds = STAGE_PROFILES.get(
@@ -66,32 +75,58 @@ class DebateEngine:
         )
         self._debaters = [r for r in roles if r not in _NON_DEBATERS]
         self._all_roles = roles
+        # ADR-0006 pre-debate prep is opt-in: only built when BOTH memory
+        # and episodes are wired. No memory/episodes → identical behaviour
+        # to the pre-ADR-0006 engine (no prep, no frame challenges).
+        self._prepper = None
+        if memory is not None and episodes is not None:
+            from kompany.core.debate_prep import DebatePrepper
+
+            self._prepper = DebatePrepper(
+                llm=registry._llm,
+                settings=registry._settings,
+                memory=memory,
+                episodes=episodes,
+            )
 
     def run(
         self,
         question: str,
         company_state: dict | None = None,
         directive_id: str | None = None,
+        decision_type: str | None = None,
     ) -> DebateResult:
-        """Run a full debate and return the result."""
+        """Run a full debate and return the result.
+
+        ADR-0006: when a prepper is wired (memory + episodes were passed to
+        ``__init__``) AND ``decision_type`` is given, a pre-debate context is
+        assembled BEFORE round 1. It unions the decision-type roster into the
+        debaters for this run and injects frame challenges + per-role prior
+        learnings into the round-1 (POSITION) prompt. With no prepper or no
+        ``decision_type`` the behaviour is identical to the pre-ADR-0006 path.
+        """
+        prep = self._prepare(question, directive_id, decision_type)
+        debaters = self._effective_debaters(prep)
+
         all_rounds: list[list[AgentPosition]] = []
 
-        # Round 1 — Independent positions
+        # Round 1 — Independent positions (prep injected here only)
         r1 = self._run_round(
-            DebateRound.POSITION, question, [], directive_id
+            DebateRound.POSITION, question, [], directive_id, debaters, prep
         )
         all_rounds.append(r1)
 
         # Round 2 — Rebuttal
         r2 = self._run_round(
-            DebateRound.REBUTTAL, question, all_rounds, directive_id
+            DebateRound.REBUTTAL, question, all_rounds, directive_id, debaters
         )
         all_rounds.append(r2)
 
         # Round 3 — Convergence (only for 3-round stages)
         if self._num_rounds >= 3:
             r3 = self._run_round(
-                DebateRound.CONVERGENCE, question, all_rounds, directive_id
+                DebateRound.CONVERGENCE, question, all_rounds, directive_id,
+                debaters,
             )
             all_rounds.append(r3)
 
@@ -111,16 +146,59 @@ class DebateEngine:
             agents_participated=[p.agent_role for p in r1],
         )
 
+    def _prepare(
+        self,
+        question: str,
+        directive_id: str | None,
+        decision_type: str | None,
+    ) -> "PreDebateContext | None":
+        """Run pre-debate prep when wired + a decision_type is supplied."""
+        if self._prepper is None or not decision_type:
+            return None
+        return self._prepper.prepare(
+            question=question,
+            directive_id=directive_id,
+            decision_type=decision_type,
+            stage=self._stage,
+            debaters=self._debaters,
+        )
+
+    def _effective_debaters(
+        self, prep: "PreDebateContext | None"
+    ) -> list[str]:
+        """Union the convene roster into the stage debaters for this run.
+
+        Existing debaters are never dropped. Convened roles are added only
+        when they exist for this stage (``self._all_roles``) and are not
+        synthesis/decision-only roles (CEO / CoS).
+        """
+        debaters = list(self._debaters)
+        if prep is None:
+            return debaters
+        existing = set(debaters)
+        for role in prep.convene_roster:
+            if (
+                role in self._all_roles
+                and role not in _NON_DEBATERS
+                and role not in existing
+            ):
+                debaters.append(role)
+                existing.add(role)
+        return debaters
+
     def _run_round(
         self,
         round_type: DebateRound,
         question: str,
         prior_rounds: list[list[AgentPosition]],
         directive_id: str | None,
+        debaters: list[str] | None = None,
+        prep: "PreDebateContext | None" = None,
     ) -> list[AgentPosition]:
         """Run one debate round across all debating agents."""
         positions: list[AgentPosition] = []
         context = self._format_prior_rounds(prior_rounds)
+        roles = debaters if debaters is not None else self._debaters
 
         # Map round_type → SSE action_type label so the cost meter in the
         # debate UI can attribute spend to the right column.
@@ -130,10 +208,10 @@ class DebateEngine:
             DebateRound.CONVERGENCE: "debate_round_3",
         }.get(round_type, "debate_round")
 
-        for role in self._debaters:
+        for role in roles:
             agent = self._registry.get(role)
             prompt = self._build_round_prompt(
-                round_type, question, context, role
+                round_type, question, context, role, prep
             )
             resp = agent.call_structured(
                 prompt=prompt,
@@ -222,6 +300,7 @@ class DebateEngine:
         question: str,
         context: str,
         role: str,
+        prep: "PreDebateContext | None" = None,
     ) -> str:
         """Build the prompt for a specific debate round.
 
@@ -229,9 +308,16 @@ class DebateEngine:
         always knows how to populate per-claim evidence. Each claim must
         be one atomic factual statement with a ``Source`` list; the
         deprecated free-text ``analysis`` field MAY be left empty.
+
+        ADR-0006: in the POSITION round, when a :class:`PreDebateContext`
+        is present, frame challenges and this role's recalled prior
+        learnings are prepended so the agent's opening position is informed
+        by both. Other rounds are unaffected.
         """
         if round_type == DebateRound.POSITION:
+            prep_block = self._prep_block(prep, role)
             body = (
+                f"{prep_block}"
                 f'The Master asks: "{question}"\n\n'
                 f"Provide your independent position as {role.upper()}. "
                 f"Produce 3-5 atomic claims (one factual statement each) and "
@@ -255,6 +341,22 @@ class DebateEngine:
                 f"Cite the source of any new factual claim."
             )
         return body + "\n\n" + CLAIMS_SCHEMA_HINT
+
+    @staticmethod
+    def _prep_block(prep: "PreDebateContext | None", role: str) -> str:
+        """Render the ADR-0006 prep block for a role's POSITION prompt."""
+        if prep is None:
+            return ""
+        parts: list[str] = []
+        frame = prep.frame_block()
+        if frame:
+            parts.append(frame)
+        learnings = prep.learnings_for(role)
+        if learnings:
+            parts.append(learnings)
+        if not parts:
+            return ""
+        return "\n\n".join(parts) + "\n\n"
 
     @staticmethod
     def _format_prior_rounds(rounds: list[list[AgentPosition]]) -> str:

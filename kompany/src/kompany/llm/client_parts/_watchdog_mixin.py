@@ -171,8 +171,14 @@ class WatchdogMixin:
         task_id: str | None,
         project_id: str | None,
         action_type: str | None = None,
+        _tried_models: set[str] | None = None,
     ) -> LLMResponse:
-        """Inner: run the call with timeout-based silent_run detection + 1 retry."""
+        """Inner: run the call with timeout-based silent_run detection + 1 retry.
+
+        ``_tried_models`` tracks which models this logical call already
+        exhausted so the ADR-0005 fallback pool retries each fallback at
+        most once and never loops.
+        """
         silent_seconds = self.silent_timeout_seconds
         # Capture context vars from the *calling* thread so the worker
         # thread sees the same run_id when it records the ledger entry.
@@ -370,6 +376,35 @@ class WatchdogMixin:
                     "second_error": str(second_error)[:500],
                 },
             )
+
+        # ADR-0005 model-fallback pool: the primary (and its retry) are
+        # exhausted. Before failing the whole call, try each configured
+        # fallback model once. A lane must survive a single-model outage;
+        # only when EVERY fallback also fails do we raise LLMUnavailable.
+        tried = _tried_models if _tried_models is not None else {model}
+        tried.add(model)
+        for fb_model in getattr(self, "fallback_models", []) or []:
+            if fb_model in tried:
+                continue
+            fb_provider = self._resolve_provider(fb_model)
+            try:
+                return self._call_with_watchdog(
+                    provider=fb_provider,
+                    model=fb_model,
+                    system=system,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    agent_name=agent_name,
+                    directive_id=directive_id,
+                    task_id=task_id,
+                    project_id=project_id,
+                    action_type=action_type,
+                    _tried_models=tried,
+                )
+            except LLMUnavailable:
+                # This fallback also exhausted; move to the next one.
+                continue
+
         raise LLMUnavailable(
             f"LLM '{model}' unavailable after retry: "
             f"{type(second_error).__name__}: {second_error}"

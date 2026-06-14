@@ -102,7 +102,7 @@ class DirectiveHandlersMixin:
     def _handle_strategic(self, directive, classification, ceo) -> DirectiveResult:
         """Handle STRATEGIC directives — full debate when classification requests it."""
         if classification and classification.requires_debate:
-            return self._handle_strategic_debate(directive)
+            return self._handle_strategic_debate(directive, classification)
 
         # Simple CEO analysis for non-debate strategic questions
         resp = ceo.call(
@@ -140,17 +140,36 @@ class DirectiveHandlersMixin:
             agents_used=["ceo"],
         )
 
-    def _handle_strategic_debate(self, directive) -> DirectiveResult:
-        """Run a full multi-agent debate for a strategic directive."""
+    def _handle_strategic_debate(
+        self, directive, classification=None
+    ) -> DirectiveResult:
+        """Run a full multi-agent debate for a strategic directive.
+
+        ADR-0006: wire ``memory`` + ``episodes`` so the engine can run
+        pre-debate prep (frame challenges, convene-by-decision-type,
+        knowledge retrieval), and pass the classification's
+        ``decision_type`` when present. Backward-compatible: with no
+        decision_type the debate behaves as before.
+        """
         from kompany.core.debate import DebateEngine
 
         stage = self.settings.company_stage or "solo"
-        debate = DebateEngine(self.registry, stage=stage)
+        debate = DebateEngine(
+            self.registry,
+            stage=stage,
+            memory=self.memory,
+            episodes=self.episodes,
+        )
         state = self.get_company_state()
+        decision_type = None
+        if classification is not None:
+            dt = getattr(classification, "decision_type", None)
+            decision_type = getattr(dt, "value", dt)
         result = debate.run(
             question=directive.raw_input,
             company_state=state,
             directive_id=directive.id,
+            decision_type=decision_type,
         )
 
         # Persist the structured debate transcript so episodes / future

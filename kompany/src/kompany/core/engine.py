@@ -71,6 +71,9 @@ from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
 from kompany.state.daemon_ticks import DaemonTickStore
+from kompany.state.intake_queue import IntakeQueueStore
+from kompany.core.lane_registry import LaneRegistry
+from kompany.core.lane_dispatcher import LaneDispatcher
 from kompany.state.self_update_proposals import SelfUpdateProposalStore
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
@@ -241,6 +244,18 @@ class KompanyEngine(
         # heartbeat that advances work with no founder session open.
         # Tick logic lives in core/ticker.py (engine.py is over the cap).
         self.daemon_ticks = DaemonTickStore(self.db)
+        # Concurrent resilient runtime (ADR-0005): intake queue (dev-inbox),
+        # lane registry (own-lease, no double-run), and the dispatcher the
+        # ticker delegates ``advance`` to. ``ensure_default`` seeds a single
+        # ``main`` lane so behaviour stays identical to the pre-lane ticker.
+        self.intake_queue = IntakeQueueStore(self.db)
+        self.lane_registry = LaneRegistry(self.db)
+        self.lane_registry.ensure_default()
+        self.lane_dispatcher = LaneDispatcher(
+            engine=self,
+            registry=self.lane_registry,
+            intake=self.intake_queue,
+        )
         self.self_update_proposals = SelfUpdateProposalStore(self.db)
         self.ticker = Ticker(
             engine=self,
@@ -329,6 +344,16 @@ class KompanyEngine(
         self.register_revision_handler(
             "glossary_review",
             self._glossary_review_revision_handler,
+        )
+        # ADR-0007: a founder "revise" on a held C-suite review stamps the
+        # task with the feedback and re-files a fresh pending review card.
+        from kompany.core.csuite_review import revision_requested_csuite_review
+
+        self.register_revision_handler(
+            "csuite_review",
+            lambda original, hint: revision_requested_csuite_review(
+                self, original, hint
+            ),
         )
 
     def _resolve_vault_key(self) -> None:

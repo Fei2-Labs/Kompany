@@ -304,6 +304,17 @@ class ProjectRunner:
                 task.id, status, result=task_result
             )
 
+            # ADR-0007: C-suite review gate. Outward-facing deliverables
+            # (customer email, published post, launch, critical decision)
+            # get an adversarial review before the actual outward action is
+            # allowed. NON-blocking: the task stays delivered/completed; the
+            # gate only files an approval that fences the send/post/launch,
+            # mirroring how channel_post / email already gate the real send.
+            from kompany.core.csuite_review import gate_completed_task
+
+            persisted = self._engine.projects.get_task(task.id) or task
+            gate_completed_task(self._engine, persisted, project, outcome)
+
             # Virtual clock model D: 1 completed task = 1 virtual day.
             # The dashboard's runway counter advances here, not on the
             # wall clock, so a founder who pauses Kompany doesn't lose

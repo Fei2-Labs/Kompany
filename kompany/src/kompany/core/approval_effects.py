@@ -26,6 +26,11 @@ from kompany.channels.outbox import (
     approve_channel_post,
     reject_channel_post,
 )
+from kompany.core.csuite_review import (
+    ACTION_CSUITE_REVIEW,
+    approve_csuite_review,
+    reject_csuite_review,
+)
 from kompany.core.harness_execution.executor import (
     ACTION_BUDGET_INCREASE,
     ACTION_ENVELOPE_TOPUP,
@@ -50,6 +55,7 @@ HARNESS_EFFECT_ACTIONS: frozenset[str] = frozenset(
         ACTION_SELF_UPDATE,
         ACTION_CHANNEL_POST,
         ACTION_TOOL_EXECUTE,
+        ACTION_CSUITE_REVIEW,
     }
 )
 
@@ -75,6 +81,10 @@ def apply_post_approve_effect(
         # Proposed tool action (#4/#5): the founder's yes executes the
         # real external action via the Integration, with audit + stamp.
         return execute_approved_tool_action(engine, request)
+    if request.action_type == ACTION_CSUITE_REVIEW:
+        # ADR-0007: founder overrides the C-suite HOLD; the outward
+        # deliverable is cleared to ship (the send/post/launch gate opens).
+        return approve_csuite_review(engine, request)
     return {"status": "no_effect"}
 
 
@@ -88,6 +98,9 @@ def apply_post_reject_effect(
         return reject_channel_post(engine, request)
     if request.action_type == ACTION_TOOL_EXECUTE:
         return reject_tool_action(engine, request)
+    if request.action_type == ACTION_CSUITE_REVIEW:
+        # ADR-0007: founder upholds the HOLD; the deliverable does not ship.
+        return reject_csuite_review(engine, request)
     payload = request.payload or {}
     task_id = payload.get("task_id")
     if request.action_type == ACTION_ENVELOPE_TOPUP:

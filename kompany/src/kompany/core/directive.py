@@ -20,6 +20,24 @@ class DirectiveType(str, Enum):
     INFORMATIONAL = "informational"
 
 
+class DecisionType(str, Enum):
+    """Kind of strategic decision a debate is about (ADR-0006).
+
+    Drives ``DECISION_TYPE_ROLES`` in :mod:`kompany.core.debate_prep` —
+    which executives get convened into a debate — and lets pre-debate
+    knowledge retrieval scope precedents. ``general`` is the safe default
+    when the CEO classifier cannot pin a more specific type.
+    """
+    GO_TO_MARKET = "go_to_market"
+    PRICING = "pricing"
+    HIRING = "hiring"
+    INFRA = "infra"
+    LEGAL = "legal"
+    FUNDRAISING = "fundraising"
+    PRODUCT_SCOPE = "product_scope"
+    GENERAL = "general"
+
+
 class DirectiveStatus(str, Enum):
     PENDING = "pending"
     ACTIVE = "active"

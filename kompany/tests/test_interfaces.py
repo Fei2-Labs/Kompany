@@ -67,6 +67,9 @@ class FakeEngine:
         )()
         self.registry = FakeRegistry()
         self.projects = FakeProjects()
+        # ADR-0006: SDK.debate() now threads memory/episodes into DebateEngine.
+        self.memory = None
+        self.episodes = None
         self.init_calls = []
         self._approval = {
             "id": "app-1",
@@ -976,7 +979,7 @@ def test_sdk_debate_matches_wire_shape(monkeypatch):
     monkeypatch.setattr("kompany.interfaces.sdk.KompanyEngine", lambda config_path=None: fake_engine)
     monkeypatch.setattr(
         "kompany.interfaces.sdk.DebateEngine",
-        lambda registry, stage: type("FakeDebateEngine", (), {"run": lambda self, question, company_state: FakeDebateResult()})(),
+        lambda registry, stage, memory=None, episodes=None: type("FakeDebateEngine", (), {"run": lambda self, question, company_state, decision_type=None: FakeDebateResult()})(),
     )
     sdk = Kompany()
 

@@ -432,3 +432,59 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                created_at TEXT NOT NULL DEFAULT (datetime('now'))
            )"""
     )
+
+    # Concurrent resilient runtime — lanes on top of the daemon (ADR-0005).
+    # Three additive tables, new → _migrate() per the shadow_costs
+    # precedent. All idempotent (CREATE TABLE IF NOT EXISTS / CREATE INDEX
+    # IF NOT EXISTS). Default single-"main"-lane behaviour stays identical;
+    # these only back the additive lane-dispatch capability.
+    #
+    # intake_work_items: the dev-inbox / "what work is waiting" queue. An
+    # append-only producer/consumer log; a worker atomically claims the
+    # oldest queued row for its lane (status queued -> assigned).
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS intake_work_items (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               project_id TEXT,
+               task_id TEXT,
+               lane_id TEXT,
+               status TEXT NOT NULL DEFAULT 'queued',
+               enqueued_at TEXT NOT NULL DEFAULT (datetime('now')),
+               assigned_at TEXT,
+               completed_at TEXT,
+               detail_json TEXT
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_intake_work_items_status "
+        "ON intake_work_items(status, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_intake_work_items_lane_id "
+        "ON intake_work_items(lane_id)"
+    )
+    # lanes: the registry of independent workstreams. ``main`` (created by
+    # LaneRegistry.ensure_default) gives today's single sequential ticker.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS lanes (
+               lane_id TEXT PRIMARY KEY,
+               name TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'healthy',
+               max_concurrent INTEGER NOT NULL DEFAULT 1,
+               last_heartbeat TEXT,
+               detail_json TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    # lane_leases: the own-lock/own-lease guard — one unexpired lease per
+    # lane so a lane never re-enters / double-runs a task.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS lane_leases (
+               lane_id TEXT PRIMARY KEY,
+               task_id TEXT,
+               run_id TEXT,
+               acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+               heartbeat_at TEXT,
+               expires_at TEXT
+           )"""
+    )
