@@ -145,3 +145,65 @@ def rules_set(
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     _emit_json(result)
+
+
+# ---------------------------------------------------------------------------
+# ``kompany outward-policy`` sub-app (ADR-0008 #2) — per-action-class
+# outward pre-authorization. Sibling top-level group (registered in cli.py).
+# ---------------------------------------------------------------------------
+
+outward_policy_app = typer.Typer(
+    name="outward-policy",
+    help=(
+        "Per-action-class outward pre-authorization (ADR-0008): which "
+        "outward action classes the daemon may execute unattended (auto) "
+        "vs park for approval (gated)."
+    ),
+    no_args_is_help=True,
+)
+
+
+@outward_policy_app.command("list")
+def outward_policy_list(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """List the outward action-class policies (mode per class)."""
+    policies = _get_engine(config).outward_policies.list()
+    if as_json:
+        _emit_json([p.model_dump(mode="json") for p in policies])
+        return
+    table = Table(title="Outward action-class policies")
+    table.add_column("Action class", style="cyan")
+    table.add_column("Mode", style="magenta")
+    table.add_column("Reason", style="white")
+    for policy in policies:
+        mode_style = "green" if policy.mode == "auto" else "yellow"
+        table.add_row(
+            policy.action_class,
+            f"[{mode_style}]{policy.mode}[/{mode_style}]",
+            policy.reason,
+        )
+    console.print(table)
+    console.print(
+        "[dim]Hard floors (spend / founder_identity / cost over cap) always "
+        "force gated regardless of the table above.[/dim]"
+    )
+
+
+@outward_policy_app.command("set")
+def outward_policy_set(
+    action_class: str = typer.Argument(..., help="The outward action class."),
+    mode: str = typer.Argument(..., help="'auto' or 'gated'."),
+    reason: str = typer.Option("", "--reason", help="Why this mode was set."),
+    config: str = typer.Option(None, "--config", "-c"),
+):
+    """Set one outward action class to 'auto' or 'gated'."""
+    try:
+        policy = _get_engine(config).outward_policies.set(
+            action_class, mode, reason=reason
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    _emit_json(policy.model_dump(mode="json"))

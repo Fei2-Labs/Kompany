@@ -33,13 +33,15 @@ def test_contract_version_pinned():
     assert __contract_version__ == "1.0.0"
 
 
-def test_entry_point_groups_are_the_five_kinds():
+def test_entry_point_groups_are_the_plugin_kinds():
+    # ADR-0008 added the outward-executor kind alongside the original five.
     assert ENTRY_POINT_GROUPS == (
         "kompany.workflows",
         "kompany.souls",
         "kompany.integrations",
         "kompany.templates",
         "kompany.tools",
+        "kompany.outward",
     )
 
 

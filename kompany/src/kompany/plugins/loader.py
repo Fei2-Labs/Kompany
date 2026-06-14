@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from kompany.plugins.contract import (
         AgentSoul,
         Integration,
+        OutwardExecutor,
         Template,
         Tool,
         Workflow,
@@ -43,6 +44,10 @@ _GROUP_TO_KIND = {
     "kompany.integrations": "integration",
     "kompany.templates": "template",
     "kompany.tools": "tool",
+    # ADR-0008: project-supplied outward executors. The engine ships none,
+    # so an engine with no plugin installed discovers [] — the outward lane
+    # then parks every action with reason "no executor".
+    "kompany.outward": "outward_executor",
 }
 
 
@@ -50,9 +55,9 @@ def discover() -> dict[str, list]:
     """Scan installed packages for Kompany plugin entry points.
 
     Returns a dict keyed by plugin kind (``"workflow"``, ``"soul"``,
-    ``"integration"``, ``"template"``, ``"tool"``); each value is a list
-    of instantiated plugin objects (or callables, for plugins exported
-    as factories rather than classes).
+    ``"integration"``, ``"template"``, ``"tool"``, ``"outward_executor"``);
+    each value is a list of instantiated plugin objects (or callables, for
+    plugins exported as factories rather than classes).
 
     Loading failures are caught and logged via a sentinel error entry so
     one broken third-party wheel does not block the rest.

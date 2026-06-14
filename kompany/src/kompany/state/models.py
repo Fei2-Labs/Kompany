@@ -349,6 +349,21 @@ class ToolAuthorizationPolicy(BaseModel):
     updated_at: datetime | str | None = None
 
 
+class OutwardActionPolicy(BaseModel):
+    """Per-action-CLASS outward pre-authorization policy (ADR-0008 #2).
+
+    ``mode`` is ``'auto'`` (the outward lane executes unattended) or
+    ``'gated'`` (parked for ``kompany approve``). Hard floors in
+    ``core/outward_policy.py`` can still force ``'gated'`` regardless of
+    this stored mode.
+    """
+
+    action_class: str
+    mode: str = "gated"
+    reason: str = ""
+    updated_at: datetime | str | None = None
+
+
 class ToolAuthorizationResult(BaseModel):
     agent_role: str
     tool_name: str

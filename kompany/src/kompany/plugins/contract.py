@@ -230,3 +230,52 @@ class Template(ABC):
     bundled_workflow_ids: tuple[str, ...] = ()
     enabled_pro_soul_ids: tuple[str, ...] = ()
     required_integration_ids: tuple[str, ...] = ()
+
+
+class OutwardExecutor(ABC):
+    """A project-supplied executor that performs an outward action (ADR-0008).
+
+    The engine owns the outward lane, its lease/serialization, the outward
+    queue, the per-action-class pre-authorization policy, and the mandatory
+    pre-flight quality gates. It does NOT own the concrete way a post / send /
+    submit actually reaches a channel — that is a project adapter (e.g. a
+    CDP/browser flow into the operating company's own accounts). Such an
+    adapter ships an ``OutwardExecutor`` registered through the same
+    entry-point loader as the other plugin kinds (group ``kompany.outward``).
+
+    The engine ships NO built-in executor: discovery returns ``[]`` and the
+    outward lane parks every action with reason ``no executor`` until a
+    project supplies one. That is the safe default, never a silent drop.
+
+    Matching: the lane routes an action to the executor whose
+    :attr:`channel` (or :attr:`kind`) matches the action's ``channel`` field.
+    """
+
+    kind: str = "outward_executor"
+    """Stable identifier for this executor kind (debugging / audit)."""
+
+    executor_id: str = ""
+    """Dotted id, e.g. ``"myproject.x_post"``."""
+
+    display_name: str = ""
+
+    channel: str = ""
+    """The outward queue ``channel`` this executor handles (e.g. ``"x"``)."""
+
+    @abstractmethod
+    def execute(self, action: dict[str, Any]) -> dict[str, Any]:
+        """Perform the outward action.
+
+        ``action`` is the outward-queue row dict (``id``, ``channel``,
+        ``text``, ``source``, plus the ADR-0008 fields ``action_class`` /
+        ``deliverable_class`` / ``side_effect`` / ``estimated_cost_usd``).
+        The engine has ALREADY resolved the action to ``auto`` and passed
+        every pre-flight gate by the time this is called.
+
+        Returns a result dict with:
+
+        * ``ok`` (bool) — did the outward action succeed,
+        * ``detail`` (str) — human-readable outcome / error,
+        * ``external_ref`` (str | None) — the external id of the posted /
+          sent artifact, when the channel returns one.
+        """

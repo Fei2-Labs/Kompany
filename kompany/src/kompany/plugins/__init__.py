@@ -37,6 +37,7 @@ from kompany.plugins.contract import (
     AutonomyTier,
     CostEstimate,
     Integration,
+    OutwardExecutor,
     SideEffect,
     Template,
     Tool,
@@ -53,6 +54,7 @@ ENTRY_POINT_GROUPS = (
     "kompany.integrations",
     "kompany.templates",
     "kompany.tools",
+    "kompany.outward",
 )
 
 __all__ = [
@@ -62,6 +64,7 @@ __all__ = [
     "AutonomyTier",
     "CostEstimate",
     "Integration",
+    "OutwardExecutor",
     "SideEffect",
     "Template",
     "Tool",

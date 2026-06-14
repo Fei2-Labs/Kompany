@@ -24,8 +24,11 @@ from typing import Any
 from kompany.channels.outbox import (
     ACTION_CHANNEL_POST,
     approve_channel_post,
+    approve_outward_park,
     reject_channel_post,
+    reject_outward_park,
 )
+from kompany.core.outward_lane import ACTION_OUTWARD_PARK
 from kompany.core.csuite_review import (
     ACTION_CSUITE_REVIEW,
     approve_csuite_review,
@@ -54,6 +57,7 @@ HARNESS_EFFECT_ACTIONS: frozenset[str] = frozenset(
         ACTION_BUDGET_INCREASE,
         ACTION_SELF_UPDATE,
         ACTION_CHANNEL_POST,
+        ACTION_OUTWARD_PARK,
         ACTION_TOOL_EXECUTE,
         ACTION_CSUITE_REVIEW,
     }
@@ -77,6 +81,10 @@ def apply_post_approve_effect(
         # Tier 1 (06-12-channels D3): mark approved + manual-post comment.
         # NEVER posts anywhere — constitution publishing gate.
         return approve_channel_post(engine, request)
+    if request.action_type == ACTION_OUTWARD_PARK:
+        # ADR-0008: a gated / HOLD'd outward action the founder cleared —
+        # re-queue it so the outward lane re-drains and executes it.
+        return approve_outward_park(engine, request)
     if request.action_type == ACTION_TOOL_EXECUTE:
         # Proposed tool action (#4/#5): the founder's yes executes the
         # real external action via the Integration, with audit + stamp.
@@ -96,6 +104,8 @@ def apply_post_reject_effect(
         return reject_self_update(engine, request)
     if request.action_type == ACTION_CHANNEL_POST:
         return reject_channel_post(engine, request)
+    if request.action_type == ACTION_OUTWARD_PARK:
+        return reject_outward_park(engine, request)
     if request.action_type == ACTION_TOOL_EXECUTE:
         return reject_tool_action(engine, request)
     if request.action_type == ACTION_CSUITE_REVIEW:

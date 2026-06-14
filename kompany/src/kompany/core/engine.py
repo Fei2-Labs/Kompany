@@ -74,6 +74,7 @@ from kompany.state.daemon_ticks import DaemonTickStore
 from kompany.state.intake_queue import IntakeQueueStore
 from kompany.core.lane_registry import LaneRegistry
 from kompany.core.lane_dispatcher import LaneDispatcher
+from kompany.core.outward_lane import OutwardLane
 from kompany.state.self_update_proposals import SelfUpdateProposalStore
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
@@ -104,6 +105,7 @@ from kompany.state.templates import (
     TemplateAlreadyApplied,
     TemplateNotFound,
 )
+from kompany.state.outward_policies import OutwardActionPolicyStore
 from kompany.state.tool_authorization import ToolAuthorizationStore
 
 
@@ -195,6 +197,7 @@ class KompanyEngine(
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
+        self.outward_policies = OutwardActionPolicyStore(self.db)
         self.templates = Templates(
             db=self.db,
             ledger=self.ledger,
@@ -256,12 +259,32 @@ class KompanyEngine(
             registry=self.lane_registry,
             intake=self.intake_queue,
         )
+        # Outward-execution lane (ADR-0008 Step 4): drains the outward queue,
+        # resolves auto/gated, runs pre-flight, then executes via a
+        # project-supplied OutwardExecutor or PARKS for `kompany approve`. The
+        # engine ships NO executor; ``outward_executors`` discovers [] until a
+        # project installs one. Empty queue ⇒ dispatch_once is a no-op.
+        try:
+            from kompany.plugins.loader import registered as _registered
+
+            self.outward_executors = _registered("outward_executor")
+        except Exception:  # noqa: BLE001 — a broken plugin scan must not block boot
+            self.outward_executors = []
+        self.outward_lane = OutwardLane(
+            engine=self, registry=self.lane_registry
+        )
         self.self_update_proposals = SelfUpdateProposalStore(self.db)
         self.ticker = Ticker(
             engine=self,
             ticks=self.daemon_ticks,
             tick_interval_seconds=self.settings.tick_interval_seconds,
             auto_execute=self.settings.daemon_auto_execute,
+        )
+        # ADR-0008 Step 4: the outward lane runs as a ticker action so the
+        # daemon acts outward unattended. No-op on an empty queue; honours
+        # suspend via its own runtime gate.
+        self.ticker.actions.append(
+            ("outward", self.outward_lane.dispatch_once)
         )
 
         # Anima persona layer (06-12-anima-persona): emotion + diary tick

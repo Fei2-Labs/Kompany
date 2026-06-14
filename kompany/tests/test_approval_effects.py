@@ -267,11 +267,14 @@ def test_effect_actions_cover_both_pr4_action_types():
 
     from kompany.channels.outbox import ACTION_CHANNEL_POST
     from kompany.core.csuite_review import ACTION_CSUITE_REVIEW
+    from kompany.core.outward_lane import ACTION_OUTWARD_PARK
     from kompany.core.tool_actions import ACTION_TOOL_EXECUTE
 
+    # ADR-0008 added the parked-outward-action effect alongside the rest.
     assert HARNESS_EFFECT_ACTIONS == {
         ACTION_ENVELOPE_TOPUP, ACTION_BUDGET_INCREASE, ACTION_SELF_UPDATE,
-        ACTION_CHANNEL_POST, ACTION_TOOL_EXECUTE, ACTION_CSUITE_REVIEW,
+        ACTION_CHANNEL_POST, ACTION_OUTWARD_PARK, ACTION_TOOL_EXECUTE,
+        ACTION_CSUITE_REVIEW,
     }
 
 
