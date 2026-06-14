@@ -8,6 +8,35 @@ from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 from kompany.state.models import Project, ProjectStatus, Task, TaskStatus
 
+# Legacy ``projects.type`` values from before the ProjectType enum was
+# narrowed (pre-2026-06 schema). Coerced on read so old DBs / fresh clones
+# of an existing DB don't ValidationError. See handoff 2026-06-15.
+_LEGACY_PROJECT_TYPE_MAP = {
+    "growth": "strategic",
+    "dev": "operational",
+}
+_VALID_PROJECT_TYPES = {"revenue", "operational", "strategic"}
+
+
+def _safe_json(raw, default):
+    """Parse a JSON column defensively: one malformed row must never crash a
+    list read. Returns ``default`` on missing/invalid JSON."""
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return default
+
+
+def _coerce_project_type(raw) -> str:
+    """Map legacy/unknown ``type`` values onto the current ProjectType enum.
+    Unknown values fall back to ``operational`` rather than crashing."""
+    val = (raw or "").strip().lower()
+    if val in _VALID_PROJECT_TYPES:
+        return val
+    return _LEGACY_PROJECT_TYPE_MAP.get(val, "operational")
+
 
 class Projects:
     """Project store backed by SQLite."""
@@ -58,13 +87,13 @@ class Projects:
         return Project(
             id=row["id"],
             name=row["name"],
-            type=row["type"],
+            type=_coerce_project_type(row["type"]),
             status=row["status"],
             target_amount=row["target_amount"],
             funded_amount=row["funded_amount"],
             triggers_directive_id=row["triggers_directive_id"],
-            plan=json.loads(row["plan"]) if row["plan"] else {},
-            assigned_agents=json.loads(row["assigned_agents"]),
+            plan=_safe_json(row["plan"], {}),
+            assigned_agents=_safe_json(row["assigned_agents"], []),
         )
 
     def update_status(self, project_id: str, status: ProjectStatus) -> None:

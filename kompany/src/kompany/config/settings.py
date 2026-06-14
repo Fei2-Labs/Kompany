@@ -143,6 +143,19 @@ class KompanySettings(BaseSettings):
             "economy": self.model_economy,
         }.get(tier, self.model_primary)
 
+    def fallback_model_pool(self) -> list[str]:
+        """Distinct tier models used as the ADR-0005 model-fallback pool.
+
+        When a call's primary model is unavailable, the LLM client retries
+        each of these (skipping the one already tried) so a single-model
+        outage can't stall a lane-worker. Order: apex → primary → economy.
+        """
+        pool: list[str] = []
+        for m in (self.model_apex, self.model_primary, self.model_economy):
+            if m and m not in pool:
+                pool.append(m)
+        return pool
+
     def get_api_key_for_provider(self, provider: str) -> str:
         """Return the API key for a given provider name."""
         return {

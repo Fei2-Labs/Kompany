@@ -313,6 +313,8 @@ class KompanyEngine(
             silent_timeout_seconds=self._get_int_config(
                 "llm_silent_timeout_seconds", default=90
             ),
+            # ADR-0005: a lane-worker must survive a single-model outage.
+            fallback_models=self.settings.fallback_model_pool(),
         )
         self.registry = AgentRegistry(
             self.llm, self.settings, self.ledger, self.projects

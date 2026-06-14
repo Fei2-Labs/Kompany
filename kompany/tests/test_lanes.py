@@ -389,3 +389,15 @@ def test_no_fallback_configured_keeps_legacy_raise(tmp_path):
     client._invoke_provider = always_fail
     with pytest.raises(LLMUnavailable):
         client.call(model=primary, system="s", prompt="p", agent_name="ceo")
+
+
+def test_engine_wires_fallback_pool(tmp_path, monkeypatch):
+    """ADR-0005 model-fallback must be WIRED at engine construction, not just
+    available on the client (handoff 2026-06-15 Step 4)."""
+    from kompany.config.settings import KompanySettings
+    s = KompanySettings()
+    pool = s.fallback_model_pool()
+    assert pool, "fallback pool must be non-empty"
+    assert pool[0] == s.model_apex
+    # distinct + ordered apex→primary→economy
+    assert len(pool) == len(set(pool))
