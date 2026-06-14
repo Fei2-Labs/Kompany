@@ -74,7 +74,23 @@ fi
 # ---------------------------------------------------------------------
 echo "==> [3/3] Running cargo tauri build..."
 cd "${REPO_ROOT}/tauri/src-tauri"
+
+# Cargo bakes ABSOLUTE paths into target/ (e.g. tauri's generated plugin
+# permission files). If the repo was moved/renamed since the last build —
+# such as the 2026-06 restructure that nested the repo under kompany-core —
+# the stale cache points at the old path and `cargo tauri build` fails with
+# "failed to read ... permissions/.../*.toml: No such file or directory".
+# Guard: clean target/ only when the build path changed (not every build).
+PATH_SENTINEL="target/.kompany-build-path"
+CURRENT_PATH="$(pwd -P)"
+if [ -f "${PATH_SENTINEL}" ] && [ "$(cat "${PATH_SENTINEL}" 2>/dev/null)" != "${CURRENT_PATH}" ]; then
+  echo "    build path changed since last build — cargo clean (stale absolute-path cache)"
+  cargo clean
+fi
+
 cargo tauri build
+
+mkdir -p target && printf '%s' "${CURRENT_PATH}" > "${PATH_SENTINEL}"
 
 echo
 echo "==> Done. Installers under:"
