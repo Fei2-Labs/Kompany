@@ -77,11 +77,23 @@ def test_static_ui_assets_reachable():
             assert resp.status_code == 200, f"{path} -> {resp.status_code}"
 
 
-def test_root_redirects_to_ui():
+def test_root_serves_board_or_falls_back_to_ui():
+    """``/`` serves the operations board SPA when it has been built.
+
+    The board (kompany-core/board-ui) builds into ``board_ui/dist/``. When
+    present, ``/`` returns the SPA shell (200). When the board hasn't been
+    built (dev checkout without ``npm run build``), ``/`` falls back to a
+    redirect to the old cyberpunk terminal at ``/ui/``.
+    """
     with TestClient(app) as client:
         resp = client.get("/", follow_redirects=False)
-        assert resp.status_code in (302, 303, 307)
-        assert resp.headers["location"] in ("/ui/", "http://testserver/ui/")
+        if resp.status_code == 200:
+            # SPA shell served directly.
+            assert '<div id="root"></div>' in resp.text
+        else:
+            # No build on disk — graceful fallback to /ui/.
+            assert resp.status_code in (302, 303, 307)
+            assert resp.headers["location"] in ("/ui/", "http://testserver/ui/")
 
 
 def test_agents_status_returns_eleven_rows(monkeypatch):

@@ -11,8 +11,8 @@
 //      `--data-dir` from KOMPANY_DATA_DIR, defaulting to ~/.kompany
 //      (same resolution as every other Kompany interface).
 //   3. Poll `http://127.0.0.1:<port>/health` until 200 OK (or 30s).
-//   4. Load the WebView at `http://127.0.0.1:<port>/ui/` — the SPA
-//      handles the onboarding redirect itself.
+//   4. Load the WebView at `http://127.0.0.1:<port>/` — the new board
+//      (falls back to `/ui/` when the board bundle is unbuilt).
 //   5. On window close: kill the sidecar we spawned (never an attached
 //      foreign server), exit the app.
 //
@@ -165,7 +165,10 @@ fn spawn_sidecar(
 /// in attach mode that state is empty, so an attached foreign server
 /// (e.g. the launchd daemon) is never touched on app exit.
 fn open_main_window(handle: &AppHandle, port: u16) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/ui/", port);
+    // Open the operations board at the site root. FastAPI serves the React
+    // board at `/` and gracefully redirects to `/ui/` (cyberpunk terminal)
+    // when the board hasn't been built yet, so this is safe pre-build.
+    let url = format!("http://127.0.0.1:{}/", port);
     let webview_url =
         WebviewUrl::External(url.parse().map_err(|e| format!("invalid url: {}", e))?);
     let window = WebviewWindowBuilder::new(handle, "main", webview_url)

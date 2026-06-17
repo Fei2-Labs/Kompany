@@ -1,0 +1,3 @@
+node_modules/
+# Build output lands inside the Python package (../kompany/src/kompany/board_ui/dist).
+# Tracked separately by the engine's .gitignore; never committed from here.

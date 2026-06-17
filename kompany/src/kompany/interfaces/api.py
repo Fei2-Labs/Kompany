@@ -12,7 +12,12 @@ from secrets import compare_digest
 from typing import Any, AsyncIterator
 
 from fastapi import BackgroundTasks, Body, FastAPI, Form, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -129,6 +134,17 @@ def _web_ui_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "web_ui"
 
 
+def _board_ui_dir() -> Path:
+    """Resolve the built operations-board SPA inside the installed package.
+
+    Source lives in ``kompany-core/board-ui/``; ``vite build`` emits into
+    ``src/kompany/board_ui/dist/`` so the wheel / PyInstaller bundle ships
+    it. May be absent in a dev checkout that hasn't run a board build yet —
+    callers must guard for ``is_dir()`` being False.
+    """
+    return Path(__file__).resolve().parent.parent / "board_ui" / "dist"
+
+
 # Clean URL alias for the onboarding page so callers can link to
 # ``/ui/onboarding`` instead of the bare ``.html`` file. Must be
 # registered before the StaticFiles mount so it wins over the static
@@ -146,7 +162,69 @@ if _WEB_UI_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(_WEB_UI_DIR), html=True), name="ui")
 
 
-@app.get("/", include_in_schema=False)
-def root_redirect() -> RedirectResponse:
-    """Redirect bare ``/`` to the web UI."""
-    return RedirectResponse(url="/ui/", status_code=307)
+# ---------------------------------------------------------------------
+# Operations board SPA at ``/`` (the new default landing).
+#
+# The React/Vite board is built into ``board_ui/dist/`` and served at the
+# site root. The old cyberpunk terminal stays reachable at ``/ui/`` (mount
+# above). This block is the LAST thing registered in the module so every
+# API router wins over the SPA catch-all — only paths no router claimed
+# fall through to ``index.html`` (client-side routing).
+#
+# When the board hasn't been built yet (dev checkout, no ``npm run build``),
+# ``board_ui/dist/`` is absent: fall back to the old ``/ui/`` redirect so
+# startup never crashes.
+_BOARD_UI_DIR = _board_ui_dir()
+_BOARD_INDEX = _BOARD_UI_DIR / "index.html"
+
+# Non-SPA URL prefixes that must NEVER be rewritten to the board's
+# ``index.html`` — they belong to API routers, the old UI, docs, or health.
+_NON_SPA_PREFIXES = (
+    "ui",
+    "dashboard",
+    "observability",
+    "events",
+    "agents",
+    "health",
+    "docs",
+    "redoc",
+    "openapi.json",
+    "assets",
+)
+
+if _BOARD_INDEX.is_file():
+    # Serve the hashed JS/CSS bundle. ``base: '/'`` in vite.config.ts makes
+    # the SPA request ``/assets/*``, so mount the assets dir there.
+    _BOARD_ASSETS = _BOARD_UI_DIR / "assets"
+    if _BOARD_ASSETS.is_dir():
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(_BOARD_ASSETS)),
+            name="board-assets",
+        )
+
+    @app.get("/", include_in_schema=False)
+    def board_root() -> FileResponse:
+        """Serve the operations board at the site root."""
+        return FileResponse(str(_BOARD_INDEX))
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def board_spa(full_path: str) -> FileResponse:
+        """SPA catch-all: return ``index.html`` for client-side routes.
+
+        Registered after every API router, so real endpoints win. Only
+        unknown, non-API GET paths reach here; they get the board shell and
+        React Router resolves the route in the browser. API/UI/docs prefixes
+        are excluded so a stray miss 404s instead of masking a real route.
+        """
+        first = full_path.split("/", 1)[0]
+        if first in _NON_SPA_PREFIXES:
+            raise HTTPException(status_code=404)
+        return FileResponse(str(_BOARD_INDEX))
+
+else:  # pragma: no cover - depends on build artifacts being present
+
+    @app.get("/", include_in_schema=False)
+    def root_redirect() -> RedirectResponse:
+        """Board not built yet — fall back to the cyberpunk terminal."""
+        return RedirectResponse(url="/ui/", status_code=307)
