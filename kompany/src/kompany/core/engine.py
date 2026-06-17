@@ -70,6 +70,7 @@ from kompany.state.episodes import Episodes
 from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
+from kompany.state.skills import SkillStore
 from kompany.state.daemon_ticks import DaemonTickStore
 from kompany.state.intake_queue import IntakeQueueStore
 from kompany.core.lane_registry import LaneRegistry
@@ -113,6 +114,8 @@ from kompany.core.directive_proposal import DirectiveProposalMixin
 from kompany.core.target_review import TargetReviewMixin
 
 from kompany.core.engine_parts import (
+    AgenticChatMixin,
+    SkillCrystallizationMixin,
     CompanyLifecycleMixin,
     ProjectExecutionMixin,
     LearningMixin,
@@ -131,6 +134,8 @@ from kompany.core.engine_parts import (
 
 
 class KompanyEngine(
+    AgenticChatMixin,
+    SkillCrystallizationMixin,
     CompanyLifecycleMixin,
     ProjectExecutionMixin,
     LearningMixin,
@@ -161,6 +166,7 @@ class KompanyEngine(
         self.journal = Journal(self.db)
         self.projects = Projects(self.db)
         self.memory = AgentMemory(self.db)
+        self.skills = SkillStore(self.db)
         self.audit = AuditLog(self.db)
         self.debates = Debates(self.db)
         self.episodes = Episodes(self.db)
@@ -327,6 +333,15 @@ class KompanyEngine(
                 ("email_poll", self.email_poller.tick_action)
             )
 
+        # OAuth-subscription token sink (06-16-agentic-chat-engine P3).
+        # Backed by the same encrypted credential vault; threaded into the
+        # LLMClient so ``chatgpt-oauth:*`` calls authenticate with the
+        # stored (auto-refreshed) bearer token. `kompany auth openai`
+        # populates it; absent a login the provider path raises a clear
+        # "run kompany auth openai" error.
+        from kompany.llm.oauth import OAuthTokenStore
+
+        self.oauth_token_store = OAuthTokenStore(self.credentials)
         self.llm = LLMClient(
             settings=self.settings,
             cost_tracker=self.cost_tracker,
@@ -338,6 +353,7 @@ class KompanyEngine(
             ),
             # ADR-0005: a lane-worker must survive a single-model outage.
             fallback_models=self.settings.fallback_model_pool(),
+            oauth_token_store=self.oauth_token_store,
         )
         self.registry = AgentRegistry(
             self.llm, self.settings, self.ledger, self.projects

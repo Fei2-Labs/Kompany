@@ -23,6 +23,10 @@ class KompanySettings(BaseSettings):
     kimi_api_key: str = Field(default="", alias="KIMI_API_KEY")
     custom_api_key: str = Field(default="", alias="CUSTOM_LLM_API_KEY")
     custom_base_url: str = Field(default="", alias="CUSTOM_LLM_BASE_URL")
+    # Optional web-search provider key for the in-loop web_search tool
+    # (06-16-agentic-chat-engine P1). Tavily. When unset, web_search
+    # returns a graceful "unconfigured" observation — never required.
+    tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
     telegram_allowed_chat_ids: str = Field(default="", alias="TELEGRAM_ALLOWED_CHAT_IDS")
@@ -86,6 +90,50 @@ class KompanySettings(BaseSettings):
     # Kompany-owned loop instead of the opencode CLI. Default OFF — the
     # rented vehicles stay the default until native proves itself.
     native_runner_enabled: bool = False
+
+    # Agentic CEO chat (06-16-agentic-chat-engine P2). When ON, a real
+    # ``answer``/``execute`` request in the board chat runs the upgraded
+    # NativeRunner loop AS the CEO (persona system prompt + in-loop tools +
+    # streaming + inline approval gate) instead of a single ``ceo.answer()``
+    # /handler call. Requires a native-tool-capable model (Anthropic /
+    # OpenAI-compatible); the engine silently falls back to the legacy
+    # single-call path when the model can't do native tool_use, so the
+    # board contract is never broken. Default OFF — the single-call path
+    # stays the default until the agentic chat proves itself.
+    agentic_chat_enabled: bool = False
+    # Per-chat-session caps for the agentic loop (cost-visibility + safety).
+    agentic_chat_budget_cap_usd: float = 0.50
+    agentic_chat_max_turns: int = 16
+
+    # Learned-skill / memory compounding (06-16-agentic-chat-engine P5).
+    # After a SUCCESSFUL agentic chat the engine distills "what worked" into
+    # a reusable skill (SOP + trigger words) via one cheap LLM call, stored
+    # in ``agent_skills`` and retrieved by trigger words on later similar
+    # requests. Default ON but gated: only crystallizes on success, dedupes
+    # against existing skills, and skips trivial chats below the tool-use
+    # floor (so a one-tool answer never makes a skill). Flip OFF to disable.
+    skill_crystallization_enabled: bool = True
+    # Minimum distinct tool calls in a session before it is worth
+    # crystallizing — keeps trivial one-shot chats out of the skill tree.
+    skill_crystallize_min_tools: int = 2
+    # Max skills injected into the chat system prompt as "relevant past
+    # skills" (token-bounded retrieval).
+    skill_retrieve_limit: int = 3
+    # History compression for the agentic loop (GenericAgent ~30K-context
+    # trick): when the running transcript grows past this many turns, older
+    # turns are folded into a single rolling summary so long sessions stay
+    # token-bounded; the latest working checkpoint is preserved intact. 0
+    # disables compression.
+    agentic_history_compress_after_turns: int = 8
+
+    # External MCP servers the in-loop MCP client connects to (06-16 P4).
+    # A list of dicts: {name, transport: "stdio"|"sse", command/args/env or
+    # url, read_only?: bool, read_only_tools?: [str]}. Each server's tools
+    # are registered as ``mcp__<server>__<tool>`` in the chat registry —
+    # EXTERNAL_ACTION (gated) by default unless marked read-only. Unreachable
+    # servers are skipped with a health note; never required. Configured via
+    # YAML (env can't carry a list cleanly).
+    mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
 
     # Daemon tick loop (06-12-daemon-tick-loop PR1): wake interval of the
     # autonomous ticker, and the advance-work gate (PRD D3 step 3 — at

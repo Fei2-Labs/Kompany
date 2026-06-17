@@ -16,6 +16,12 @@ class Provider(str, Enum):
     # opencode:openai/gpt-5).
     CODEX_CLI = "codex_cli"
     OPENCODE_CLI = "opencode_cli"
+    # OAuth-subscription provider (06-16-agentic-chat-engine P3). Routes
+    # native tool_use calls through the Codex/ChatGPT backend
+    # (chatgpt.com/backend-api) authenticated by a stored OAuth bearer
+    # token — NOT an API key, NOT a CLI shell-out. Model id convention:
+    # "chatgpt-oauth:<model>" (e.g. chatgpt-oauth:gpt-5).
+    CHATGPT_OAUTH = "chatgpt_oauth"
     OPENAI = "openai"
     GEMINI = "gemini"
     GLM = "glm"
@@ -29,6 +35,15 @@ PROVIDER_BASE_URLS: dict[Provider, str] = {
     Provider.GEMINI: "https://generativelanguage.googleapis.com/v1beta/openai/",
     Provider.GLM: "https://open.bigmodel.cn/api/paas/v4/",
     Provider.KIMI: "https://api.moonshot.cn/v1",
+    # OAuth-subscription path (06-16-agentic-chat-engine P3). The Codex
+    # backend the Codex CLI itself uses, NOT api.openai.com — spending
+    # ChatGPT subscription quota rather than API billing (research §2).
+    # TODO(verify-live): research/subscription-oauth-and-openclaw.md §2
+    # cites `chatgpt.com/backend-api` from OpenClaw docs, NOT confirmed
+    # against OpenAI. The OpenAI-compatible chat-completions sub-path is a
+    # best guess; verify the real path + body shape against a live Codex
+    # login. Overridable via KOMPANY_CHATGPT_OAUTH_BASE_URL.
+    Provider.CHATGPT_OAUTH: "https://chatgpt.com/backend-api/codex",
 }
 
 # Prefix-based auto-detection: (prefix, provider). Order matters — first
@@ -37,6 +52,10 @@ _MODEL_PREFIX_MAP: list[tuple[str, Provider]] = [
     # CLI providers first: explicit "<cli>:" prefixes are operator
     # choices and must win over any broader provider prefix.
     ("claude-code", Provider.CLAUDE_CODE),
+    # OAuth-subscription prefix must precede the broader "codex:" CLI
+    # prefix: "chatgpt-oauth:" is an explicit "use my ChatGPT sub via the
+    # native loop" choice, distinct from the codex CLI shell-out.
+    ("chatgpt-oauth:", Provider.CHATGPT_OAUTH),
     ("codex:", Provider.CODEX_CLI),
     ("opencode:", Provider.OPENCODE_CLI),
     ("claude-", Provider.ANTHROPIC),

@@ -24,6 +24,9 @@ dependencies = [
 [project.optional-dependencies]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["mcp>=1.0"]
+# Edge-CDP browser tools for the agentic loop (06-16 P4). Optional: the
+# browser tools degrade to a clear observation when Playwright is absent.
+browser = ["playwright>=1.40"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
 # Desktop bundle build: PyInstaller produces the sidecar binary that
 # the Tauri shell spawns. Pillow only needed to render the placeholder
@@ -50,6 +53,9 @@ include = [
     "src/kompany/web_ui/**/*.js",
     "src/kompany/web_ui/**/*.css",
     "src/kompany/web_ui/**/*.ttf",
+    # Operations board SPA (built by board-ui via `vite build`). Must be
+    # listed here or the desktop `--collect-all kompany` bundle drops it.
+    "src/kompany/board_ui/dist/**/*",
 ]
 
 [tool.hatch.build.targets.sdist]
@@ -63,6 +69,7 @@ include = [
     "src/kompany/web_ui/**/*.js",
     "src/kompany/web_ui/**/*.css",
     "src/kompany/web_ui/**/*.ttf",
+    "src/kompany/board_ui/dist/**/*",
     "tests/**/*.py",
     "README.md",
     "pyproject.toml",

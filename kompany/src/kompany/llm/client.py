@@ -14,6 +14,8 @@ from kompany.llm.client_parts._types import (
     LLMResponse,
     ProviderErrorHandler,
     T,
+    ToolCallRequest,
+    ToolSpec,
     _SilentTimeoutMarker,
 )
 from kompany.llm.client_parts._provider_mixin import ProviderMixin
@@ -27,6 +29,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "LLMClient",
     "LLMResponse",
+    "ToolSpec",
+    "ToolCallRequest",
     "_SilentTimeoutMarker",
     "ProviderErrorHandler",
     "DEFAULT_LLM_SILENT_TIMEOUT_SECONDS",
@@ -49,8 +53,17 @@ class LLMClient(ProviderMixin, WatchdogMixin):
         watchdog: Any = None,
         silent_timeout_seconds: float | None = None,
         fallback_models: list[str] | None = None,
+        oauth_token_store: Any = None,
     ):
         self.settings = settings
+        # OAuth-subscription token sink (06-16-agentic-chat-engine P3).
+        # When wired (engine passes an
+        # :class:`~kompany.llm.oauth.token_store.OAuthTokenStore`), the
+        # ``chatgpt-oauth:*`` provider path authenticates with the stored
+        # bearer token (auto-refreshed). None = no OAuth login configured;
+        # selecting that provider then raises a clear "run kompany auth
+        # openai" error rather than silently misrouting to API billing.
+        self.oauth_token_store = oauth_token_store
         self.cost_tracker = cost_tracker
         self.provider_error_handler = provider_error_handler
         # Optional audit log: when set, every successful LLM call writes an
@@ -188,3 +201,72 @@ class LLMClient(ProviderMixin, WatchdogMixin):
         parsed = output_schema.model_validate_json(text)
         resp.parsed = parsed
         return resp
+
+    def call_with_tools(
+        self,
+        model: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[ToolSpec],
+        agent_name: str = "unknown",
+        directive_id: str | None = None,
+        max_tokens: int = 4096,
+        action_type: str | None = None,
+        tool_choice: str = "auto",
+        provider_override: Provider | None = None,
+    ) -> LLMResponse:
+        """One native tool_use turn (06-16-agentic-chat-engine P1).
+
+        Uses PROVIDER-NATIVE function calling — Anthropic ``tools=`` +
+        ``tool_use`` blocks, OpenAI/OpenAI-compatible ``tools=`` +
+        ``tool_calls``. ``messages`` is a provider-native multi-turn list
+        (the caller threads the prior assistant turn + tool results
+        between calls). The returned :class:`LLMResponse` carries
+        ``tool_calls`` (normalized) and ``raw_assistant_message`` (replay
+        verbatim on the next turn).
+
+        Cost/usage is booked through the same path as ``call`` /
+        ``call_structured`` (``cost_tracker.record`` + ``llm.call``
+        audit) via :meth:`_record_success`, keyed by ``action_type``.
+
+        Raises ``ValueError`` for providers that can't do native tool_use
+        (CLI vehicles) — callers must check :meth:`supports_native_tools`
+        and fall back to the JSON protocol.
+        """
+        provider = provider_override or self._resolve_provider(model)
+        try:
+            resp = self._invoke_provider_with_tools(
+                provider=provider,
+                model=model,
+                system=system,
+                messages=messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                tool_choice=tool_choice,
+            )
+        except Exception as exc:
+            self._handle_provider_error(
+                exc,
+                provider=provider,
+                model=model,
+                agent_name=agent_name,
+                directive_id=directive_id,
+            )
+            raise
+        # Book cost/usage exactly like the other success exits. The
+        # "prompt" label uses the latest user content for the ledger
+        # description, falling back to the system prompt.
+        last_user = next(
+            (m for m in reversed(messages) if m.get("role") == "user"),
+            None,
+        )
+        desc = str((last_user or {}).get("content", system))[:60]
+        return self._record_success(
+            resp,
+            provider=provider,
+            model=model,
+            prompt=desc,
+            agent_name=agent_name,
+            directive_id=directive_id,
+            action_type=action_type,
+        )

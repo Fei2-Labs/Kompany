@@ -38,6 +38,9 @@ from kompany.interfaces.cli_parts import (  # noqa: E402,F401
     knowledge as _cli_knowledge,
     model_source as _cli_model_source,
 )
+# auth sub-app (06-16-agentic-chat-engine P3). The module registers itself
+# on the shared ``app`` at import (like model_source); just import it.
+from kompany.interfaces.cli_parts import auth as _cli_auth  # noqa: E402,F401
 
 # Daemon sub-app (06-12-daemon-tick-loop PR2). Lives in cli_daemon.py —
 # cli.py is over the file-size cap, new command groups go in siblings.

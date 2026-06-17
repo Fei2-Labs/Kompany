@@ -168,6 +168,18 @@ def select_runner(
         and llm_client is not None
     ):
         vehicle = "native"
+    # OAuth-subscription kind (06-16-agentic-chat-engine P3): its vehicle is
+    # already "native" by mapping, but the native loop still needs the
+    # threaded ``llm_client`` and the ``native_runner_enabled`` gate. If
+    # either is missing we fall back to the legacy single-call path rather
+    # than constructing a NativeRunner with no client.
+    if source.kind == "openai_oauth_subscription":
+        if not (
+            getattr(settings, "native_runner_enabled", False)
+            and llm_client is not None
+        ):
+            return None
+        vehicle = "native"
     binary = VEHICLE_BINARIES.get(vehicle)
     if binary is not None and shutil.which(binary) is None:
         _warn_vehicle_missing(health_events, vehicle, binary, source.kind)

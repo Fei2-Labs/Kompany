@@ -25,6 +25,7 @@ from kompany.state.episodes import Episodes
 from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
 from kompany.state.memory import AgentMemory
+from kompany.state.skills import SkillStore
 from kompany.state.runtime import RuntimeStateStore
 from kompany.state.remote_replay import RemoteReplayStore
 from kompany.state.shadow_costs import ShadowCostStore
@@ -308,6 +309,7 @@ class EngineOpsMixin:
         self.journal = Journal(self.db)
         self.projects = Projects(self.db)
         self.memory = AgentMemory(self.db)
+        self.skills = SkillStore(self.db)
         self.audit = AuditLog(self.db)
         self.debates = Debates(self.db)
         self.episodes = Episodes(self.db)

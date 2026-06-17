@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -37,6 +37,54 @@ class _SilentTimeoutMarker(BaseException):
 
 
 @dataclass
+class ToolSpec:
+    """Provider-neutral tool definition (06-16-agentic-chat-engine P1).
+
+    A single description of a callable tool that each provider mixin
+    translates to its own wire format (Anthropic ``tools=`` / OpenAI
+    ``tools=[{"type":"function",...}]``). ``parameters`` is a JSON-schema
+    object describing the tool's arguments.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any] = field(default_factory=lambda: {
+        "type": "object", "properties": {}
+    })
+
+    def to_anthropic(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.parameters or {"type": "object", "properties": {}},
+        }
+
+    def to_openai(self) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters or {"type": "object", "properties": {}},
+            },
+        }
+
+
+@dataclass
+class ToolCallRequest:
+    """One tool invocation the model asked for, provider-normalized.
+
+    ``call_id`` is the provider's correlation id (Anthropic ``tool_use``
+    block id / OpenAI ``tool_call`` id) that the matching result must
+    echo back so the next turn is well-formed.
+    """
+
+    call_id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class LLMResponse:
     text: str
     input_tokens: int
@@ -44,6 +92,15 @@ class LLMResponse:
     cost_usd: float
     model: str
     parsed: Any = None
+    # Native tool_use surface (06-16-agentic-chat-engine P1). Populated by
+    # the ``call_with_tools`` path: the tool calls the model requested this
+    # turn, ``stop_reason`` ("tool_use"/"end_turn"/"stop"/...), and the
+    # provider-native assistant message to replay on the next turn (so the
+    # follow-up tool_result/role:"tool" message threads correctly). Empty
+    # on the legacy text paths.
+    tool_calls: list[ToolCallRequest] = field(default_factory=list)
+    stop_reason: str | None = None
+    raw_assistant_message: Any = None
     # Set to True by :class:`CostTracker.record` (and by
     # ``record_ai_cost``) after the response has been booked against the
     # ledger. Callers can read this to avoid double-recording the same

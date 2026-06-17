@@ -34,6 +34,11 @@ ALLOWED_CREDENTIALS = {
     # Resend (native API) — preferred over raw SMTP when present.
     "resend_api_key",
     "resend_from",
+    # OAuth-subscription credentials (06-16-agentic-chat-engine P3).
+    # The OpenAI Codex/ChatGPT PKCE token sink — a JSON blob holding
+    # {access_token, refresh_token, expires_at, account_id}. Encrypted at
+    # rest like every other vault row; never written to settings/env.
+    "openai_oauth_tokens",
 }
 
 

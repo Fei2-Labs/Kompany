@@ -322,6 +322,29 @@ class DirectiveProcessingMixin:
                 return self._handle_clarify(
                     directive, classification, session_id, start_time
                 )
+
+            # ----- Agentic CEO chat (06-16 P2) -----
+            # A real ``answer``/``execute`` request runs the upgraded
+            # NativeRunner loop AS the CEO (persona + in-loop tools +
+            # streaming + inline approval gate) in-conversation. The fast
+            # classify above still decided route/gate/clarify; here we hand
+            # the real work to the loop instead of a single ``ceo.answer()``
+            # /handler call. Gated only when the model can't do native
+            # tool_use (falls back to the legacy single-call path below).
+            if route in ("answer", "execute") and self._agentic_chat_available():
+                directive.directive_type = DirectiveType(
+                    classification.directive_type
+                )
+                seed = self._compose_session_context(session_id) or None
+                return self._handle_agentic_chat(
+                    directive,
+                    classification,
+                    ceo,
+                    session_id,
+                    start_time,
+                    seed_context=seed,
+                )
+
             if route == "answer":
                 return self._handle_answer(
                     directive,

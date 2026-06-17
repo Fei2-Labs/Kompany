@@ -25,7 +25,18 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-SourceKind = Literal["custom_api", "claude_subscription", "openai_subscription"]
+SourceKind = Literal[
+    "custom_api",
+    "claude_subscription",
+    "openai_subscription",
+    # OAuth-subscription credential (06-16-agentic-chat-engine P3). A
+    # ChatGPT/Codex PKCE login whose VEHICLE is the Kompany-owned NATIVE
+    # loop — credential and vehicle are decoupled (OpenClaw model): a cheap
+    # sub runs Kompany's own tools + approval gate + persona, NOT the codex
+    # CLI. Distinct from ``openai_subscription`` (which is the codex-CLI
+    # vehicle, no OAuth).
+    "openai_oauth_subscription",
+]
 BillingMode = Literal["api", "subscription"]
 
 # Derived billing default per source kind (PRD D2). Overridable — e.g. a
@@ -35,6 +46,7 @@ _DEFAULT_BILLING_MODE: dict[str, BillingMode] = {
     "custom_api": "api",
     "claude_subscription": "subscription",
     "openai_subscription": "subscription",
+    "openai_oauth_subscription": "subscription",
 }
 
 # PRD D1 — engine-internal vehicle per source kind. Subscription compute
@@ -44,6 +56,12 @@ _VEHICLE_BY_KIND: dict[str, str] = {
     "claude_subscription": "claude_code",
     "openai_subscription": "codex",
     "custom_api": "opencode",
+    # OAuth-subscription → NATIVE loop (06-16-agentic-chat-engine P3,
+    # credential×vehicle decouple). The ChatGPT sub reaches Kompany's own
+    # agentic loop via the OAuth bearer token, so native tool_use +
+    # approval gate + persona are all in play. select_runner threads the
+    # llm_client and picks NativeRunner when native_runner_enabled.
+    "openai_oauth_subscription": "native",
 }
 
 # Which *single-call* model ids route through the subscription's own CLI
@@ -56,6 +74,10 @@ _VEHICLE_BY_KIND: dict[str, str] = {
 _SUBSCRIPTION_CLI_PREFIXES: dict[str, tuple[str, ...]] = {
     "claude_subscription": ("claude-code",),
     "openai_subscription": ("codex:",),
+    # OAuth-subscription single-call ids carry the ``chatgpt-oauth:``
+    # routing prefix (mirrors ``_MODEL_PREFIX_MAP``). These ride the
+    # ChatGPT sub via the OAuth bearer token → shadow-only per-call spend.
+    "openai_oauth_subscription": ("chatgpt-oauth:",),
     "custom_api": (),
 }
 
