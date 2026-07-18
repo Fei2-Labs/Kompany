@@ -135,6 +135,18 @@ class KompanySettings(BaseSettings):
     # YAML (env can't carry a list cleanly).
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
 
+    # Remote backup config block (07-14 cloud-deploy-backup-restore step 5).
+    # Raw dict — parsed by RemoteBackupConfig.from_dict in state/remote_backup.
+    # YAML example:
+    #   remote_backup:
+    #     endpoint_url: https://<acct>.r2.cloudflarestorage.com
+    #     bucket: kompany-backups
+    #     access_key_id: ...
+    #     secret_access_key: ...
+    #     passphrase: ...
+    #     retain: 7
+    remote_backup: dict[str, Any] = Field(default_factory=dict)
+
     # Daemon tick loop (06-12-daemon-tick-loop PR1): wake interval of the
     # autonomous ticker, and the advance-work gate (PRD D3 step 3 — at
     # most one pending task of one active project per tick). Flip
@@ -350,6 +362,9 @@ class KompanySettings(BaseSettings):
                 overrides["self_update_test_cmd"] = str(
                     data["self_update_test_cmd"]
                 )
+            # Remote backup config block (07-14 step 5).
+            if "remote_backup" in data and isinstance(data["remote_backup"], dict):
+                overrides["remote_backup"] = data["remote_backup"]
         settings = cls(**overrides)
         # ModelSource fallback (06-11-harness-execution-leg PR5b): the
         # founder surfaces persist the active source to

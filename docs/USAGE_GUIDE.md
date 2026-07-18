@@ -536,9 +536,9 @@ The CLI and desktop app only act while you have them open. The **daemon** keeps 
 
 ```bash
 kompany daemon run         # run the server in the foreground (Ctrl-C to stop)
-kompany daemon install     # install as a launchd LaunchAgent (macOS) — survives reboots
-kompany daemon status      # live server + launchd + ticker report
-kompany daemon uninstall   # unload and remove the LaunchAgent
+kompany daemon install     # install as a launchd agent (macOS) or systemd service (Linux) — survives reboots
+kompany daemon status      # live server + supervisor + ticker report
+kompany daemon uninstall   # remove the launchd plist or systemd unit
 ```
 
 These four commands are deliberately CLI-only — they manage a process on *this* machine. Tick visibility lives on the existing surfaces instead: `kompany status` (and `GET /status`, `kompany_status`, `k.status()`) carries a `ticker` block (`running`, `last_tick_at`, `tick_count`, `interval_seconds`), and `kompany observability` shows the most recent ticks.
@@ -570,7 +570,38 @@ One billing consequence to know: because the heartbeat doesn't run while suspend
 
 ### Install details (macOS)
 
-`kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` with `KeepAlive` and `RunAtLoad`, pins `KOMPANY_DATA_DIR` to the data directory chosen at install time, and logs to `<data_dir>/logs/daemon.out.log` / `daemon.err.log`. The launch command prefers the server binary bundled inside `/Applications/Kompany.app` (no Python install needed); without the desktop app it falls back to your current Python interpreter. On non-macOS platforms `install` exits with a clear macOS-only message — run `kompany daemon run` under your own process supervisor instead.
+`kompany daemon install` writes `~/Library/LaunchAgents/com.kompany.daemon.plist` with `KeepAlive` and `RunAtLoad`, pins `KOMPANY_DATA_DIR` to the data directory chosen at install time, and logs to `<data_dir>/logs/daemon.out.log` / `daemon.err.log`. The launch command prefers the server binary bundled inside `/Applications/Kompany.app` (no Python install needed); without the desktop app it falls back to your current Python interpreter.
+
+### Install details (Linux / systemd)
+
+On Linux the same `kompany daemon install` writes `/etc/systemd/system/kompany-daemon.service` with `Restart=always` and `WantedBy=multi-user.target`, then runs `systemctl daemon-reload` + `enable --now` (best-effort — failures are reported but never fatal). The unit pins `KOMPANY_DATA_DIR` and prepends `~/.local/bin` to `PATH` so CLI-harness modes (claude, codex, opencode) resolve under the daemon. Logs go to journald: `journalctl -u kompany-daemon -f`. Requires root (or sudo) to write to `/etc/systemd/system`.
+
+---
+
+## Move the Company to Another Machine
+
+The live company state is more than the database: it's the SQLite file **plus** the vault master key, any `*.key` files (e.g. a git-crypt key), and `config.yaml`. `kompany backup` only snapshots the database; `kompany export` bundles all of it into one passphrase-encrypted file you can carry to a new machine (a laptop swap, or a VPS for true 24/7 operation).
+
+```bash
+# On the old machine — export everything into one encrypted bundle.
+# --handoff additionally tombstones THIS machine: its engine/daemon
+# stops ticking, so two machines never run the same company.
+kompany export --out company.kmp --handoff
+
+# On the new machine (after `pip install`-ing kompany):
+kompany import company.kmp     # prompts for the same passphrase
+kompany status                 # verify the company came across
+kompany daemon install         # resume 24/7 operation here
+```
+
+Details worth knowing:
+
+- The bundle payload is encrypted (PBKDF2-SHA256 → Fernet) with the passphrase you enter at export; secrets never travel in plaintext. Only a small metadata header (file list, timestamp) is readable without it.
+- The database is snapshotted live via SQLite's `Connection.backup()` — no need to stop the daemon first.
+- `kompany export` **without** `--handoff` leaves the source machine live — use that for off-machine backups rather than migration.
+- After `--handoff`, the old machine's daemon refuses to start and every tick records `idle_exported`. Importing a bundle onto that machine clears the tombstone and makes it live again.
+- `kompany import` refuses to overwrite an existing company database unless you pass `--force`.
+- Not included (by design): per-project git workspaces (clone them from their repos), browser login sessions, and the launchd/systemd job itself — reinstall the daemon on the new machine.
 
 ---
 
@@ -605,9 +636,9 @@ kompany daemon run --host 0.0.0.0 --port 8000
 
 This is the recommended remote path: zero public exposure, no reverse-proxy or TLS setup, works on cellular.
 
-### Note on the launchd daemon
+### Note on the daemon supervisor
 
-`kompany daemon install` currently pins the LaunchAgent to `127.0.0.1`. For phone access run the daemon in the foreground with `--host` as above, or put `kompany daemon run --host 0.0.0.0` under your own supervisor.
+`kompany daemon install` pins the daemon to `127.0.0.1` on both macOS (launchd) and Linux (systemd). For phone access run the daemon in the foreground with `--host` as above, or put `kompany daemon run --host 0.0.0.0` under your own supervisor.
 
 There is no separate mobile app or mobile-specific view — the responsive `/ui/` is the mobile surface. (The engine also has an `INTAKE_TOKEN`/`mobile_remote_token`-gated `POST /intake` endpoint for sending directives remotely — see Using the REST API — but approvals live in the web UI.)
 
@@ -636,7 +667,7 @@ A `data_dir` key inside the chosen workspace's `config.yaml` still applies after
 
 Same operations everywhere: REST `GET /workspaces`, `POST /workspaces/switch`, `POST /workspaces`; MCP `kompany_workspaces` / `kompany_workspace_switch`; SDK `k.workspaces_list()` / `k.workspace_switch(name)` / `k.workspace_create(name)`; and a switcher in the web UI's Settings page (two-stage confirm; the page reloads after the switch).
 
-Switching while a server is running: the sidecar's `POST /workspaces/switch` drops its cached engine, so the **next** request rebinds to the new brand's data dir (the desktop WebView just reloads). One server serves one active workspace at a time. The daemon's launchd plist pins `KOMPANY_DATA_DIR`, so an installed daemon **stays on its brand** regardless of registry switches — the switch response says `restart_required: true` in that case. Running multiple brand daemons side by side (one plist per brand) is future work.
+Switching while a server is running: the sidecar's `POST /workspaces/switch` drops its cached engine, so the **next** request rebinds to the new brand's data dir (the desktop WebView just reloads). One server serves one active workspace at a time. The daemon's launchd plist / systemd unit pins `KOMPANY_DATA_DIR`, so an installed daemon **stays on its brand** regardless of registry switches — the switch response says `restart_required: true` in that case. Running multiple brand daemons side by side (one unit per brand) is future work.
 
 ---
 

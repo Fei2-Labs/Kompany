@@ -50,6 +50,7 @@ from kompany.core.harness_execution import (
     ACTION_ENVELOPE_TOPUP,
 )
 from kompany.state.daemon_ticks import DaemonTickStore
+from kompany.state.export_bundle import read_exported_marker
 from kompany.state.models import TaskStatus
 
 log = logging.getLogger(__name__)
@@ -146,7 +147,11 @@ class Ticker:
         actions: list[str] = []
         errors: dict[str, str] = {}
         runtime = self._engine.runtime.get() or {}
-        if runtime.get("state") == "suspended":
+        if read_exported_marker(self._engine.settings.data_dir) is not None:
+            # Handoff tombstone: this company moved to another machine.
+            # Never tick here — the imported copy is the live one.
+            outcome = "idle_exported"
+        elif runtime.get("state") == "suspended":
             outcome = "idle_suspended"
         else:
             for name, action in self.actions:
@@ -238,7 +243,32 @@ class Ticker:
             trimmed = trim(max_full)
             if trimmed:
                 actions.append(f"episodes_trimmed:{len(trimmed)}")
+        # Remote backup (07-14 step 5): upload an encrypted bundle every
+        # ~24h (288 ticks at 300s). Best-effort — failures are logged,
+        # never fatal to the tick.
+        if self.tick_count % 288 == 0 and self.tick_count > 0:
+            rb = self._maybe_remote_backup()
+            if rb:
+                actions.append(rb)
         return actions
+
+    def _maybe_remote_backup(self) -> str | None:
+        """Upload an encrypted bundle to remote storage if configured."""
+        cfg_dict = getattr(self._engine.settings, "remote_backup", None)
+        if not cfg_dict or not isinstance(cfg_dict, dict):
+            return None
+        try:
+            from kompany.state.remote_backup import (
+                RemoteBackupConfig,
+                RemoteBackupError,
+                upload_bundle,
+            )
+            cfg = RemoteBackupConfig.from_dict(cfg_dict)
+            result = upload_bundle(cfg, self._engine.settings.data_dir)
+            return f"remote_backup:{result['key']}"
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            log.warning("remote backup failed: %s", exc)
+            return "remote_backup:error"
 
     # ------------------------------------------------------------------
     # Internals

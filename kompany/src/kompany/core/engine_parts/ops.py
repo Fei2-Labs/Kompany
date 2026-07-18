@@ -378,3 +378,47 @@ class EngineOpsMixin:
             "auto_pre_restore_id": auto_meta["id"],
         }
 
+    def export_company(
+        self,
+        passphrase: str,
+        out_path: str | None = None,
+        handoff: bool = False,
+    ) -> dict[str, Any]:
+        """Export the full engine state as a passphrase-encrypted bundle.
+
+        Bundle = live DB snapshot + config.yaml + vault master key +
+        any ``*.key`` files at the data_dir root. With ``handoff=True``
+        the company on THIS machine is suspended and tombstoned so two
+        machines never tick the same company (the bundle's new home is
+        the live one).
+        """
+        from pathlib import Path
+
+        from kompany.state.export_bundle import create_bundle, write_exported_marker
+
+        meta = create_bundle(
+            self.settings.data_dir,
+            passphrase,
+            Path(out_path) if out_path else None,
+        )
+        self.audit.record(
+            "export.created",
+            f"Company exported to bundle: {meta['path']}",
+            detail={
+                "path": meta["path"],
+                "size_bytes": meta["size_bytes"],
+                "files": meta["files"],
+                "handoff": handoff,
+            },
+        )
+        if handoff:
+            self.suspend(reason=f"exported (handoff) to {meta['path']}")
+            marker = write_exported_marker(self.settings.data_dir, meta["path"])
+            self.audit.record(
+                "export.handoff",
+                "Company handed off — this machine is tombstoned",
+                detail=marker,
+            )
+            meta = {**meta, "handoff": True, "exported_at": marker["exported_at"]}
+        return meta
+

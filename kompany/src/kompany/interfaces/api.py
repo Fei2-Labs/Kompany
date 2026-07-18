@@ -34,6 +34,22 @@ app = FastAPI(
 )
 app.include_router(mcp_bridge_router)
 
+# CORS (07-14 cloud-deploy): when the engine runs on a VPS, the
+# kompany-world UI and other browser clients need cross-origin access.
+# Opt-in via KOMPANY_CORS_ORIGINS (comma-separated). Default off —
+# local sidecar mode serves UI from the same origin, no CORS needed.
+_cors_origins = os.environ.get("KOMPANY_CORS_ORIGINS", "").strip()
+if _cors_origins:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in _cors_origins.split(",") if o.strip()],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 _engine: KompanyEngine | None = None
 
 
@@ -160,6 +176,13 @@ def onboarding_alias() -> RedirectResponse:
 _WEB_UI_DIR = _web_ui_dir()
 if _WEB_UI_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=str(_WEB_UI_DIR), html=True), name="ui")
+
+# Kompany World (Phaser office visualization) at /world/. The built
+# SPA lives in ``world_ui/dist/`` — deploy it there on the VPS. When
+# absent (local dev without the world UI), the mount is skipped.
+_WORLD_UI_DIR = Path(__file__).resolve().parent.parent / "world_ui" / "dist"
+if _WORLD_UI_DIR.is_dir():
+    app.mount("/world", StaticFiles(directory=str(_WORLD_UI_DIR), html=True), name="world")
 
 
 # ---------------------------------------------------------------------

@@ -136,9 +136,9 @@ def test_status_no_server(tmp_path, fake_home, darwin, launchctl_recorder):
         "running": False, "port": None, "pid": None, "source": "none",
     }
     assert result["ticker"] is None
-    assert result["launchd"]["installed"] is False
-    assert result["launchd"]["loaded"] is False
-    assert result["launchd"]["plist_path"].endswith(
+    assert result["supervisor"]["installed"] is False
+    assert result["supervisor"]["loaded"] is False
+    assert result["supervisor"]["plist_path"].endswith(
         "Library/LaunchAgents/com.kompany.daemon.plist"
     )
 
@@ -198,8 +198,8 @@ def test_status_loaded_via_launchctl_print(
 
     result = daemon_ops.daemon_status(tmp_path)
 
-    assert result["launchd"]["installed"] is True
-    assert result["launchd"]["loaded"] is True
+    assert result["supervisor"]["installed"] is True
+    assert result["supervisor"]["loaded"] is True
     assert calls == [[
         "launchctl", "print", f"gui/{os.getuid()}/com.kompany.daemon",
     ]]
@@ -426,3 +426,207 @@ def test_resolve_daemon_path_includes_user_and_homebrew_bins(monkeypatch):
     assert "/usr/local/bin" in parts
     assert "/usr/bin" in parts  # base PATH preserved
     assert len(parts) == len(set(parts))  # no duplicates
+
+
+# ---------------------------------------------------------------------------
+# systemd install / uninstall (Linux counterpart of launchd)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def linux(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+
+
+@pytest.fixture()
+def systemctl_recorder(monkeypatch):
+    """Replace subprocess.run with a recorder; returncode configurable."""
+    calls: list[list[str]] = []
+    state = {"returncode": 0, "stderr": "", "raise_oserror": False}
+
+    def fake_run(cmd, capture_output=False, text=False, check=False, **kwargs):
+        calls.append(list(cmd))
+        if state["raise_oserror"]:
+            raise FileNotFoundError("systemctl not found")
+        return SimpleNamespace(
+            returncode=state["returncode"], stdout="", stderr=state["stderr"]
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls, state
+
+
+def test_systemd_unit_content_shape():
+    body = daemon_ops._systemd_unit_content(
+        Path("/home/user/.kompany"),
+        ["/usr/bin/python3", "-m", "kompany.interfaces.daemon_main"],
+        "/home/user/.local/bin:/usr/bin:/bin",
+        user="kosonen",
+    )
+    assert "[Unit]" in body
+    assert "[Service]" in body
+    assert "[Install]" in body
+    assert "Restart=always" in body
+    assert "RestartSec=5" in body
+    assert "WantedBy=multi-user.target" in body
+    assert "User=kosonen" in body
+    assert "ExecStart=/usr/bin/python3 -m kompany.interfaces.daemon_main" in body
+    assert "KOMPANY_DATA_DIR=/home/user/.kompany" in body
+    assert "PATH=/home/user/.local/bin:/usr/bin:/bin" in body
+
+
+def test_systemd_unit_content_no_user():
+    body = daemon_ops._systemd_unit_content(
+        Path("/root/.kompany"),
+        ["/usr/bin/python3", "-m", "kompany.interfaces.daemon_main"],
+        "/usr/bin:/bin",
+        user=None,
+    )
+    assert "User=" not in body
+
+
+def test_install_systemd_refuses_off_linux(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    result = daemon_ops.install_systemd(tmp_path)
+    assert result["installed"] is False
+    assert "Linux-only" in result["error"]
+
+
+def test_install_systemd_writes_unit_and_enables(
+    tmp_path, linux, systemctl_recorder, monkeypatch
+):
+    calls, state = systemctl_recorder
+    state["returncode"] = 0
+    monkeypatch.setattr(
+        daemon_ops, "SYSTEMD_UNIT_PATH", tmp_path / "kompany-daemon.service"
+    )
+    monkeypatch.setattr(
+        daemon_ops, "BUNDLED_SERVER_BINARY", tmp_path / "no-such-binary"
+    )
+    data_dir = tmp_path / "data"
+
+    result = daemon_ops.install_systemd(data_dir)
+
+    assert result["installed"] is True
+    unit_path = tmp_path / "kompany-daemon.service"
+    assert result["unit_path"] == str(unit_path)
+    body = unit_path.read_text()
+    assert "ExecStart=" + sys.executable in body
+    assert "KOMPANY_DATA_DIR=" + str(data_dir) in body
+    assert result["reload"]["ok"] is True
+    assert result["enable"]["ok"] is True
+    # daemon-reload then enable --now
+    assert calls[0] == ["systemctl", "daemon-reload"]
+    assert calls[1] == ["systemctl", "enable", "--now", "kompany-daemon.service"]
+    assert (data_dir / "logs").is_dir()
+
+
+def test_install_systemd_records_enable_failure(
+    tmp_path, linux, systemctl_recorder, monkeypatch
+):
+    calls, state = systemctl_recorder
+    # daemon-reload succeeds, enable --now fails
+    responses = [
+        SimpleNamespace(returncode=0, stdout="", stderr=""),
+        SimpleNamespace(returncode=1, stdout="", stderr="Failed to start: unit not found"),
+    ]
+
+    def fake_run(cmd, capture_output=False, text=False, check=False, **kwargs):
+        calls.append(list(cmd))
+        return responses.pop(0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        daemon_ops, "SYSTEMD_UNIT_PATH", tmp_path / "kompany-daemon.service"
+    )
+    monkeypatch.setattr(
+        daemon_ops, "BUNDLED_SERVER_BINARY", tmp_path / "no-such-binary"
+    )
+
+    result = daemon_ops.install_systemd(tmp_path / "data")
+
+    assert result["installed"] is True
+    assert result["reload"]["ok"] is True
+    assert result["enable"]["ok"] is False
+    assert "Failed to start" in result["enable"]["error"]
+
+
+def test_uninstall_systemd_idempotent(linux, systemctl_recorder, monkeypatch):
+    calls, state = systemctl_recorder
+    state["returncode"] = 0
+    unit_path = tmp_path / "kompany-daemon.service" if False else None
+    # Use a temp path that doesn't exist
+    monkeypatch.setattr(
+        daemon_ops, "SYSTEMD_UNIT_PATH", Path("/tmp/test-kompany-nonexistent.service")
+    )
+
+    result = daemon_ops.uninstall_systemd()
+
+    assert result["removed"] is False
+    assert result["error"] is None
+    assert result["disable"]["ok"] is True
+    assert result["reload"]["ok"] is True
+    assert calls[0] == ["systemctl", "disable", "--now", "kompany-daemon.service"]
+    assert calls[1] == ["systemctl", "daemon-reload"]
+
+
+def test_uninstall_systemd_removes_existing_unit(
+    tmp_path, linux, systemctl_recorder, monkeypatch
+):
+    calls, state = systemctl_recorder
+    state["returncode"] = 0
+    unit_path = tmp_path / "kompany-daemon.service"
+    unit_path.write_text("[Service]\nExecStart=foo\n")
+    monkeypatch.setattr(daemon_ops, "SYSTEMD_UNIT_PATH", unit_path)
+
+    result = daemon_ops.uninstall_systemd()
+
+    assert result["removed"] is True
+    assert not unit_path.exists()
+
+
+def test_install_daemon_routes_to_systemd_on_linux(
+    tmp_path, linux, systemctl_recorder, monkeypatch
+):
+    monkeypatch.setattr(
+        daemon_ops, "SYSTEMD_UNIT_PATH", tmp_path / "kompany-daemon.service"
+    )
+    monkeypatch.setattr(
+        daemon_ops, "BUNDLED_SERVER_BINARY", tmp_path / "no-such-binary"
+    )
+
+    result = daemon_ops.install_daemon(tmp_path / "data")
+
+    assert result["installed"] is True
+    assert "unit_path" in result
+
+
+def test_install_daemon_routes_to_launchd_on_macos(
+    tmp_path, fake_home, darwin, launchctl_recorder, monkeypatch
+):
+    monkeypatch.setattr(
+        daemon_ops, "BUNDLED_SERVER_BINARY", tmp_path / "no-such-binary"
+    )
+
+    result = daemon_ops.install_daemon(tmp_path / "data")
+
+    assert result["installed"] is True
+    assert "plist_path" in result
+
+
+def test_daemon_status_reports_systemd_on_linux(
+    tmp_path, linux, systemctl_recorder, monkeypatch
+):
+    calls, state = systemctl_recorder
+    state["returncode"] = 1  # is-active / is-enabled → false (not installed)
+    monkeypatch.setattr(
+        daemon_ops, "SYSTEMD_UNIT_PATH", tmp_path / "kompany-daemon.service"
+    )
+    monkeypatch.setattr(mcp_proxy, "discover_sidecar", lambda data_dir=None: None)
+
+    result = daemon_ops.daemon_status(tmp_path)
+
+    assert result["supervisor"]["type"] == "systemd"
+    assert result["supervisor"]["installed"] is False
+    assert result["supervisor"]["loaded"] is False
+    assert result["supervisor"]["enabled"] is False
