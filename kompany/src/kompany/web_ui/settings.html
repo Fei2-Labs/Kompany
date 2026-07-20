@@ -102,6 +102,18 @@
       <div class="set-result" id="email-result" hidden></div>
     </div>
 
+    <div class="frame" data-label="SETTINGS // channels">
+      <h2 class="set-h">// TELEGRAM — CEO channel</h2>
+      <p class="set-note">Connect a Telegram bot so you can talk to the CEO from your phone. Get a token from <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> (<code>/newbot</code>), then message the bot once so it can see your chat id. Find your chat id via <a href="https://t.me/userinfobot" target="_blank" rel="noopener">@userinfobot</a>. Stored encrypted in the vault; the long-poll worker starts on next server boot.</p>
+      <div class="set-meta" id="tg-status">checking…</div>
+      <div class="set-row"><label>Bot token</label><input id="tg-token" type="password" placeholder="123456:ABC-DEF..." autocomplete="off"></div>
+      <div class="set-row"><label>Allowed chat IDs</label><input id="tg-chats" placeholder="123456789,-100987654321" autocomplete="off"></div>
+      <div class="set-control">
+        <button type="button" id="tg-connect" class="onb-btn onb-btn-submit">[ ▸ CONNECT + VERIFY ]</button>
+      </div>
+      <div class="set-result" id="tg-result" hidden></div>
+    </div>
+
     <div class="frame" data-label="SETTINGS // founder profile">
       <h2 class="set-h">// FOUNDER PROFILE</h2>
       <p class="set-note">How the team addresses + talks to you. Style shapes phrasing only — it never softens an honest assessment.</p>
@@ -427,6 +439,61 @@
       } catch (e) { emShow("test failed: " + e.message, false); }
     });
     emLoad();
+
+    // ---- Telegram channel ----
+    const tgStatus = document.getElementById("tg-status");
+    const tgResult = document.getElementById("tg-result");
+    function tgShow(msg, ok) {
+      tgResult.hidden = false; tgResult.textContent = msg;
+      tgResult.className = "set-result " + (ok ? "ok" : "err");
+    }
+    async function tgLoad() {
+      try {
+        const [ch, creds] = await Promise.all([
+          fetch("/channels/status", { headers: { Accept: "application/json" } }).then((r) => r.json()),
+          fetch("/integrations/telegram/credentials").then((r) => r.ok ? r.json() : null),
+        ]);
+        const tg = (ch && ch.telegram) || {};
+        const tokenEl = document.getElementById("tg-token");
+        if (creds && creds.telegram_bot_token_set) {
+          tokenEl.placeholder = (creds.telegram_bot_token_mask || "••••") + " — leave blank to keep";
+          tokenEl.dataset.saved = "1";
+        } else {
+          tokenEl.placeholder = "123456:ABC-DEF..."; delete tokenEl.dataset.saved;
+        }
+        if (creds && creds.telegram_allowed_chat_ids) {
+          document.getElementById("tg-chats").value = creds.telegram_allowed_chat_ids;
+        }
+        if (tg.configured) {
+          tgStatus.textContent = `✓ configured — worker ${tg.running ? "running" : "stopped"}` +
+            (tg.last_update_at ? ` · last update ${tg.last_update_at}` : "") +
+            (tg.updates_handled ? ` · ${tg.updates_handled} handled` : "");
+        } else {
+          tgStatus.textContent = "not configured";
+        }
+      } catch (_) { tgStatus.textContent = "status unavailable"; }
+    }
+    document.getElementById("tg-connect").addEventListener("click", async () => {
+      const body = {
+        bot_token: document.getElementById("tg-token").value.trim(),
+        allowed_chat_ids: document.getElementById("tg-chats").value.trim(),
+      };
+      if (!body.allowed_chat_ids) { tgShow("allowed chat ids required", false); return; }
+      if (!body.bot_token && !document.getElementById("tg-token").dataset.saved) {
+        tgShow("bot token required", false); return;
+      }
+      tgShow("verifying via getMe…", true);
+      try {
+        const r = await fetch("/integrations/telegram/connect", {
+          method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(body),
+        });
+        const d = await r.json();
+        tgShow((d.ok ? "✓ " : "✗ ") + d.detail, d.ok);
+        if (d.ok) tgLoad();
+      } catch (e) { tgShow("connect failed: " + e.message, false); }
+    });
+    tgLoad();
 
     // ---- Founder profile (#7) ----
     // Tauri WebView: no native dialogs — inline results only.
