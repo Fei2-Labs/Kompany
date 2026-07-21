@@ -1462,3 +1462,110 @@ body {
   border-radius: var(--radius);
   background: #000;
 }
+
+/* ---- Settings pane (integration credentials) ---- */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+}
+.settings__card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.settings__card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.settings__card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+.settings__badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.settings__badge--ok {
+  color: #4ade80;
+  border-color: #1f5130;
+  background: rgba(74, 222, 128, 0.08);
+}
+.settings__badge--off {
+  color: var(--text-faint);
+}
+.settings__hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.5;
+}
+.settings__hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.settings__hint a:hover {
+  text-decoration: underline;
+}
+.settings__hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.settings__input {
+  font: inherit;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings__input::placeholder {
+  color: var(--text-faint);
+}
+.settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.settings__result {
+  font-size: 12px;
+}
+.settings__result--ok {
+  color: #4ade80;
+}
+.settings__result--err {
+  color: #ff9b9b;
+}

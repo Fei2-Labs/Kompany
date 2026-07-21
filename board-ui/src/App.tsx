@@ -10,6 +10,7 @@ import { Projects } from './panes/Projects';
 import { Autopilot } from './panes/Autopilot';
 import { Runtimes } from './panes/Runtimes';
 import { Live } from './panes/Live';
+import { Settings } from './panes/Settings';
 import { TalkToCeo } from './channel/TalkToCeo';
 import { CommandBar } from './channel/CommandBar';
 import { ActivityTimeline } from './timeline/ActivityTimeline';
@@ -61,7 +62,7 @@ export function App() {
           <Route path="/usage" element={<Usage />} />
           <Route path="/runtimes" element={<Runtimes />} />
           <Route path="/live" element={<Live />} />
-          <Route path="/settings" element={<Placeholder title="Settings" />} />
+          <Route path="/settings" element={<Settings />} />
           <Route
             path="*"
             element={<Placeholder title="Not found" hint="This pane does not exist." />}

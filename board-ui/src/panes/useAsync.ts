@@ -13,6 +13,15 @@ export interface AsyncResult<T> {
   data: T | null;
   state: AsyncState;
   error: string | null;
+  /** Imperative refetch — used by write surfaces (Settings) after a successful
+   *  mutation, so the displayed status/mask updates without waiting for an SSE. */
+  reload: () => void;
+}
+
+interface AsyncStateValue<T> {
+  data: T | null;
+  state: AsyncState;
+  error: string | null;
 }
 
 function errMessage(err: unknown): string {
@@ -32,7 +41,7 @@ export function useAsync<T>(
   loader: (signal?: AbortSignal) => Promise<T>,
   refetchOn: RefetchTrigger[] = [],
 ): AsyncResult<T> {
-  const [result, setResult] = useState<AsyncResult<T>>({
+  const [result, setResult] = useState<AsyncStateValue<T>>({
     data: null,
     state: 'loading',
     error: null,
@@ -70,5 +79,5 @@ export function useAsync<T>(
     return () => unsubs.forEach((u) => u());
   }, [triggerKey, load]);
 
-  return result;
+  return { ...result, reload: () => void load() };
 }

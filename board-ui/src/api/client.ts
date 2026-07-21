@@ -264,3 +264,38 @@ export function getRunCost(runId: string, signal?: AbortSignal): Promise<RunCost
 export function sendDirective(text: string): Promise<DirectiveResult> {
   return postJson<DirectiveResult>('/directive', { text });
 }
+
+// ---- Integrations / Settings ---------------------------------------------
+// Telegram + (future) Resend/Email SMTP credential management. The engine
+// verifies-then-stores tokens in the encrypted vault; these calls are the
+// board SPA's counterpart to the legacy /ui/settings.html forms.
+
+export interface TelegramCredentials {
+  telegram_bot_token: string;
+  telegram_bot_token_set: boolean;
+  telegram_bot_token_mask?: string;
+  telegram_allowed_chat_ids: string;
+}
+
+export interface ConnectResult {
+  ok: boolean;
+  detail: string;
+}
+
+/** `GET /integrations/telegram/credentials` — masked token + chat ids. */
+export function getTelegramCredentials(
+  signal?: AbortSignal,
+): Promise<TelegramCredentials> {
+  return getJson<TelegramCredentials>('/integrations/telegram/credentials', signal);
+}
+
+/**
+ * `POST /integrations/telegram/connect` — verify token via getMe, then
+ * store. Empty `bot_token` keeps the saved one (mirror Resend pattern).
+ */
+export function connectTelegram(input: {
+  bot_token: string;
+  allowed_chat_ids: string;
+}): Promise<ConnectResult> {
+  return postJson<ConnectResult>('/integrations/telegram/connect', input);
+}
