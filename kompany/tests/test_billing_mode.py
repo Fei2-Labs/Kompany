@@ -128,6 +128,28 @@ def test_subscription_claude_code_call_is_shadow_not_expense(world):
     assert payload["shadow_value_usd"] == pytest.approx(row["shadow_value_usd"])
 
 
+def test_subscription_oauth_call_is_shadow_not_expense(world):
+    """06-16-agentic-chat-engine P3: a chatgpt-oauth:* call under the
+    openai_oauth_subscription source books shadow value only (real cost 0).
+    """
+    source = ModelSource(
+        kind="openai_oauth_subscription", monthly_fee_usd=20.0
+    )
+    tracker = _tracker(world, source)
+    real_cost = tracker.record(
+        "chatgpt-oauth:gpt-5", 1000, 500, "CEO research", run_id="run-oa"
+    )
+    assert real_cost == 0.0
+    assert world.ledger.get_balance() == pytest.approx(100.0)
+    [row] = world.shadow.get_recent()
+    assert row["model"] == "chatgpt-oauth:gpt-5"
+    assert row["run_id"] == "run-oa"
+    [(event_type, payload)] = world.hub.events
+    assert event_type == "llm.spend"
+    assert payload["shadow"] is True
+    assert payload["cost_usd"] == 0.0
+
+
 def test_subscription_source_api_routed_model_still_real_expense(world):
     """A claude_subscription source only shadows claude-code:* calls;
     a model routed to a real API endpoint stays a real expense."""

@@ -63,38 +63,61 @@ def daemon_install(
     ),
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ):
-    """Install the launchd LaunchAgent so the daemon survives reboots (macOS)."""
+    """Install the daemon supervisor (launchd on macOS, systemd on Linux)."""
     from kompany.core import daemon_ops
 
-    result = daemon_ops.install_launchd(data_dir=_data_dir(data_dir))
+    result = daemon_ops.install_daemon(data_dir=_data_dir(data_dir))
     if as_json:
         _emit_json(result)
         return
     if not result["installed"]:
         console.print(f"[red]{result['error']}[/red]")
         raise typer.Exit(1)
-    bootstrap = result["bootstrap"]
-    bootstrap_line = (
-        "loaded into launchd"
-        if bootstrap["ok"]
-        else f"[yellow]bootstrap failed (loads at next login): {bootstrap['error']}[/yellow]"
-    )
-    console.print(Panel(
-        f"Plist: {result['plist_path']}\n"
-        f"Command: {' '.join(result['program_arguments'])}\n"
-        f"Launchd: {bootstrap_line}",
-        title="kompany daemon install",
-    ))
+    if "plist_path" in result:
+        # launchd
+        bootstrap = result["bootstrap"]
+        bootstrap_line = (
+            "loaded into launchd"
+            if bootstrap["ok"]
+            else f"[yellow]bootstrap failed (loads at next login): {bootstrap['error']}[/yellow]"
+        )
+        console.print(Panel(
+            f"Plist: {result['plist_path']}\n"
+            f"Command: {' '.join(result['program_arguments'])}\n"
+            f"Launchd: {bootstrap_line}",
+            title="kompany daemon install",
+        ))
+    else:
+        # systemd
+        reload_res = result["reload"]
+        enable_res = result["enable"]
+        reload_line = (
+            "daemon-reload ok"
+            if reload_res and reload_res["ok"]
+            else f"[yellow]daemon-reload failed: {reload_res['error'] if reload_res else 'n/a'}[/yellow]"
+        )
+        enable_line = (
+            "enabled + started"
+            if enable_res and enable_res["ok"]
+            else f"[yellow]enable --now failed: {enable_res['error'] if enable_res else 'n/a'}[/yellow]"
+        )
+        console.print(Panel(
+            f"Unit: {result['unit_path']}\n"
+            f"ExecStart: {result['exec_start']}\n"
+            f"{reload_line}\n"
+            f"{enable_line}",
+            title="kompany daemon install",
+        ))
 
 
 @daemon_app.command("uninstall")
 def daemon_uninstall(
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ):
-    """Remove the launchd LaunchAgent (bootout + plist removal). Idempotent."""
+    """Remove the daemon supervisor (launchd plist or systemd unit). Idempotent."""
     from kompany.core import daemon_ops
 
-    result = daemon_ops.uninstall_launchd()
+    result = daemon_ops.uninstall_daemon()
     if as_json:
         _emit_json(result)
         return
@@ -102,7 +125,7 @@ def daemon_uninstall(
         console.print(f"[red]{result['error']}[/red]")
         raise typer.Exit(1)
     state = "removed" if result["removed"] else "was not installed"
-    console.print(f"[green]Daemon LaunchAgent {state}.[/green]")
+    console.print(f"[green]Daemon supervisor {state}.[/green]")
 
 
 @daemon_app.command("status")
@@ -112,7 +135,7 @@ def daemon_status(
     ),
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
 ):
-    """Show daemon server, launchd, and ticker status."""
+    """Show daemon server, supervisor, and ticker status."""
     from kompany.core import daemon_ops
 
     payload = daemon_ops.daemon_status(data_dir=_data_dir(data_dir))
@@ -120,7 +143,7 @@ def daemon_status(
         _emit_json(payload)
         return
     server = payload["server"]
-    launchd = payload["launchd"]
+    supervisor = payload["supervisor"]
     ticker = payload["ticker"]
     server_line = (
         f"running (source={server['source']}, pid={server['pid']}, "
@@ -128,12 +151,24 @@ def daemon_status(
         if server["running"]
         else "not running"
     )
-    launchd_line = (
-        f"installed ({'loaded' if launchd['loaded'] else 'not loaded'}) — "
-        f"{launchd['plist_path']}"
-        if launchd["installed"]
-        else "not installed"
-    )
+    sup_type = supervisor.get("type", "none")
+    if sup_type == "launchd":
+        sup_line = (
+            f"installed ({'loaded' if supervisor['loaded'] else 'not loaded'}) — "
+            f"{supervisor['plist_path']}"
+            if supervisor["installed"]
+            else "not installed"
+        )
+    elif sup_type == "systemd":
+        sup_line = (
+            f"installed ({'active' if supervisor['loaded'] else 'inactive'}, "
+            f"{'enabled' if supervisor['enabled'] else 'disabled'}) — "
+            f"{supervisor['unit_path']}"
+            if supervisor["installed"]
+            else "not installed"
+        )
+    else:
+        sup_line = "not installed (no built-in supervisor on this platform)"
     if ticker is None:
         ticker_line = "— (no server)"
     elif ticker.get("running"):
@@ -145,7 +180,7 @@ def daemon_status(
         ticker_line = "stopped"
     console.print(Panel(
         f"Server: {server_line}\n"
-        f"Launchd: {launchd_line}\n"
+        f"Supervisor: {sup_line}\n"
         f"Ticker: {ticker_line}",
         title="Kompany Daemon",
     ))

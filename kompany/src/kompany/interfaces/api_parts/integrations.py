@@ -110,6 +110,10 @@ def get_integration_credentials(integration_id: str) -> dict[str, Any]:
             ("smtp_password", True), ("smtp_from", False),
         ),
         "resend": (("resend_api_key", True), ("resend_from", False)),
+        "telegram": (
+            ("telegram_bot_token", True),
+            ("telegram_allowed_chat_ids", False),
+        ),
     }
     cfg = fields_by_id.get(integration_id)
     if not cfg:
@@ -125,6 +129,14 @@ def get_integration_credentials(integration_id: str) -> dict[str, Any]:
             if is_secret:
                 out[name + "_set"] = False
     return out
+
+
+class ConnectTelegramRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Empty bot_token means "keep the saved token" — lets the founder
+    # edit allowed_chat_ids alone without re-pasting the token.
+    bot_token: str = ""
+    allowed_chat_ids: str = Field(..., min_length=1)
 
 
 class ConnectResendRequest(BaseModel):
@@ -177,6 +189,51 @@ def connect_resend(req: ConnectResendRequest) -> IntegrationActionResponse:
     engine.audit.record("integration.connected", "Connected Resend",
                         detail={"integration": "resend", "from": req.resend_from})
     return IntegrationActionResponse(ok=True, detail=f"connected Resend (from {req.resend_from})")
+
+
+@router.post("/integrations/telegram/connect", response_model=IntegrationActionResponse)
+def connect_telegram(req: ConnectTelegramRequest) -> IntegrationActionResponse:
+    """Store + verify a Telegram bot token via ``getMe`` before saving.
+
+    Verifies the token authenticates with Telegram (catches a pasted
+    wrong token now, not at worker start). On success stores both
+    ``telegram_bot_token`` and ``telegram_allowed_chat_ids`` in the
+    encrypted vault. Empty ``bot_token`` means "keep the saved token"
+    so the founder can edit the chat-id allowlist alone."""
+    import urllib.error
+    import urllib.request
+
+    engine = get_engine()
+    if not getattr(engine.settings, "vault_key", ""):
+        return IntegrationActionResponse(ok=False, detail="vault key not configured")
+    token = req.bot_token.strip()
+    if not token:
+        token = engine.credentials.get("telegram_bot_token") or ""
+    if not token:
+        return IntegrationActionResponse(ok=False, detail="bot token required")
+    try:
+        vr = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/getMe",
+            headers={"User-Agent": "Kompany/0.1 (+https://kompany.dev)"},
+        )
+        with urllib.request.urlopen(vr, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return IntegrationActionResponse(
+            ok=False, detail=f"getMe failed: HTTP {e.code} — invalid token"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return IntegrationActionResponse(
+            ok=False, detail=f"getMe failed: {type(exc).__name__}: {exc}"
+        )
+    if not payload.get("ok") or not payload.get("result", {}).get("username"):
+        return IntegrationActionResponse(ok=False, detail="getMe returned no bot username")
+    username = payload["result"]["username"]
+    engine.credentials.set("telegram_bot_token", token)
+    engine.credentials.set("telegram_allowed_chat_ids", req.allowed_chat_ids.strip())
+    engine.audit.record("integration.connected", "Connected Telegram",
+                        detail={"integration": "telegram", "bot": username})
+    return IntegrationActionResponse(ok=True, detail=f"connected @{username}")
 
 
 class ProposeEmailRequest(BaseModel):

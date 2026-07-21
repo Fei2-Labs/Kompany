@@ -14,8 +14,12 @@ from kompany.core.engine_parts.channel_actions import ChannelActionsMixin
 from kompany.core.engine_parts.approvals import ApprovalsMixin
 from kompany.core.engine_parts.governance import GovernanceMixin
 from kompany.core.engine_parts.handlers import DirectiveHandlersMixin
+from kompany.core.engine_parts.agentic_chat import AgenticChatMixin
+from kompany.core.engine_parts.skill_crystallize import SkillCrystallizationMixin
 
 __all__ = [
+    "AgenticChatMixin",
+    "SkillCrystallizationMixin",
     "CompanyLifecycleMixin",
     "ProjectExecutionMixin",
     "LearningMixin",
@@ -30,4 +34,5 @@ __all__ = [
     "ApprovalsMixin",
     "GovernanceMixin",
     "DirectiveHandlersMixin",
+    "AgenticChatMixin",
 ]

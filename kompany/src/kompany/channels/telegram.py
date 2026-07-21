@@ -26,7 +26,7 @@ from urllib import request as urlrequest
 
 from kompany.remote import request_from_telegram_update
 from kompany.state.channel_sessions_map import ChannelSessionMapStore
-from kompany.state.models import SESSION_TERMINAL_STATUSES
+from kompany.state.models import SESSION_TERMINAL_STATUSES, SessionStatus
 
 log = logging.getLogger(__name__)
 
@@ -172,12 +172,26 @@ class TelegramWorker:
         return bool(allowed) and str(chat_id) in allowed
 
     def _session_for(self, chat_id: str) -> str | None:
-        """Mapped session id, dropping mappings to closed sessions."""
+        """Mapped session id, dropping mappings to closed or gated sessions.
+
+        Terminal sessions (dispatched/answered/abandoned) are obviously done.
+        Gated/proposed sessions are non-terminal but are waiting for an
+        explicit GO/give-up on a *specific* pending action — a new freeform
+        Telegram message is not that GO, and reusing the session makes the
+        directive flow try to transition gated→clarifying, which the
+        conversation state machine rejects (IllegalSessionTransition). So
+        we drop the mapping and let ``process_directive`` open a fresh
+        session for the new message. The gated session stays in the store
+        for the board SPA to resolve via its own UI.
+        """
         session_id = self._sessions.get(chat_id)
         if not session_id:
             return None
         session = self._engine.channel.get_session(session_id)
         if session is None or session.state in SESSION_TERMINAL_STATUSES:
+            self._sessions.clear(chat_id)
+            return None
+        if session.state in (SessionStatus.GATED, SessionStatus.PROPOSED):
             self._sessions.clear(chat_id)
             return None
         return session_id

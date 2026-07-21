@@ -56,6 +56,12 @@ EXECUTION_SUMMARY: dict[str, str] = {
         "Tasks execute via the opencode CLI with your API key — every "
         "call books real per-token cost to the ledger."
     ),
+    "openai_oauth_subscription": (
+        "Tasks execute in Kompany's own agentic loop (full tools + "
+        "approval gate + persona) on your ChatGPT subscription via OAuth — "
+        "per-call spend books as shadow value; the monthly fee is the real "
+        "recurring expense. Run `kompany auth openai` to log in."
+    ),
 }
 
 AUDIT_EVENT = "settings.model_source_changed"

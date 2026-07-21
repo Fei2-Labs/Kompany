@@ -323,7 +323,7 @@ async def test_call_tool_proxies_when_sidecar_alive(monkeypatch):
         mcp_proxy, "discover_sidecar", lambda data_dir=None: {"port": 4242, "pid": 1}
     )
 
-    def fake_proxy(port, name, arguments, timeout=None):
+    def fake_proxy(port, name, arguments, timeout=None, base_url=None):
         calls.append((port, name, arguments))
         return {"balance": 7.0}
 
@@ -342,7 +342,7 @@ async def test_call_tool_surfaces_proxy_error_without_fallback(monkeypatch):
         mcp_proxy, "discover_sidecar", lambda data_dir=None: {"port": 4242, "pid": 1}
     )
 
-    def boom(port, name, arguments, timeout=None):
+    def boom(port, name, arguments, timeout=None, base_url=None):
         raise mcp_proxy.SidecarProxyError("connection died mid-call")
 
     monkeypatch.setattr(mcp_proxy, "proxy_tool_call", boom)
@@ -426,3 +426,140 @@ async def test_full_chain_call_tool_through_real_sidecar(
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# Remote URL mode (07-14 cloud-deploy-backup-restore step 6)
+# ---------------------------------------------------------------------------
+
+class _FakeRemoteHandler(http.server.BaseHTTPRequestHandler):
+    """Minimal handler that fakes a remote Kompany engine."""
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "ok"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/mcp/tool":
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "result": {"echo": body["name"], "args": body["arguments"]},
+            }).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def _start_fake_remote():
+    """Start a fake remote engine on a random loopback port. Returns (port, server)."""
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _FakeRemoteHandler)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return port, httpd
+
+
+def test_discover_sidecar_remote_url(monkeypatch):
+    """KOMPANY_REMOTE_URL makes discover_sidecar return a remote dict."""
+    port, httpd = _start_fake_remote()
+    try:
+        monkeypatch.setenv(mcp_proxy.REMOTE_URL_ENV, f"http://127.0.0.1:{port}")
+        result = mcp_proxy.discover_sidecar()
+        assert result is not None
+        assert result["source"] == "remote"
+        assert result["url"] == f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+
+
+def test_discover_sidecar_remote_url_takes_precedence(monkeypatch, tmp_path, sleeper_pid):
+    """Remote URL wins over a local sidecar discovery file."""
+    port, httpd = _start_fake_remote()
+    try:
+        # Also write a local discovery file — remote should still win.
+        _write_discovery(tmp_path, 99999, sleeper_pid)
+        monkeypatch.setattr(mcp_proxy, "default_data_dir", lambda: tmp_path)
+        monkeypatch.setenv(mcp_proxy.REMOTE_URL_ENV, f"http://127.0.0.1:{port}")
+        result = mcp_proxy.discover_sidecar()
+        assert result is not None
+        assert result["source"] == "remote"
+    finally:
+        httpd.shutdown()
+
+
+def test_discover_sidecar_remote_url_unreachable(monkeypatch):
+    """An unreachable remote URL returns None (falls back to local)."""
+    monkeypatch.setenv(mcp_proxy.REMOTE_URL_ENV, "http://127.0.0.1:1")
+    assert mcp_proxy.discover_sidecar() is None
+
+
+def test_discover_sidecar_remote_url_bad_response(monkeypatch):
+    """A remote that doesn't return kompany health shape is rejected."""
+    class _BadHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "not_ok"}).encode())
+        def log_message(self, *a): pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), _BadHandler)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setenv(mcp_proxy.REMOTE_URL_ENV, f"http://127.0.0.1:{port}")
+        assert mcp_proxy.discover_sidecar() is None
+    finally:
+        httpd.shutdown()
+
+
+def test_proxy_tool_call_with_base_url():
+    """proxy_tool_call forwards to base_url/mcp/tool when base_url is set."""
+    port, httpd = _start_fake_remote()
+    try:
+        result = mcp_proxy.proxy_tool_call(
+            port=0,
+            name="kompany_status",
+            arguments={"detail": True},
+            base_url=f"http://127.0.0.1:{port}",
+        )
+        assert result == {"echo": "kompany_status", "args": {"detail": True}}
+    finally:
+        httpd.shutdown()
+
+
+def test_discover_sidecar_remote_url_cached(monkeypatch):
+    """Remote URL discovery is cached for ~5s."""
+    port, httpd = _start_fake_remote()
+    try:
+        monkeypatch.setenv(mcp_proxy.REMOTE_URL_ENV, f"http://127.0.0.1:{port}")
+        # First call probes
+        r1 = mcp_proxy.discover_sidecar()
+        assert r1 is not None
+        # Shutdown the remote — cached verdict should still return
+        httpd.shutdown()
+        r2 = mcp_proxy.discover_sidecar()
+        assert r2 is not None  # cached
+    finally:
+        pass
+
+
+def test_discover_sidecar_no_remote_url(monkeypatch, tmp_path):
+    """Without KOMPANY_REMOTE_URL, local discovery is used (no remote dict)."""
+    monkeypatch.delenv(mcp_proxy.REMOTE_URL_ENV, raising=False)
+    monkeypatch.setattr(mcp_proxy, "default_data_dir", lambda: tmp_path)
+    # No discovery file, no remote URL → None
+    assert mcp_proxy.discover_sidecar() is None

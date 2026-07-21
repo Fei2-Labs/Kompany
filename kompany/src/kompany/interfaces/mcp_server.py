@@ -75,7 +75,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     sidecar = mcp_proxy.discover_sidecar()
     if sidecar is not None:
         try:
-            result = mcp_proxy.proxy_tool_call(sidecar["port"], name, arguments)
+            result = mcp_proxy.proxy_tool_call(
+                sidecar.get("port", 0),
+                name,
+                arguments,
+                base_url=sidecar.get("url"),
+            )
         except mcp_proxy.SidecarProxyError as exc:
             # Never fall back to in-process here: the sidecar may have
             # started real work before the call died (double-execution

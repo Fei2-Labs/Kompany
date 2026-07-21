@@ -305,5 +305,37 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "ON channel_turns(run_id)"
     )
 
+    # Learned-skill store (06-16-agentic-chat-engine P5). The L3 "task
+    # skills" layer of the GenericAgent no-embedding memory model: one row
+    # per crystallized SOP, keyed (agent_role, name) for dedupe/refine,
+    # with trigger_words driving the cheap L1 index + trigger-word retrieval.
+    # New table → _migrate() (shadow_costs precedent). Idempotent.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS agent_skills (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               agent_role TEXT NOT NULL,
+               name TEXT NOT NULL,
+               trigger_words TEXT NOT NULL DEFAULT '[]',
+               when_to_use TEXT NOT NULL DEFAULT '',
+               sop TEXT NOT NULL DEFAULT '',
+               code TEXT,
+               run_id TEXT,
+               session_id TEXT,
+               created_count INTEGER NOT NULL DEFAULT 1,
+               used_count INTEGER NOT NULL DEFAULT 0,
+               last_used_at TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_skills_name "
+        "ON agent_skills(agent_role, name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_skills_run_id "
+        "ON agent_skills(run_id)"
+    )
+
     # Continued in migrations_extra (ADR-0003 file-size split).
     run_migrations_part2(conn)

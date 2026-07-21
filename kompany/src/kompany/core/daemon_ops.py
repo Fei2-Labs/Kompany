@@ -12,13 +12,19 @@ Key decisions implemented here:
   when ``<data_dir>/server.json`` points at a healthy live server
   (validated via :func:`kompany.interfaces.mcp_proxy.discover_sidecar`:
   pid alive + ``/health`` probe). Exactly one engine ever ticks.
-* **D4 — launchd (macOS MVP).** ``install_launchd`` writes
+* **D4 — launchd (macOS).** ``install_launchd`` writes
   ``~/Library/LaunchAgents/com.kompany.daemon.plist`` with
   KeepAlive/RunAtLoad, resolving ProgramArguments at install time:
   bundled PyInstaller server binary if the desktop app is installed
   (no Python dependency for founders), else the current interpreter +
   ``kompany.interfaces.daemon_main``. ``launchctl bootstrap`` is
   best-effort — its failure is recorded, never fatal to the install.
+* **D4b — systemd (Linux).** ``install_systemd`` writes
+  ``/etc/systemd/system/kompany-daemon.service`` with Restart=always,
+  resolving ExecStart at install time the same way as launchd.
+  ``systemctl daemon-reload`` + ``enable --now`` is best-effort —
+  its failure is recorded, never fatal to the install. Counterpart
+  of the launchd path for VPS deployment (07-14-cloud-deploy).
 
 All subprocess calls are list-form (never ``shell=True``).
 """
@@ -35,9 +41,17 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+
+def pwd_get_username() -> str:
+    """Current username via pwd (fallback when USER env is unset)."""
+    import pwd
+    return pwd.getpwuid(os.getuid()).pw_name
+
 from kompany.interfaces import mcp_proxy
 
 LAUNCHD_LABEL = "com.kompany.daemon"
+SYSTEMD_UNIT_NAME = "kompany-daemon.service"
+SYSTEMD_UNIT_PATH = Path("/etc/systemd/system") / SYSTEMD_UNIT_NAME
 # Bundled desktop server binary (preferred ProgramArguments target —
 # founders without a Python install still get a 24/7 daemon).
 BUNDLED_SERVER_BINARY = Path(
@@ -83,6 +97,37 @@ def _launchd_loaded() -> bool:
     return _run_launchctl(["print", f"{_launchctl_domain()}/{LAUNCHD_LABEL}"])["ok"]
 
 
+def _run_systemctl(args: list[str]) -> dict[str, Any]:
+    """Run one systemctl command; never raises. Returns {ok, returncode, error}."""
+    try:
+        proc = subprocess.run(
+            ["systemctl", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        return {"ok": False, "returncode": None, "error": str(exc)}
+    error = None
+    if proc.returncode != 0:
+        error = (proc.stderr or proc.stdout or "").strip() or f"systemctl exited {proc.returncode}"
+    return {"ok": proc.returncode == 0, "returncode": proc.returncode, "error": error}
+
+
+def _systemd_active() -> bool:
+    """True when the systemd unit is currently active (running)."""
+    if sys.platform != "linux":
+        return False
+    return _run_systemctl(["is-active", "--quiet", SYSTEMD_UNIT_NAME])["ok"]
+
+
+def _systemd_enabled() -> bool:
+    """True when the systemd unit is enabled (starts at boot)."""
+    if sys.platform != "linux":
+        return False
+    return _run_systemctl(["is-enabled", "--quiet", SYSTEMD_UNIT_NAME])["ok"]
+
+
 def _fetch_ticker(port: int) -> dict[str, Any] | None:
     """Pull the ``ticker`` block from the running server's ``GET /status``."""
     url = f"http://127.0.0.1:{port}/status"
@@ -105,7 +150,7 @@ def _fetch_ticker(port: int) -> dict[str, Any] | None:
 
 
 def daemon_status(data_dir: Path | None = None) -> dict[str, Any]:
-    """Truthful daemon report: live server, launchd agent, ticker block."""
+    """Truthful daemon report: live server, platform supervisor, ticker block."""
     data_dir = _resolve_data_dir(data_dir)
     info = mcp_proxy.discover_sidecar(data_dir)
     if info is not None:
@@ -121,13 +166,33 @@ def daemon_status(data_dir: Path | None = None) -> dict[str, Any]:
     else:
         server = {"running": False, "port": None, "pid": None, "source": "none"}
         ticker = None
+    if sys.platform == "darwin":
+        supervisor = _launchd_status_block()
+    elif sys.platform == "linux":
+        supervisor = _systemd_status_block()
+    else:
+        supervisor = {"installed": False, "loaded": False, "unit_path": None}
+    return {"server": server, "supervisor": supervisor, "ticker": ticker}
+
+
+def _launchd_status_block() -> dict[str, Any]:
     plist_path = _plist_path()
-    launchd = {
+    return {
+        "type": "launchd",
         "installed": plist_path.exists(),
         "plist_path": str(plist_path),
         "loaded": _launchd_loaded(),
     }
-    return {"server": server, "launchd": launchd, "ticker": ticker}
+
+
+def _systemd_status_block() -> dict[str, Any]:
+    return {
+        "type": "systemd",
+        "installed": SYSTEMD_UNIT_PATH.exists(),
+        "unit_path": str(SYSTEMD_UNIT_PATH),
+        "loaded": _systemd_active(),
+        "enabled": _systemd_enabled(),
+    }
 
 
 def resolve_program_arguments() -> list[str]:
@@ -244,6 +309,121 @@ def uninstall_launchd() -> dict[str, Any]:
     }
 
 
+def _systemd_unit_content(
+    data_dir: Path,
+    program_arguments: list[str],
+    path_env: str,
+    user: str | None = None,
+) -> str:
+    """Render the systemd unit file body."""
+    exec_start = " ".join(program_arguments)
+    user_line = f"User={user}\n" if user else ""
+    return (
+        "[Unit]\n"
+        "Description=Kompany 24/7 daemon server\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n"
+        "\n"
+        "[Service]\n"
+        f"Type=simple\n"
+        f"{user_line}"
+        f"ExecStart={exec_start}\n"
+        "Restart=always\n"
+        "RestartSec=5\n"
+        f"Environment=KOMPANY_DATA_DIR={data_dir}\n"
+        f"Environment=PATH={path_env}\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def install_systemd(data_dir: Path | None = None) -> dict[str, Any]:
+    """Write + (best-effort) enable the kompany-daemon systemd unit (Linux).
+
+    Counterpart of :func:`install_launchd` for VPS deployment. Writes
+    ``/etc/systemd/system/kompany-daemon.service`` with Restart=always,
+    then runs ``systemctl daemon-reload`` + ``enable --now`` (best-effort
+    — failures are recorded, never fatal to the install). Requires root
+    (or sudo) to write to ``/etc/systemd/system``.
+    """
+    if sys.platform != "linux":
+        return {
+            "installed": False,
+            "unit_path": None,
+            "exec_start": None,
+            "reload": None,
+            "enable": None,
+            "error": (
+                "kompany daemon install is Linux-only for systemd. "
+                "On macOS use launchd (the default)."
+            ),
+        }
+    data_dir = _resolve_data_dir(data_dir)
+    logs_dir = data_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    program_arguments = resolve_program_arguments()
+    path_env = resolve_daemon_path()
+    # Run as the current user so the daemon accesses the right home
+    # dir, venv, and CLI harness tools (claude/codex/opencode). Under
+    # sudo, USER/root is wrong — prefer SUDO_USER (the invoking user).
+    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or pwd_get_username()
+    unit_body = _systemd_unit_content(data_dir, program_arguments, path_env, user=user)
+    try:
+        SYSTEMD_UNIT_PATH.write_text(unit_body, encoding="utf-8")
+    except OSError as exc:
+        return {
+            "installed": False,
+            "unit_path": str(SYSTEMD_UNIT_PATH),
+            "exec_start": " ".join(program_arguments),
+            "reload": None,
+            "enable": None,
+            "error": str(exc),
+        }
+    reload_result = _run_systemctl(["daemon-reload"])
+    enable_result = _run_systemctl(["enable", "--now", SYSTEMD_UNIT_NAME])
+    return {
+        "installed": True,
+        "unit_path": str(SYSTEMD_UNIT_PATH),
+        "exec_start": " ".join(program_arguments),
+        "reload": reload_result,
+        "enable": enable_result,
+        "error": None,
+    }
+
+
+def uninstall_systemd() -> dict[str, Any]:
+    """Disable + remove the systemd unit. Idempotent."""
+    if sys.platform != "linux":
+        return {
+            "removed": False,
+            "unit_path": str(SYSTEMD_UNIT_PATH),
+            "disable": {"ok": True, "returncode": None, "error": None},
+            "reload": {"ok": True, "returncode": None, "error": None},
+            "error": None,
+        }
+    existed = SYSTEMD_UNIT_PATH.exists()
+    disable_result = _run_systemctl(["disable", "--now", SYSTEMD_UNIT_NAME])
+    try:
+        SYSTEMD_UNIT_PATH.unlink(missing_ok=True)
+    except OSError as exc:
+        return {
+            "removed": False,
+            "unit_path": str(SYSTEMD_UNIT_PATH),
+            "disable": disable_result,
+            "reload": None,
+            "error": str(exc),
+        }
+    reload_result = _run_systemctl(["daemon-reload"])
+    return {
+        "removed": existed,
+        "unit_path": str(SYSTEMD_UNIT_PATH),
+        "disable": disable_result,
+        "reload": reload_result,
+        "error": None,
+    }
+
+
 def run_daemon(
     host: str = "127.0.0.1",
     port: int = 0,
@@ -270,6 +450,25 @@ def run_daemon(
     """
     explicit_data_dir = data_dir is not None
     resolved_data_dir = _resolve_data_dir(data_dir)
+    # Handoff tombstone: this company was exported to another machine
+    # (`kompany export --handoff`). Refuse to boot a second live engine.
+    from kompany.state.export_bundle import read_exported_marker
+
+    marker = read_exported_marker(resolved_data_dir)
+    if marker is not None:
+        return {
+            "started": False,
+            "port": None,
+            "pid": None,
+            "source": "exported",
+            "message": (
+                "This company was handed off to another machine "
+                f"(exported_at={marker.get('exported_at')}). The daemon "
+                "will not tick a tombstoned data_dir — run the company "
+                "where the bundle was imported, or `kompany import` a "
+                "bundle here to make this machine live again."
+            ),
+        }
     # A cached "no sidecar" verdict from earlier in this process must
     # not let two daemons race past the lock check.
     mcp_proxy.reset_discovery_cache()
@@ -299,12 +498,56 @@ def run_daemon(
     return {"started": True, "port": port, "pid": os.getpid(), "source": "daemon"}
 
 
+# ---------------------------------------------------------------------------
+# Platform-routing shims (used by the CLI; pick launchd or systemd)
+# ---------------------------------------------------------------------------
+
+
+def install_daemon(data_dir: Path | None = None) -> dict[str, Any]:
+    """Install the daemon supervisor for the current platform.
+
+    macOS → launchd LaunchAgent; Linux → systemd system service. Other
+    platforms get a clear error pointing to ``kompany daemon run`` under
+    a manual process supervisor.
+    """
+    if sys.platform == "darwin":
+        return install_launchd(data_dir)
+    if sys.platform == "linux":
+        return install_systemd(data_dir)
+    return {
+        "installed": False,
+        "error": (
+            f"kompany daemon install has no built-in supervisor for "
+            f"{sys.platform}. Run 'kompany daemon run' under your own "
+            "process supervisor (e.g. supervisord, runit)."
+        ),
+    }
+
+
+def uninstall_daemon() -> dict[str, Any]:
+    """Uninstall the daemon supervisor for the current platform."""
+    if sys.platform == "darwin":
+        return uninstall_launchd()
+    if sys.platform == "linux":
+        return uninstall_systemd()
+    return {
+        "removed": False,
+        "error": f"No built-in supervisor to uninstall on {sys.platform}.",
+    }
+
+
 __all__ = [
     "BUNDLED_SERVER_BINARY",
     "LAUNCHD_LABEL",
+    "SYSTEMD_UNIT_NAME",
+    "SYSTEMD_UNIT_PATH",
     "daemon_status",
+    "install_daemon",
     "install_launchd",
+    "install_systemd",
     "resolve_program_arguments",
     "run_daemon",
+    "uninstall_daemon",
     "uninstall_launchd",
+    "uninstall_systemd",
 ]

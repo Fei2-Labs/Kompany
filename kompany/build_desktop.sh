@@ -25,6 +25,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------
+# Stage 0 — operations board SPA.
+#
+# The React/Vite board (kompany-core/board-ui) builds into
+# src/kompany/board_ui/dist/, which the sidecar's `--collect-all kompany`
+# step then bundles. It MUST run before Stage 1 so the assets are on disk.
+# ---------------------------------------------------------------------
+BOARD_UI_DIR="${REPO_ROOT}/board-ui"
+if [[ -d "${BOARD_UI_DIR}" ]]; then
+  if command -v npm >/dev/null 2>&1; then
+    echo "==> [0/3] Building operations board (board-ui)..."
+    npm --prefix "${BOARD_UI_DIR}" ci
+    npm --prefix "${BOARD_UI_DIR}" run build
+  else
+    echo "error: npm not found but board-ui/ exists — install Node 24+ to build the board." >&2
+    exit 2
+  fi
+else
+  echo "==> [0/3] No board-ui/ dir; skipping board build."
+fi
+
+# ---------------------------------------------------------------------
 # Stage 1 — sidecar bundle.
 # ---------------------------------------------------------------------
 echo "==> [1/3] Building Python sidecar..."

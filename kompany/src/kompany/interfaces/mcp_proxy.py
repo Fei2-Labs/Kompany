@@ -9,6 +9,13 @@ engine — the app panel then receives live SSE events and every euro
 books in one cost ledger (no second in-process engine, no
 double-billing heartbeats).
 
+Remote mode (07-14 cloud-deploy): when ``KOMPANY_REMOTE_URL`` is set
+(e.g. ``http://100.125.151.40:37895`` over Tailscale), the proxy
+forwards all tool calls to that remote engine instead of looking for a
+local sidecar. The remote URL is validated with a ``GET /health`` probe
+on each call (cached ~5s). This lets a laptop CLI/MCP client drive the
+VPS engine without running a local engine.
+
 Readers never trust the discovery file blindly: a sidecar can crash
 without cleanup and the OS can recycle its port for another process.
 Validation = pid liveness + ``GET /health`` probe with response-shape
@@ -39,6 +46,9 @@ HEALTH_PROBE_TIMEOUT_SECONDS = 0.5
 # not time out handlers, so the client side carries the generous cap.
 PROXY_CALL_TIMEOUT_SECONDS = 1800.0
 DISCOVERY_CACHE_TTL_SECONDS = 5.0
+# Remote engine URL env var (07-14 cloud-deploy). When set, the MCP
+# proxy forwards all tool calls to this URL instead of a local sidecar.
+REMOTE_URL_ENV = "KOMPANY_REMOTE_URL"
 
 
 class SidecarProxyError(RuntimeError):
@@ -114,10 +124,29 @@ def reset_discovery_cache() -> None:
 def discover_sidecar(data_dir: Path | None = None) -> dict[str, Any] | None:
     """Return validated sidecar info (``{"port", "pid", ...}``) or None.
 
-    None means: no discovery file, malformed file, the sidecar pid is
-    dead, the health probe failed/answered with a foreign shape, or the
-    file points at *this* process (self-proxy guard).
+    Remote mode (07-14): when ``KOMPANY_REMOTE_URL`` is set, returns a
+    synthetic discovery dict ``{"url": "...", "source": "remote"}``
+    after a successful health probe. The remote URL takes precedence
+    over local sidecar discovery — the operator's intent when they set
+    it is "use the VPS engine, not a local one."
+
+    None means: no remote URL, no discovery file, malformed file, the
+    sidecar pid is dead, the health probe failed/answered with a
+    foreign shape, or the file points at *this* process (self-proxy
+    guard).
     """
+    # Remote URL takes precedence over local discovery.
+    remote_url = os.environ.get(REMOTE_URL_ENV, "").strip()
+    if remote_url:
+        cache_key = f"remote:{remote_url}"
+        now = time.monotonic()
+        cached = _verdict_cache.get(cache_key)
+        if cached is not None and now < cached[0]:
+            return cached[1]
+        verdict = _validate_remote(remote_url)
+        _verdict_cache[cache_key] = (now + DISCOVERY_CACHE_TTL_SECONDS, verdict)
+        return verdict
+
     path = discovery_path(data_dir)
     key = str(path)
     now = time.monotonic()
@@ -191,6 +220,28 @@ def _probe_health(port: int) -> bool:
     return isinstance(body, dict) and body.get("status") == "ok"
 
 
+def _validate_remote(remote_url: str) -> dict[str, Any] | None:
+    """Validate a remote engine URL via health probe.
+
+    Returns a synthetic discovery dict ``{"url": ..., "source": "remote"}``
+    when the remote is alive, None otherwise. No pid check — the remote
+    engine is on another machine.
+    """
+    base = remote_url.rstrip("/")
+    try:
+        with urllib.request.urlopen(
+            f"{base}/health", timeout=HEALTH_PROBE_TIMEOUT_SECONDS
+        ) as resp:
+            if resp.status != 200:
+                return None
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    if not (isinstance(body, dict) and body.get("status") == "ok"):
+        return None
+    return {"url": base, "source": "remote"}
+
+
 # ---------------------------------------------------------------------------
 # Proxy client.
 # ---------------------------------------------------------------------------
@@ -201,8 +252,13 @@ def proxy_tool_call(
     name: str,
     arguments: dict[str, Any],
     timeout: float = PROXY_CALL_TIMEOUT_SECONDS,
+    *,
+    base_url: str | None = None,
 ) -> Any:
     """POST one tool call to the sidecar bridge and return its payload.
+
+    When ``base_url`` is set (remote mode), the call goes to
+    ``{base_url}/mcp/tool`` instead of ``http://127.0.0.1:{port}/mcp/tool``.
 
     Raises :class:`SidecarProxyError` on any failure. Callers must NOT
     fall back to in-process execution on error — the sidecar may have
@@ -210,8 +266,9 @@ def proxy_tool_call(
     risk); surface the error instead.
     """
     body = json.dumps({"name": name, "arguments": arguments}).encode("utf-8")
+    target = f"{base_url}/mcp/tool" if base_url else f"http://127.0.0.1:{port}/mcp/tool"
     request = urllib.request.Request(
-        f"http://127.0.0.1:{port}/mcp/tool",
+        target,
         data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
