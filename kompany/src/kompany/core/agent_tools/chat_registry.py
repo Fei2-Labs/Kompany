@@ -20,6 +20,7 @@ not edit a checkout. File work still belongs to the background project runner.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from kompany.core.agent_tools.base import SideEffect, ToolContext
@@ -31,6 +32,18 @@ from kompany.core.agent_tools.web_tools import web_tools
 from kompany.llm.client_parts._types import ToolSpec
 
 __all__ = ["build_chat_registry", "IntegrationToolAdapter"]
+
+
+# OpenAI's native tool-name pattern is ``^[a-zA-Z0-9_-]+$`` — no dots.
+# Plugin catalog names use dots (``email.send``); sanitize for the model-
+# facing schema. The original dotted name is preserved via ``dispatch_name``
+# so engine-side lookup (``execute_tool`` / ``propose_action``) still works.
+_TOOL_NAME_INVALID = re.compile(r"[^a-zA-Z0-9_-]")
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Make a plugin tool name model-facing-safe (OpenAI tool-name pattern)."""
+    return _TOOL_NAME_INVALID.sub("_", name or "")
 
 
 class IntegrationToolAdapter:
@@ -48,6 +61,16 @@ class IntegrationToolAdapter:
 
     @property
     def name(self) -> str:
+        # Plugin tools use dotted names like ``email.send`` for the founder-
+        # facing catalog, but OpenAI's tool-name pattern is ``^[a-zA-Z0-9_-]+$``
+        # (no dots). Sanitize for the model-facing registry; the original
+        # dotted name is still used when dispatching back through
+        # ``engine.execute_tool`` / ``propose_action`` (see ``dispatch_name``).
+        return _sanitize_tool_name(self._tool.name)
+
+    @property
+    def dispatch_name(self) -> str:
+        # Engine-side lookup uses the ORIGINAL dotted catalog name.
         return self._tool.name
 
     @property
@@ -75,7 +98,11 @@ class IntegrationToolAdapter:
         engine = getattr(ctx, "engine", None)
         if engine is None or not hasattr(engine, "execute_tool"):
             return f"ERROR: {self.name} has no engine to execute against."
-        result = engine.execute_tool(self.name, args)
+        # Dispatch by the ORIGINAL dotted name via ``dispatch_name`` —
+        # engine.execute_tool looks up plugins by their founder-facing
+        # catalog name (``email.send``), not the sanitized model-facing
+        # name (``email_send``).
+        result = engine.execute_tool(self.dispatch_name, args)
         return json.dumps(result, ensure_ascii=False, default=str)
 
     def to_spec(self) -> ToolSpec:

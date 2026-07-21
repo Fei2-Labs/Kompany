@@ -44,6 +44,17 @@ class Tool(Protocol):
     def name(self) -> str: ...
 
     @property
+    def dispatch_name(self) -> str:
+        """Name used when calling ``engine.execute_tool`` / ``propose_action``.
+
+        Defaults to ``name``. Tools whose ``name`` is sanitized for the
+        model-facing schema (e.g. ``email_send``) but whose engine-side
+        lookup key is the original dotted name (``email.send``) override
+        this to return the original.
+        """
+        ...
+
+    @property
     def description(self) -> str: ...
 
     @property
@@ -79,6 +90,12 @@ class FunctionTool:
     parameters: dict[str, Any]
     side_effect: SideEffect
     func: Callable[[dict[str, Any], ToolContext], str]
+
+    @property
+    def dispatch_name(self) -> str:
+        # FunctionTool's ``name`` is already model-safe (no dots), so the
+        # engine-side lookup key is the same string.
+        return self.name
 
     def run(self, args: dict[str, Any], ctx: ToolContext) -> str:
         return self.func(args, ctx)

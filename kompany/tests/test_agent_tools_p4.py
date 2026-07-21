@@ -361,15 +361,22 @@ def test_integration_tools_appear_in_loop_and_gate(monkeypatch):
 
     engine = FakeEngine()
     reg = build_chat_registry(engine)
-    assert "email.send" in reg.names()
-    assert not reg.is_inline("email.send")
+    # Plugin tool names are sanitized for the model-facing schema
+    # (OpenAI's ``^[a-zA-Z0-9_-]+$`` pattern rejects dots): ``email.send``
+    # becomes ``email_send`` in the registry. The ORIGINAL dotted name is
+    # preserved on ``dispatch_name`` and used when the registry calls
+    # ``engine.propose_action`` / ``engine.execute_tool``.
+    assert "email_send" in reg.names()
+    assert "email.send" not in reg.names()
+    assert not reg.is_inline("email_send")
     # browser tools also present (P4 source composition)
     assert "browser_navigate" in reg.names()
 
     ctx = ToolContext(settings=engine.settings, engine=engine,
                       extra={"pending_approval_ids": []})
-    obs = reg.dispatch("email.send", {"to": "x@y.z"}, ctx)
+    obs = reg.dispatch("email_send", {"to": "x@y.z"}, ctx)
     assert obs.startswith(GATED_PREFIX)
+    # Engine-side dispatch uses the ORIGINAL dotted name, not the sanitized one.
     assert calls["t"] == "email.send"
     assert ctx.extra["pending_approval_ids"] == ["appr-e1"]
 

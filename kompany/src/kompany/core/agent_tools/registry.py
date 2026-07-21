@@ -104,10 +104,14 @@ class ToolRegistry:
                 "but no approval channel is available in this context. "
                 "No action taken."
             )
-        summary = f"Agentic chat requested: {name}"
+        # ``dispatch_name`` is the engine-side lookup key — for plugin tools
+        # whose model-facing ``name`` is sanitized (``email_send``) but whose
+        # engine catalog name is the original dotted form (``email.send``).
+        dispatch_name = getattr(tool, "dispatch_name", None) or name
+        summary = f"Agentic chat requested: {dispatch_name}"
         try:
             request = engine.propose_action(
-                tool_name=name,
+                tool_name=dispatch_name,
                 inputs=args,
                 summary=summary,
                 requested_by="ceo",
@@ -115,7 +119,7 @@ class ToolRegistry:
             )
         except Exception as exc:  # noqa: BLE001 — observation, never a crash
             return (
-                f"{GATED_PREFIX}tool {name!r} could not be proposed for "
+                f"{GATED_PREFIX}tool {dispatch_name!r} could not be proposed for "
                 f"approval: {type(exc).__name__}: {exc}. No action taken."
             )
         approval_id = (request or {}).get("id") if isinstance(request, dict) else None
