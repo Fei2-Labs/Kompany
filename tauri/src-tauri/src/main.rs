@@ -165,6 +165,47 @@ fn spawn_sidecar(
         .spawn()
 }
 
+enum ProbeResult {
+    /// `/` returned 200 OK — the board SPA is present, load it directly.
+    Board,
+    /// `/` returned a redirect (3xx) — board bundle absent, load `/ui/`.
+    Redirect,
+    /// `/` did not respond or returned an error — fall back to `/` and
+    /// let the WebView surface whatever error it can.
+    Unreachable,
+}
+
+/// Probe `<base_url>/` to decide which path to load in the WebView.
+///
+/// We disable redirect-following so a 307 is distinguishable from a
+/// real 200. The probe is best-effort: any failure maps to
+/// `Unreachable` and the caller falls back to `/` (the WebView will
+/// show its own error page, which is more informative than a white
+/// screen from a redirect it didn't follow).
+fn probe_root(base_url: &str) -> ProbeResult {
+    let url = format!("{}/", base_url.trim_end_matches('/'));
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return ProbeResult::Unreachable,
+    };
+    let resp = match client.get(&url).send() {
+        Ok(r) => r,
+        Err(_) => return ProbeResult::Unreachable,
+    };
+    let status = resp.status().as_u16();
+    if status == 200 {
+        ProbeResult::Board
+    } else if status >= 300 && status < 400 {
+        ProbeResult::Redirect
+    } else {
+        ProbeResult::Unreachable
+    }
+}
+
 /// Open the main WebView window against a healthy server at `base_url`.
 ///
 /// `base_url` is the origin (scheme + host + port, no path) of either:
@@ -181,7 +222,20 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
     // Open the operations board at the site root. FastAPI serves the React
     // board at `/` and gracefully redirects to `/ui/` (cyberpunk terminal)
     // when the board hasn't been built yet, so this is safe pre-build.
-    let url = format!("{}/", base_url.trim_end_matches('/'));
+    //
+    // EXCEPTION: when the board bundle is absent (e.g. a VPS deployed from
+    // source without `npm run build`), `/` returns a 307 to `/ui/`. Tauri's
+    // WebView does not reliably follow that redirect on initial load
+    // (observed white screen), so we probe `/` first and fall back to
+    // `/ui/` if it doesn't return 200 OK. This keeps the local sidecar
+    // path (board present) on the fast path and fixes the remote VPS path.
+    let base = base_url.trim_end_matches('/');
+    let path = match probe_root(base) {
+        ProbeResult::Board => "/",
+        ProbeResult::Redirect => "/ui/",
+        ProbeResult::Unreachable => "/",
+    };
+    let url = format!("{}{}", base, path);
     let webview_url =
         WebviewUrl::External(url.parse().map_err(|e| format!("invalid url: {}", e))?);
     let window = WebviewWindowBuilder::new(handle, "main", webview_url)
