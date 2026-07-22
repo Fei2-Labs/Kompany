@@ -159,7 +159,14 @@ def _session(ctx: ToolContext) -> BrowserSession:
     """Get-or-create the per-run browser session stored on the ctx."""
     sess = ctx.extra.get(_SESSION_KEY)
     if sess is None:
-        sess = BrowserSession()
+        # Read the CDP endpoint from settings (env: KOMPANY_BROWSER_CDP_ENDPOINT).
+        # Falls back to the module default (9223) when settings are absent
+        # (standalone tests without a full engine).
+        endpoint = CDP_ENDPOINT
+        settings = getattr(ctx, "settings", None)
+        if settings is not None:
+            endpoint = getattr(settings, "browser_cdp_endpoint", None) or CDP_ENDPOINT
+        sess = BrowserSession(endpoint=endpoint)
         ctx.extra[_SESSION_KEY] = sess
     return sess
 

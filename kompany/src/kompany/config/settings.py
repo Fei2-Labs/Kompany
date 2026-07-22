@@ -91,6 +91,17 @@ class KompanySettings(BaseSettings):
     # rented vehicles stay the default until native proves itself.
     native_runner_enabled: bool = False
 
+    # Envelope overdraw (founder investment model). When ON, the harness
+    # executor's pre-run envelope guard does NOT park a task whose project
+    # envelope is exhausted — the task runs, token cost is booked to the
+    # ledger as usual (treasury goes more negative), and the deficit is
+    # expected to be offset by future revenue. Default OFF preserves the
+    # hard-cap semantics (an empty envelope parks the task and proposes a
+    # top-up approval). Founders running on a negative-balance investment
+    # model turn this on; founders enforcing per-project budget discipline
+    # leave it off.
+    allow_envelope_overdraw: bool = False
+
     # Agentic CEO chat (06-16-agentic-chat-engine P2). When ON, a real
     # ``answer``/``execute`` request in the board chat runs the upgraded
     # NativeRunner loop AS the CEO (persona system prompt + in-loop tools +
@@ -134,6 +145,17 @@ class KompanySettings(BaseSettings):
     # servers are skipped with a health note; never required. Configured via
     # YAML (env can't carry a list cleanly).
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Browser CDP endpoint for the agentic loop's browser tools. The founder
+    # runs a real browser (Brave/Edge/Chrome) with --remote-debugging-port=N
+    # and a dedicated --user-data-dir so the agent reuses the logged-in
+    # profile (e.g. LinkedIn sessions). Default 9223 matches the Kompany
+    # desktop convention; VPS deployments with a different port (e.g. 9335
+    # for the linkedin-growth Brave instance) override via env or YAML.
+    browser_cdp_endpoint: str = Field(
+        default="http://127.0.0.1:9223",
+        alias="KOMPANY_BROWSER_CDP_ENDPOINT",
+    )
 
     # Remote backup config block (07-14 cloud-deploy-backup-restore step 5).
     # Raw dict — parsed by RemoteBackupConfig.from_dict in state/remote_backup.
@@ -303,6 +325,7 @@ class KompanySettings(BaseSettings):
                 "harness_execution_enabled",
                 "harness_permission_routing",
                 "native_runner_enabled",
+                "allow_envelope_overdraw",
             ):
                 if flag in data:
                     overrides[flag] = bool(data[flag])
