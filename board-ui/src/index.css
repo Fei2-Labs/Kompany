@@ -1468,7 +1468,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 640px;
+  max-width: 760px;
 }
 .settings__card {
   display: flex;
@@ -1568,4 +1568,119 @@ body {
 }
 .settings__result--err {
   color: #ff9b9b;
+}
+
+/* ---- Settings pane: extra form elements shared by every card below ---- */
+.settings__select,
+.settings__textarea {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings__select:focus,
+.settings__textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings__textarea {
+  font-family: inherit;
+  resize: vertical;
+  min-height: 56px;
+}
+.settings__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.settings__meta {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin: 0;
+}
+.settings__section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin: 4px 0 -4px;
+}
+.settings__badge--warn {
+  color: #fbbf24;
+  border-color: #5c4a12;
+  background: rgba(251, 191, 36, 0.08);
+}
+
+/* Repeatable rows: founder hard rules, integration credential list,
+   vault entries, workspace registry. Each is a horizontal strip that
+   wraps on narrow widths instead of clipping. */
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.settings__row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+.settings__row-label {
+  flex: 1 1 160px;
+  font-size: 13px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.settings__row-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.settings__row-input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.settings__row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.settings__rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.settings__rule-kind {
+  flex: 0 0 200px;
+}
+.settings__rule-match {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.settings__inline-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 100%;
+  padding: 8px 0 4px;
+}
+
+/* ---- Settings: browser probe results ---- */
+.settings__probe-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.settings__meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0;
 }

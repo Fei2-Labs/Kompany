@@ -86,6 +86,50 @@ async function postJson<T>(
   return (await res.json()) as T;
 }
 
+/** Same contract as `postJson` but for `PUT` (merge-set settings routes). */
+async function putJson<T>(
+  path: string,
+  body: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'PUT',
+      signal,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new ApiError(0, err instanceof Error ? err.message : 'network error');
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, `${path} → ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
+/** `DELETE` with no body — vault credential removal / workspace teardown. */
+async function deleteJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: 'DELETE',
+      signal,
+      headers: { accept: 'application/json' },
+    });
+  } catch (err) {
+    throw new ApiError(0, err instanceof Error ? err.message : 'network error');
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, `${path} → ${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as T;
+}
+
 /** `GET /projects` — active projects only. */
 export function getProjects(signal?: AbortSignal): Promise<ProjectListItem[]> {
   return getJson<ProjectListItem[]>('/projects', signal);
@@ -298,4 +342,332 @@ export function connectTelegram(input: {
   allowed_chat_ids: string;
 }): Promise<ConnectResult> {
   return postJson<ConnectResult>('/integrations/telegram/connect', input);
+}
+
+// ---- Browser CDP config ---------------------------------------------------
+
+export interface BrowserConfig {
+  cdp_endpoint: string;
+  connected: boolean;
+  browser_type: string | null;
+  playwright_installed: boolean;
+}
+
+export interface BrowserProbeResult {
+  browsers: Array<{ port: number; endpoint: string; browser_type: string | null }>;
+}
+
+/** `GET /browser/config` — current CDP endpoint + connection status. */
+export function getBrowserConfig(
+  signal?: AbortSignal,
+): Promise<BrowserConfig> {
+  return getJson<BrowserConfig>('/browser/config', signal);
+}
+
+/** `POST /browser/config` — persist the CDP endpoint. */
+export function setBrowserConfig(
+  cdp_endpoint: string,
+): Promise<ConnectResult & { cdp_endpoint?: string; connected?: boolean; browser_type?: string | null }> {
+  return postJson('/browser/config', { cdp_endpoint });
+}
+
+/** `GET /browser/probe` — auto-detect running browsers on common ports. */
+export function probeBrowsers(
+  signal?: AbortSignal,
+): Promise<BrowserProbeResult> {
+  return getJson<BrowserProbeResult>('/browser/probe', signal);
+}
+
+/** `GET /channels/status` — Telegram/email adapter health + outbox counts. */
+export interface ChannelsStatus {
+  telegram: {
+    configured: boolean;
+    running: boolean;
+    last_update_at: string | null;
+    updates_handled: number;
+  };
+  email: {
+    configured: boolean;
+    poll_every_ticks: number;
+    last_poll_at: string | null;
+  };
+  outbox: { enabled: boolean; counts: Record<string, number> };
+}
+export function getChannelsStatus(signal?: AbortSignal): Promise<ChannelsStatus> {
+  return getJson<ChannelsStatus>('/channels/status', signal);
+}
+
+// ---- LLM model -------------------------------------------------------------
+// All three tiers (apex/primary/economy) share one model. Switching applies
+// immediately on the live engine, no restart.
+
+export interface ModelSetting {
+  current_model: string;
+  provider: string;
+  base_url: string;
+  available_models: string[];
+  error: string;
+}
+
+/** `GET /settings/model` — current model + the endpoint's advertised list. */
+export function getModelSetting(signal?: AbortSignal): Promise<ModelSetting> {
+  return getJson<ModelSetting>('/settings/model', signal);
+}
+
+/** `POST /settings/model` — `{ model }`. Applies to the live engine now. */
+export function setModelSetting(model: string): Promise<ModelSetting> {
+  return postJson<ModelSetting>('/settings/model', { model });
+}
+
+// ---- Model source (subscription vs custom API key) ------------------------
+
+export interface ModelSource {
+  kind: 'custom_api' | 'claude_subscription' | 'openai_subscription' | string;
+  billing_mode?: string | null;
+  monthly_fee_usd?: number | null;
+  price_overrides?: Record<string, [number, number]> | null;
+  vehicle?: string;
+  execution_summary?: string;
+}
+
+/** `GET /settings/model-source` — active source, or `null` (legacy billing). */
+export function getModelSource(
+  signal?: AbortSignal,
+): Promise<ModelSource | null> {
+  return getJson<ModelSource | null>('/settings/model-source', signal);
+}
+
+/**
+ * `PUT /settings/model-source` — set or clear (`kind: null`) the source.
+ * No `vehicle` input — the engine derives the execution loop from `kind`.
+ */
+export function setModelSource(body: {
+  kind: string | null;
+  monthly_fee_usd?: number;
+}): Promise<ModelSource> {
+  return putJson<ModelSource>('/settings/model-source', body);
+}
+
+export interface DetectedCli {
+  found: boolean;
+  version?: string;
+}
+
+/** `GET /settings/detect-clis` — probes PATH for agent CLIs (claude/codex/opencode). */
+export function detectAgentClis(
+  signal?: AbortSignal,
+): Promise<Record<string, DetectedCli>> {
+  return getJson<Record<string, DetectedCli>>('/settings/detect-clis', signal);
+}
+
+// ---- Email: Resend (recommended) + SMTP (alternative) --------------------
+
+export interface ResendCredentials {
+  resend_api_key_set?: boolean;
+  resend_api_key_mask?: string;
+  resend_from?: string;
+}
+
+/** `GET /integrations/resend/credentials` — masked key + saved From. */
+export function getResendCredentials(
+  signal?: AbortSignal,
+): Promise<ResendCredentials> {
+  return getJson<ResendCredentials>('/integrations/resend/credentials', signal);
+}
+
+/**
+ * `POST /integrations/resend/connect` — verify (list domains) then store.
+ * Empty `api_key` keeps the saved one.
+ */
+export function connectResend(input: {
+  api_key: string;
+  resend_from: string;
+}): Promise<ConnectResult> {
+  return postJson<ConnectResult>('/integrations/resend/connect', input);
+}
+
+export interface EmailSmtpCredentials {
+  smtp_host?: string;
+  smtp_port?: string;
+  smtp_user?: string;
+  smtp_password_set?: boolean;
+  smtp_password_mask?: string;
+  smtp_from?: string;
+}
+
+/** `GET /integrations/email_smtp/credentials` — masked password + saved fields. */
+export function getEmailSmtpCredentials(
+  signal?: AbortSignal,
+): Promise<EmailSmtpCredentials> {
+  return getJson<EmailSmtpCredentials>(
+    '/integrations/email_smtp/credentials',
+    signal,
+  );
+}
+
+/** `POST /integrations/email/connect` — SMTP login-verify then store. */
+export function connectEmailSmtp(input: {
+  smtp_host: string;
+  smtp_port: string;
+  smtp_user: string;
+  smtp_password: string;
+  smtp_from: string;
+}): Promise<ConnectResult> {
+  return postJson<ConnectResult>('/integrations/email/connect', input);
+}
+
+/**
+ * `POST /integrations/email/test` — send a real test email via whichever
+ * provider (Resend/SMTP) is connected. Empty `to` defaults to the
+ * connected From address.
+ */
+export function sendTestEmail(to: string): Promise<ConnectResult> {
+  return postJson<ConnectResult>('/integrations/email/test', { to });
+}
+
+// ---- Founder profile + rules -----------------------------------------------
+
+export interface FounderProfile {
+  address?: string;
+  pronouns?: string;
+  comms_style?: string;
+  language?: string;
+  working_hours?: string;
+  timezone?: string;
+  risk_tolerance?: string;
+}
+
+/** `GET /founder/profile` — or `null` when unset. */
+export function getFounderProfile(
+  signal?: AbortSignal,
+): Promise<FounderProfile | null> {
+  return getJson<FounderProfile | null>('/founder/profile', signal);
+}
+
+/** `PUT /founder/profile` — partial merge; `{ clear: true }` removes it. */
+export function setFounderProfile(
+  body: Partial<FounderProfile> & { clear?: boolean },
+): Promise<FounderProfile> {
+  return putJson<FounderProfile>('/founder/profile', body);
+}
+
+export type FounderRuleKind =
+  | 'exclude_capability'
+  | 'budget_cap'
+  | 'forbid_paid_category';
+
+export interface FounderHardRule {
+  kind: FounderRuleKind;
+  match: string;
+  action: string;
+}
+
+export interface FounderRules {
+  hard: FounderHardRule[];
+  soft: string;
+}
+
+/** `GET /founder/rules` — `{ hard, soft }`, or `null` when unset. */
+export function getFounderRules(
+  signal?: AbortSignal,
+): Promise<FounderRules | null> {
+  return getJson<FounderRules | null>('/founder/rules', signal);
+}
+
+/** `PUT /founder/rules` — full replace of `{ hard, soft }`; `{ clear: true }` removes both. */
+export function setFounderRules(
+  body: Partial<FounderRules> & { clear?: boolean },
+): Promise<FounderRules> {
+  return putJson<FounderRules>('/founder/rules', body);
+}
+
+// ---- Integrations registry + credentials vault ----------------------------
+
+export interface IntegrationInfo {
+  integration_id: string;
+  display_name: string;
+  description: string;
+  required_credentials: string[];
+  connected: boolean;
+  tools: string[];
+}
+
+/** `GET /integrations` — every registered integration + connection state. */
+export function getIntegrations(
+  signal?: AbortSignal,
+): Promise<IntegrationInfo[]> {
+  return getJson<IntegrationInfo[]>('/integrations', signal);
+}
+
+export interface CredentialEntry {
+  name: string;
+  configured: boolean;
+  updated_at?: string;
+}
+
+/** `GET /credentials` — raw vault entries (values never returned). */
+export function getCredentials(
+  signal?: AbortSignal,
+): Promise<CredentialEntry[]> {
+  return getJson<CredentialEntry[]>('/credentials', signal);
+}
+
+/** `POST /credentials` — `{ name, value }`. Overwrites any existing entry. */
+export function setCredential(name: string, value: string): Promise<CredentialEntry> {
+  return postJson<CredentialEntry>('/credentials', { name, value });
+}
+
+/** `DELETE /credentials/{name}`. */
+export function deleteCredential(name: string): Promise<{ ok?: boolean }> {
+  return deleteJson<{ ok?: boolean }>(`/credentials/${encodeURIComponent(name)}`);
+}
+
+/** `POST /credentials/rotate-key` — re-encrypts every entry with a new Fernet key. */
+export function rotateCredentialKey(
+  newVaultKey: string,
+): Promise<{ rotated?: number }> {
+  return postJson<{ rotated?: number }>('/credentials/rotate-key', {
+    new_vault_key: newVaultKey,
+  });
+}
+
+// ---- Workspaces (one isolated data dir per brand) --------------------------
+
+export interface WorkspaceEntry {
+  name: string;
+  label: string;
+  data_dir: string;
+  active: boolean;
+}
+
+export interface WorkspacesList {
+  active: string;
+  env_override: boolean;
+  workspaces: WorkspaceEntry[];
+}
+
+/** `GET /workspaces` — registry: active brand + every registered entry. */
+export function getWorkspaces(signal?: AbortSignal): Promise<WorkspacesList> {
+  return getJson<WorkspacesList>('/workspaces', signal);
+}
+
+/** `POST /workspaces/switch` — `{ name }`. Rebinds the server; caller reloads. */
+export function switchWorkspace(
+  name: string,
+): Promise<WorkspaceEntry & { error?: string; restart_required?: boolean }> {
+  return postJson<WorkspaceEntry & { error?: string; restart_required?: boolean }>(
+    '/workspaces/switch',
+    { name },
+  );
+}
+
+/** `POST /workspaces` — `{ name, label? }`. Registers, does not switch. */
+export function createWorkspace(
+  name: string,
+  label = '',
+): Promise<WorkspaceEntry & { error?: string }> {
+  return postJson<WorkspaceEntry & { error?: string }>('/workspaces', {
+    name,
+    label,
+  });
 }

@@ -43,6 +43,70 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# Cached daemon build info — computed once on first /version request.
+# Resolved lazily so importing the module never shells out to git.
+_DAEMON_BUILD_INFO: dict[str, str] | None = None
+
+
+def _resolve_daemon_build_info() -> dict[str, str]:
+    """Daemon version + git commit of the running engine package.
+
+    Walks up from this file's location to find a ``.git`` dir and runs
+    ``git rev-parse --short HEAD`` there. Falls back to ``unknown`` when
+    not in a git checkout (e.g. PyInstaller bundle) so the endpoint
+    never 500s. Cached after the first call.
+    """
+    global _DAEMON_BUILD_INFO
+    if _DAEMON_BUILD_INFO is not None:
+        return _DAEMON_BUILD_INFO
+
+    from kompany import __version__ as pkg_version
+
+    commit = "unknown"
+    describe = "unknown"
+    try:
+        import subprocess
+
+        # This file lives at <git_root>/kompany/src/kompany/interfaces/api_parts/system.py
+        here = Path(__file__).resolve()
+        for candidate in [here, *here.parents]:
+            if (candidate / ".git").exists() or (candidate / ".git").is_dir():
+                git_dir = candidate
+                break
+        else:
+            git_dir = None
+        if git_dir is not None:
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
+            ).stdout.strip() or "unknown"
+            describe = subprocess.run(
+                ["git", "describe", "--tags", "--always", "--dirty"],
+                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
+            ).stdout.strip() or commit
+    except Exception:  # noqa: BLE001 — version probe must never break /version
+        pass
+
+    _DAEMON_BUILD_INFO = {
+        "version": pkg_version,
+        "commit": commit,
+        "git_describe": describe,
+    }
+    return _DAEMON_BUILD_INFO
+
+
+@router.get("/version")
+def version() -> dict[str, str]:
+    """Daemon build info — package version + git commit of the running engine.
+
+    The Tauri shell fetches this after health-check passes and shows
+    both its own (tauri) commit and this daemon commit in the window
+    title, so a founder can tell at a glance which build is live on the
+    remote VPS vs the local desktop shell.
+    """
+    return _resolve_daemon_build_info()
+
+
 # ---------------------------------------------------------------------------
 # Onboarding REST surface (used by the Tauri shell + browser flow).
 # ---------------------------------------------------------------------------
@@ -320,3 +384,103 @@ def agents_status() -> list[dict[str, Any]]:
             })
     return result
 
+
+
+# ---------------------------------------------------------------------------
+# Browser config — CDP endpoint selection + connection test
+# ---------------------------------------------------------------------------
+
+import urllib.request
+import urllib.error
+
+
+_BROWSER_CONFIG_KEY = "browser_cdp_endpoint"
+# Common CDP ports to probe for auto-detection.
+_PROBE_PORTS = [9222, 9223, 9229, 9335, 9445]
+
+
+@router.get("/browser/config")
+def browser_config() -> dict[str, Any]:
+    """Current browser CDP endpoint + connection status."""
+    engine = get_engine()
+    endpoint = getattr(engine.settings, "browser_cdp_endpoint", "") or ""
+    # Check company_config for a persisted override (set via POST below).
+    row = engine.db.execute(
+        "SELECT value FROM company_config WHERE key = ?",
+        (_BROWSER_CONFIG_KEY,),
+    ).fetchone()
+    if row and row["value"]:
+        endpoint = row["value"]
+    alive = False
+    browser_type = None
+    if endpoint:
+        alive, browser_type = _probe_cdp(endpoint)
+    return {
+        "cdp_endpoint": endpoint,
+        "connected": alive,
+        "browser_type": browser_type,
+        "playwright_installed": _playwright_installed(),
+    }
+
+
+@router.post("/browser/config")
+def set_browser_config(body: dict[str, Any]) -> dict[str, Any]:
+    """Persist the browser CDP endpoint. Applied on next engine boot."""
+    engine = get_engine()
+    endpoint = str(body.get("cdp_endpoint") or "").strip()
+    if not endpoint:
+        return {"ok": False, "detail": "cdp_endpoint is required"}
+    engine.db.execute(
+        """INSERT INTO company_config (key, value, updated_at)
+           VALUES (?, ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET
+             value = excluded.value,
+             updated_at = datetime('now')""",
+        (_BROWSER_CONFIG_KEY, endpoint),
+    )
+    # Apply immediately so the running engine picks it up.
+    try:
+        engine.settings.browser_cdp_endpoint = endpoint
+    except Exception:  # noqa: BLE001
+        pass
+    alive, browser_type = _probe_cdp(endpoint)
+    return {
+        "ok": True,
+        "cdp_endpoint": endpoint,
+        "connected": alive,
+        "browser_type": browser_type,
+    }
+
+
+@router.get("/browser/probe")
+def browser_probe() -> dict[str, Any]:
+    """Probe common CDP ports for running browsers. Returns all found."""
+    found = []
+    for port in _PROBE_PORTS:
+        url = f"http://127.0.0.1:{port}"
+        alive, browser_type = _probe_cdp(url)
+        if alive:
+            found.append({"port": port, "endpoint": url, "browser_type": browser_type})
+    return {"browsers": found}
+
+
+def _probe_cdp(endpoint: str) -> tuple[bool, str | None]:
+    """Quick HTTP probe of a CDP endpoint. Returns (alive, browser_type)."""
+    try:
+        url = endpoint.rstrip("/") + "/json/version"
+        req = urllib.request.Request(url, headers={"User-Agent": "kompany-probe"})
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            import json as _json
+            data = _json.loads(resp.read())
+            browser = data.get("Browser", "")
+            return True, browser or None
+    except Exception:  # noqa: BLE001
+        return False, None
+
+
+def _playwright_installed() -> bool:
+    try:
+        import playwright.sync_api  # noqa: F401
+        return True
+    except Exception:  # noqa: BLE001
+        return False
