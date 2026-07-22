@@ -238,14 +238,65 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
     let url = format!("{}{}", base, path);
     let webview_url =
         WebviewUrl::External(url.parse().map_err(|e| format!("invalid url: {}", e))?);
+
+    // Tauri shell commit baked at build time by build.rs. The daemon
+    // commit is fetched from /version after the window opens (best
+    // effort — a remote engine may not expose it yet) and stamped onto
+    // the title in a background thread so a slow /version never blocks
+    // the window from appearing.
+    let tauri_commit = env!("KOMPANY_TAURI_COMMIT");
+    let initial_title = format!("Kompany · tauri@{}", tauri_commit);
+
     let window = WebviewWindowBuilder::new(handle, "main", webview_url)
-        .title("Kompany")
+        .title(&initial_title)
         .inner_size(1200.0, 800.0)
         .min_inner_size(900.0, 600.0)
         .resizable(true)
         .visible(true)
         .build()
         .map_err(|e| format!("window build failed: {}", e))?;
+
+    // Best-effort: fetch daemon /version and append daemon@<commit> to
+    // the title. Runs off the main thread so a hung/slow engine never
+    // delays the window. A 3s cap matches the probe timeouts above.
+    let base_for_thread = base.to_string();
+    let win_label = window.label().to_string();
+    let handle_for_thread = handle.clone();
+    thread::spawn(move || {
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let url = format!("{}/version", base_for_thread.trim_end_matches('/'));
+        let resp = match client.get(&url).header("Accept", "application/json").send() {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        if !resp.status().is_success() {
+            return;
+        }
+        let bytes = match resp.bytes() {
+            Ok(b) => b,
+            Err(_) => return,
+        };
+        let body: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let daemon_commit = body
+            .get("commit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let new_title = format!("Kompany · tauri@{} · daemon@{}", tauri_commit, daemon_commit);
+        // Hop back onto the Tauri main thread to mutate the window.
+        use tauri::Manager;
+        if let Some(w) = handle_for_thread.get_webview_window(&win_label) {
+            let _ = w.set_title(&new_title);
+        }
+    });
 
     // CloseRequested → kill the sidecar we spawned (if any) then exit.
     let close_handle = handle.clone();
@@ -287,25 +338,47 @@ fn main() {
             std::fs::create_dir_all(&data_dir).ok();
 
             // ---- Remote mode (07-20 VPS deploy) ------------------------
-            // If KOMPANY_REMOTE_URL is set, the desktop app becomes a
-            // pure client of a remote engine (typically on a tailnet
-            // VPS). No discovery, no sidecar — just probe /health and
-            // load the URL. SidecarHandle stays empty so app exit never
-            // touches the remote server. The remote engine must already
-            // be running (e.g. as a systemd service on the VPS).
-            if let Some(remote_url) = std::env::var_os("KOMPANY_REMOTE_URL") {
-                let base = remote_url
-                    .to_str()
-                    .ok_or("KOMPANY_REMOTE_URL is not valid UTF-8")?
-                    .trim()
-                    .trim_end_matches('/')
-                    .to_string();
+            // If KOMPANY_REMOTE_URL is set (env) OR a `remote_url` file
+            // exists in the data dir, the desktop app becomes a pure client
+            // of a remote engine (typically on a tailnet VPS). No discovery,
+            // no sidecar — just probe /health and load the URL. SidecarHandle
+            // stays empty so app exit never touches the remote server. The
+            // remote engine must already be running (e.g. as a systemd
+            // service on the VPS).
+            //
+            // The env var is the one-shot override (e.g. for testing a
+            // different server). The file is the persistent setting so the
+            // founder can double-click the app without setting env vars.
+            // To set: `echo http://my-server:55352 > ~/.kompany/remote_url`
+            // To clear: `rm ~/.kompany/remote_url`
+            let remote_url_file = data_dir.join("remote_url");
+            let remote_url: Option<String> = std::env::var_os("KOMPANY_REMOTE_URL")
+                .map(|v| {
+                    v.to_str()
+                        .ok_or("KOMPANY_REMOTE_URL is not valid UTF-8")
+                        .map(|s| s.trim().trim_end_matches('/').to_string())
+                        .ok()
+                })
+                .flatten()
+                .or_else(|| {
+                    std::fs::read_to_string(&remote_url_file)
+                        .ok()
+                        .map(|s| s.trim().trim_end_matches('/').to_string())
+                        .filter(|s| !s.is_empty())
+                });
+
+            if let Some(base) = remote_url {
                 if base.is_empty() {
                     return Err("KOMPANY_REMOTE_URL is empty".into());
                 }
+                let source = if std::env::var_os("KOMPANY_REMOTE_URL").is_some() {
+                    "env KOMPANY_REMOTE_URL"
+                } else {
+                    "data-dir remote_url file"
+                };
                 eprintln!(
-                    "kompany: remote mode — probing {} (KOMPANY_REMOTE_URL set, skipping sidecar)",
-                    base
+                    "kompany: remote mode — probing {} (from {}, skipping sidecar)",
+                    base, source
                 );
                 if !wait_for_health(&base, Duration::from_secs(30)) {
                     return Err(format!(
