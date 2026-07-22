@@ -41,6 +41,84 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 /// and kill it from the window-close event.
 struct SidecarHandle(Mutex<Option<Child>>);
 
+// ---- Tauri IPC commands for desktop connection settings -------------------
+// The board SPA calls these via `window.__TAURI__.core.invoke('cmd_name')`
+// to read/write the persistent remote_url file. This lets the founder
+// switch between local and remote mode from the Settings UI without
+// touching the filesystem.
+
+fn kompany_data_dir() -> std::path::PathBuf {
+    std::env::var_os("KOMPANY_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|h| std::path::PathBuf::from(h).join(".kompany"))
+        })
+        .unwrap_or_else(|| std::path::PathBuf::from("./.kompany"))
+}
+
+#[derive(serde::Serialize)]
+struct DesktopConnection {
+    /// "local" or "remote"
+    mode: String,
+    /// Current remote URL if set (empty string when local)
+    remote_url: String,
+    /// Whether the URL came from env var (one-shot, can't be cleared from UI)
+    from_env: bool,
+}
+
+/// `get_desktop_connection` — read current connection mode + URL.
+#[tauri::command]
+fn get_desktop_connection() -> DesktopConnection {
+    let env_url = std::env::var_os("KOMPANY_REMOTE_URL")
+        .map(|v| v.to_string_lossy().trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty());
+    let file_path = kompany_data_dir().join("remote_url");
+    let file_url = std::fs::read_to_string(&file_path)
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty());
+    let (mode, url, from_env) = match (env_url.clone(), file_url.clone()) {
+        (Some(e), _) => ("remote".into(), e, true),
+        (None, Some(f)) => ("remote".into(), f, false),
+        (None, None) => ("local".into(), String::new(), false),
+    };
+    DesktopConnection { mode, remote_url: url, from_env }
+}
+
+/// `set_remote_url` — persist a remote URL to ~/.kompany/remote_url.
+/// Returns the new connection state. The change takes effect on next app launch.
+#[tauri::command]
+fn set_remote_url(url: String) -> Result<DesktopConnection, String> {
+    let url = url.trim().trim_end_matches('/').to_string();
+    if url.is_empty() {
+        return Err("URL is required".into());
+    }
+    let dir = kompany_data_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create data dir: {e}"))?;
+    std::fs::write(dir.join("remote_url"), &url)
+        .map_err(|e| format!("write remote_url: {e}"))?;
+    Ok(DesktopConnection {
+        mode: "remote".into(),
+        remote_url: url,
+        from_env: false,
+    })
+}
+
+/// `clear_remote_url` — delete ~/.kompany/remote_url, reverting to local mode.
+#[tauri::command]
+fn clear_remote_url() -> Result<DesktopConnection, String> {
+    let path = kompany_data_dir().join("remote_url");
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("remove remote_url: {e}"))?;
+    }
+    Ok(DesktopConnection {
+        mode: "local".into(),
+        remote_url: String::new(),
+        from_env: false,
+    })
+}
+
 fn pick_free_port() -> std::io::Result<u16> {
     // Bind to port 0 to let the kernel pick a free one, then drop the
     // listener immediately. There's a tiny TOCTOU window where another
@@ -319,6 +397,11 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
 fn main() {
     tauri::Builder::default()
         .manage(SidecarHandle(Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![
+            get_desktop_connection,
+            set_remote_url,
+            clear_remote_url,
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
 

@@ -6,6 +6,7 @@
 // it was the only one ported here. Order mirrors the legacy page.
 
 import { ModelCard } from './settings/ModelCard';
+import { DesktopConnectionCard } from './settings/DesktopConnectionCard';
 import { ModelSourceCard } from './settings/ModelSourceCard';
 import { ResendCard } from './settings/ResendCard';
 import { EmailSmtpCard } from './settings/EmailSmtpCard';
@@ -29,6 +30,7 @@ export function Settings() {
       </header>
 
       <div className="settings">
+        <DesktopConnectionCard />
         <ModelCard />
         <ModelSourceCard />
         <ResendCard />
