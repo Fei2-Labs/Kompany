@@ -45,12 +45,17 @@ def _playwright_available() -> bool:
 
 
 class BrowserSession:
-    """A lazily-attached Playwright-over-CDP session for one chat run.
+    """A lazily-attached Playwright browser session for one chat run.
 
-    Connects on first use to an Edge already listening on
-    :data:`CDP_ENDPOINT`. Reuses the first existing browser context (the
-    founder's logged-in profile) and its current page when present, so the
-    agent acts inside the real signed-in session rather than a blank tab.
+    Two modes, tried in order:
+
+    1. **CDP attach** — if a browser is listening on :data:`CDP_ENDPOINT`
+       (the founder's Edge/Chrome with ``--remote-debugging-port=9223``),
+       attach to it and reuse the logged-in profile. This is the preferred
+       mode on the founder's desktop where their real browser runs.
+    2. **Headless launch** — if no CDP endpoint responds, launch a headless
+       Chromium. This is the mode on a VPS / server with no desktop browser.
+       No login sessions, but full public-web browsing capability.
 
     Every method returns ``(page_or_None, error_or_None)`` style only through
     :meth:`page`; tool bodies translate ``error`` into an observation. Nothing
@@ -62,9 +67,10 @@ class BrowserSession:
         self._pw = None
         self._browser = None
         self._connected = False
+        self._is_headless = False
 
     def _connect(self) -> str | None:
-        """Attach to Edge. Returns an error string or ``None`` on success."""
+        """Attach to a browser. Returns an error string or ``None`` on success."""
         if self._connected:
             return None
         if not _playwright_available():
@@ -73,19 +79,35 @@ class BrowserSession:
                 "installed. Ask the founder to install Kompany's [browser] "
                 "extra. (No action taken.)"
             )
-        try:
-            from playwright.sync_api import sync_playwright
+        from playwright.sync_api import sync_playwright
 
+        try:
             self._pw = sync_playwright().start()
+        except Exception as exc:  # noqa: BLE001
+            self._cleanup()
+            return f"browser unavailable: playwright failed to start ({exc})."
+
+        # Try CDP attach first (founder's real browser with login sessions).
+        try:
             self._browser = self._pw.chromium.connect_over_cdp(self.endpoint)
             self._connected = True
+            self._is_headless = False
             return None
-        except Exception as exc:  # noqa: BLE001 — Edge not running / no CDP
+        except Exception:  # noqa: BLE001 — no Edge on 9223, try headless
+            pass
+
+        # Fall back to headless Chromium (VPS / no desktop browser).
+        try:
+            self._browser = self._pw.chromium.launch(headless=True)
+            self._connected = True
+            self._is_headless = True
+            return None
+        except Exception as exc:  # noqa: BLE001
             self._cleanup()
             return (
-                f"browser unavailable: could not attach to Edge over CDP at "
-                f"{self.endpoint} ({type(exc).__name__}: {exc}). Is Edge "
-                "running with --remote-debugging-port=9223? (No action taken.)"
+                f"browser unavailable: could not attach to CDP at "
+                f"{self.endpoint} nor launch headless Chromium "
+                f"({type(exc).__name__}: {exc}). (No action taken.)"
             )
 
     def page(self):
@@ -94,10 +116,16 @@ class BrowserSession:
         if err is not None:
             return None, err
         try:
-            contexts = self._browser.contexts
-            ctx = contexts[0] if contexts else self._browser.new_context()
-            pages = ctx.pages
-            page = pages[0] if pages else ctx.new_page()
+            if self._is_headless:
+                # Headless: always create a fresh context + page.
+                ctx = self._browser.new_context()
+                page = ctx.new_page()
+            else:
+                # CDP: reuse the founder's existing context + page.
+                contexts = self._browser.contexts
+                ctx = contexts[0] if contexts else self._browser.new_context()
+                pages = ctx.pages
+                page = pages[0] if pages else ctx.new_page()
             return page, None
         except Exception as exc:  # noqa: BLE001
             return None, (
@@ -109,7 +137,8 @@ class BrowserSession:
         self._cleanup()
 
     def _cleanup(self) -> None:
-        # connect_over_cdp must NOT close the founder's Edge — only detach.
+        # CDP attach must NOT close the founder's Edge — only detach.
+        # Headless launch: close the browser we created.
         try:
             if self._browser is not None:
                 self._browser.close()
@@ -123,6 +152,7 @@ class BrowserSession:
         self._pw = None
         self._browser = None
         self._connected = False
+        self._is_headless = False
 
 
 def _session(ctx: ToolContext) -> BrowserSession:
