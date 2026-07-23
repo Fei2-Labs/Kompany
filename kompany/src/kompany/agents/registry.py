@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -9,6 +10,16 @@ if TYPE_CHECKING:
     from kompany.config.settings import KompanySettings
     from kompany.llm.client import LLMClient
     from kompany.state.ledger import Ledger
+
+
+@dataclass(frozen=True, slots=True)
+class AgentCapabilityDescriptor:
+    """Stable, model-independent description used by the router."""
+
+    role: str
+    squad: str
+    capabilities: tuple[str, ...]
+    can_own_conversation: bool = True
 
 
 class AgentRegistry:
@@ -39,6 +50,29 @@ class AgentRegistry:
     def list_by_squad(self, squad: str) -> list[str]:
         """Return role names belonging to a squad."""
         return [r for r, s in _SQUAD_MAP.items() if s == squad]
+
+    def descriptor(self, role: str) -> AgentCapabilityDescriptor:
+        """Return the public routing descriptor for an agent role."""
+        descriptor = _CAPABILITY_DESCRIPTORS.get(role)
+        if descriptor is None:
+            raise ValueError(f"Unknown agent role: {role}")
+        return descriptor
+
+    def descriptors(self) -> list[AgentCapabilityDescriptor]:
+        """Return all public routing descriptors in stable role order."""
+        return [
+            _CAPABILITY_DESCRIPTORS[role]
+            for role in sorted(_CAPABILITY_DESCRIPTORS)
+        ]
+
+    def candidates_for(self, capabilities: set[str]) -> list[str]:
+        """Return conversation agents satisfying every required capability."""
+        return [
+            descriptor.role
+            for descriptor in self.descriptors()
+            if descriptor.can_own_conversation
+            and capabilities.issubset(set(descriptor.capabilities))
+        ]
 
     def _create(self, role: str, company_state: dict | None = None):
         from kompany.agents.ceo import CEOAgent
@@ -96,4 +130,92 @@ _SQUAD_MAP: dict[str, str] = {
     "cmo": "growth",
     "cro": "growth",
     "cv": "growth",
+}
+
+_CAPABILITY_DESCRIPTORS: dict[str, AgentCapabilityDescriptor] = {
+    "ceo": AgentCapabilityDescriptor(
+        "ceo",
+        "strategy",
+        ("strategy", "coordination", "prioritization", "decisions"),
+    ),
+    "cfo": AgentCapabilityDescriptor(
+        "cfo",
+        "strategy",
+        ("finance", "budget", "forecasting", "pricing"),
+    ),
+    "coo": AgentCapabilityDescriptor(
+        "coo",
+        "strategy",
+        ("operations", "process", "delivery", "vendors"),
+    ),
+    "cos": AgentCapabilityDescriptor(
+        "cos",
+        "strategy",
+        ("coordination", "planning", "reporting", "follow-up"),
+    ),
+    "cto": AgentCapabilityDescriptor(
+        "cto",
+        "product",
+        ("engineering", "architecture", "infrastructure", "technical"),
+    ),
+    "cpo": AgentCapabilityDescriptor(
+        "cpo",
+        "product",
+        ("product", "roadmap", "requirements", "user-research"),
+    ),
+    "csa": AgentCapabilityDescriptor(
+        "csa",
+        "product",
+        ("solutions", "integrations", "customer-architecture"),
+    ),
+    "ciso": AgentCapabilityDescriptor(
+        "ciso",
+        "product",
+        ("security", "privacy", "risk", "compliance"),
+    ),
+    "cmo": AgentCapabilityDescriptor(
+        "cmo",
+        "growth",
+        ("marketing", "content", "campaigns", "brand"),
+    ),
+    "cro": AgentCapabilityDescriptor(
+        "cro",
+        "growth",
+        ("sales", "revenue", "pipeline", "partnerships"),
+    ),
+    "cv": AgentCapabilityDescriptor(
+        "cv",
+        "growth",
+        ("validation", "experiments", "market-research"),
+    ),
+    "researcher": AgentCapabilityDescriptor(
+        "researcher",
+        "support",
+        ("research", "sources", "synthesis"),
+        can_own_conversation=False,
+    ),
+    "writer": AgentCapabilityDescriptor(
+        "writer",
+        "support",
+        ("writing", "editing", "content"),
+        can_own_conversation=False,
+    ),
+    "analyst": AgentCapabilityDescriptor(
+        "analyst",
+        "support",
+        ("analysis", "data", "metrics"),
+        can_own_conversation=False,
+    ),
+    "builder": AgentCapabilityDescriptor(
+        "builder",
+        "support",
+        ("implementation", "prototyping", "automation"),
+        can_own_conversation=False,
+    ),
+    "procurement": AgentCapabilityDescriptor(
+        "procurement",
+        "support",
+        ("procurement", "vendors", "purchasing"),
+        can_own_conversation=False,
+    ),
 }

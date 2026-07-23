@@ -1,9 +1,9 @@
-"""P4 real-world tool reach: browser (Edge CDP), MCP client, integrations.
+"""P4 real-world tool reach: browser (CDP), MCP client, integrations.
 
 All backends are mocked — NO real browser, NO real MCP server, NO network.
 Covers:
 - browser tool classification (navigate/read/find/screenshot inline vs
-  click/type gated), and graceful degrade when Playwright/Edge are absent,
+  click/type gated), and graceful degrade when Playwright/CDP are absent,
 - a mocked Playwright-over-CDP session driving read + (gated) write tools,
 - MCP client registers external tools, dispatches via a mocked session, gates
   by default, honors read_only config, and is graceful on an unreachable
@@ -51,7 +51,8 @@ from kompany.core.agent_tools.chat_registry import build_chat_registry
 # ===================================================================== #
 
 def test_browser_tools_classification():
-    reg = ToolRegistry(list(browser_tools()))
+    tools = list(browser_tools())
+    reg = ToolRegistry(tools)
     assert set(reg.names()) == {
         "browser_navigate", "browser_read", "browser_find",
         "browser_screenshot", "browser_click", "browser_type",
@@ -63,6 +64,9 @@ def test_browser_tools_classification():
     # EXTERNAL_ACTION (gated)
     for n in ("browser_click", "browser_type"):
         assert not reg.is_inline(n), n
+    descriptions = " ".join(tool.description for tool in tools)
+    assert "Edge" not in descriptions
+    assert "founder" not in descriptions.lower()
 
 
 def test_browser_write_tools_gate_through_propose_action():
@@ -93,8 +97,8 @@ def test_browser_graceful_degrade_when_playwright_absent(monkeypatch):
     assert "playwright" in obs.lower()
 
 
-def test_browser_graceful_degrade_when_edge_not_running(monkeypatch):
-    """Playwright present but Edge-on-9223 absent → connect raises → clear
+def test_browser_graceful_degrade_when_cdp_not_running(monkeypatch):
+    """Playwright present but configured CDP absent → connect raises → clear
     notice, no crash."""
     monkeypatch.setattr(bt_module, "_playwright_available", lambda: True)
 
@@ -106,7 +110,7 @@ def test_browser_graceful_degrade_when_edge_not_running(monkeypatch):
         def chromium(self):
             class _C:
                 def connect_over_cdp(self, endpoint):
-                    raise ConnectionRefusedError("no Edge on 9223")
+                    raise ConnectionRefusedError("no CDP browser on 9223")
             return _C()
 
         def stop(self):

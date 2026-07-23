@@ -578,7 +578,7 @@ def test_directive_llm_failure_returns_graceful_200(monkeypatch):
     rejected gpt-5.5 with 'Param Incorrect / invalid_request_error'."""
     fake_engine = FakeEngine()
 
-    def boom(_text, session_id=None):
+    def boom(_text, session_id=None, context=None):
         raise RuntimeError(
             "LLM 'gpt-5.5' unavailable after retry: BadRequestError: "
             '{"error":{"message":"Param Incorrect",'
@@ -643,9 +643,11 @@ class _ChannelEngine:
             status="completed", message="dispatched", session_id="s-new", run_id="r1"
         )
         self.send_calls = []
+        self.contexts = []
 
-    def process_directive(self, text, session_id=None):
+    def process_directive(self, text, session_id=None, context=None):
         self.send_calls.append((text, session_id))
+        self.contexts.append(context)
         return self._send_result
 
     def channel_go(self, session_id):
@@ -690,20 +692,29 @@ def test_channel_session_detail_returns_ordered_turns(tmp_path, monkeypatch):
     from kompany.state.models import ConversationSession
 
     eng = _ChannelEngine(tmp_path)
-    session = eng.channel.create_session(ConversationSession())
+    session = eng.channel.create_session(
+        ConversationSession(active_agent_id="cmo")
+    )
     eng.channel.add_turn(session.id, role="founder", content="build a CRM")
-    eng.channel.add_turn(session.id, role="ceo", content="which segment?",
-                         kind="clarify_question")
+    eng.channel.add_turn(
+        session.id,
+        role="ceo",
+        agent_id="cmo",
+        content="which segment?",
+        kind="clarify_question",
+    )
     monkeypatch.setattr("kompany.interfaces.api._engine", eng)
 
     resp = client.get(f"/channel/sessions/{session.id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["session"]["session_id"] == session.id
+    assert body["session"]["active_agent_id"] == "cmo"
     turns = body["turns"]
     assert [t["turn_index"] for t in turns] == [0, 1]
     assert turns[0]["role"] == "founder"
     assert turns[1]["kind"] == "clarify_question"
+    assert turns[1]["agent_id"] == "cmo"
 
 
 def test_channel_session_detail_unknown_is_404(tmp_path, monkeypatch):
@@ -725,7 +736,33 @@ def test_channel_send_new_session_flattens_result(tmp_path, monkeypatch):
     assert body["session_id"] == "s-new"
     assert body["run_id"] == "r1"
     assert {"status", "message", "project_id", "approval_id", "total_ai_cost",
-            "agents_used", "run_id", "session_id"} == set(body)
+            "agents_used", "run_id", "session_id", "active_agent_id",
+            "previous_agent_id", "handoff_id",
+            "conversation_continues", "delegation_id",
+            "delegation_status"} == set(body)
+
+
+def test_channel_send_passes_board_project_context_to_engine(tmp_path, monkeypatch):
+    eng = _ChannelEngine(tmp_path)
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post(
+        "/channel/send",
+        json={
+            "text": "Review the launch",
+            "project_id": "project-vinted",
+            "agent_id": "cmo",
+        },
+    )
+
+    assert resp.status_code == 200
+    context = eng.contexts[0]
+    assert context.channel == "board"
+    assert context.account_id == "local"
+    assert context.chat_id == "main"
+    assert context.sender_id == "founder"
+    assert context.project_id == "project-vinted"
+    assert context.active_agent_id == "cmo"
 
 
 def test_channel_send_continues_clarify_session(tmp_path, monkeypatch):
@@ -763,7 +800,7 @@ def test_channel_send_llm_failure_returns_graceful_200(tmp_path, monkeypatch):
     contract as /directive (shared _process_directive_graceful)."""
     eng = _ChannelEngine(tmp_path)
 
-    def boom(_text, session_id=None):
+    def boom(_text, session_id=None, context=None):
         raise RuntimeError(
             "LLM unavailable: BadRequestError: invalid_request_error upstream_error"
         )
@@ -777,6 +814,32 @@ def test_channel_send_llm_failure_returns_graceful_200(tmp_path, monkeypatch):
     assert body["status"] == "failed"
     assert body["error_code"] == "provider_error"
     assert body["message"]
+
+
+def test_channel_send_failure_preserves_open_specialist_session(tmp_path, monkeypatch):
+    from kompany.state.models import ConversationSession
+
+    eng = _ChannelEngine(tmp_path)
+    session = eng.channel.create_session(
+        ConversationSession(active_agent_id="cmo")
+    )
+
+    def boom(_text, session_id=None, context=None):
+        raise RuntimeError("provider unavailable")
+
+    eng.process_directive = boom  # type: ignore[assignment]
+    monkeypatch.setattr("kompany.interfaces.api._engine", eng)
+
+    resp = client.post(
+        "/channel/send",
+        json={"text": "try again", "session_id": session.id},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["active_agent_id"] == "cmo"
+    assert body["conversation_continues"] is True
+    assert body["session_id"] == session.id
 
 
 def test_channel_go_happy_path_flattens(tmp_path, monkeypatch):
@@ -845,7 +908,10 @@ def test_directive_delegates_to_channel_send_path(tmp_path, monkeypatch):
     body = resp.json()
     assert eng.send_calls == [("ship it", "s-existing")]
     assert {"status", "message", "project_id", "approval_id", "total_ai_cost",
-            "agents_used", "run_id", "session_id"} == set(body)
+            "agents_used", "run_id", "session_id", "active_agent_id",
+            "previous_agent_id", "handoff_id",
+            "conversation_continues", "delegation_id",
+            "delegation_status"} == set(body)
 
 
 def test_channel_updated_event_reaches_events_stream(tmp_path):
@@ -2360,6 +2426,8 @@ def test_cli_status_json_output(monkeypatch):
 _PARITY_KEYS = {
     "status", "message", "project_id", "approval_id",
     "total_ai_cost", "agents_used", "run_id", "session_id",
+    "active_agent_id", "previous_agent_id", "handoff_id",
+    "conversation_continues", "delegation_id", "delegation_status",
 }
 
 
@@ -2470,10 +2538,18 @@ def test_sdk_channel_sessions_and_history(monkeypatch):
     sdk = Kompany.__new__(Kompany)
     sdk._engine = engine
 
-    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
+    s = engine.channel.add_session(ConversationSession(
+        state=SessionStatus.OPEN,
+        active_agent_id="cmo",
+    ))
     engine.channel.add_turn(s.id, role="founder", content="build a CRM")
-    engine.channel.add_turn(s.id, role="ceo", content="which segment?",
-                            kind="clarify_question")
+    engine.channel.add_turn(
+        s.id,
+        role="ceo",
+        agent_id="cmo",
+        content="which segment?",
+        kind="clarify_question",
+    )
 
     rows = sdk.channel.sessions()
     assert rows[0]["session_id"] == s.id
@@ -2481,8 +2557,10 @@ def test_sdk_channel_sessions_and_history(monkeypatch):
 
     detail = sdk.channel.session(s.id)
     assert detail["session"]["session_id"] == s.id
+    assert detail["session"]["active_agent_id"] == "cmo"
     assert [t["turn_index"] for t in detail["turns"]] == [0, 1]
     assert detail["turns"][1]["kind"] == "clarify_question"
+    assert detail["turns"][1]["agent_id"] == "cmo"
     assert sdk.channel.session("nope") is None
 
 
@@ -2506,15 +2584,24 @@ def test_mcp_channel_history_and_actions(monkeypatch):
     from kompany.state.models import ConversationSession, SessionStatus
 
     engine = _ParityEngine()
-    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
-    engine.channel.add_turn(s.id, role="founder", content="hi")
+    s = engine.channel.add_session(ConversationSession(
+        state=SessionStatus.OPEN,
+        active_agent_id="cmo",
+    ))
+    engine.channel.add_turn(
+        s.id,
+        role="ceo",
+        agent_id="cmo",
+        content="hi",
+    )
 
     listing = _call_mcp("kompany_channel_sessions", {}, engine, monkeypatch)
     assert listing["sessions"][0]["session_id"] == s.id
 
     detail = _call_mcp("kompany_channel_session", {"session_id": s.id}, engine, monkeypatch)
     assert detail["session"]["session_id"] == s.id
-    assert detail["turns"][0]["role"] == "founder"
+    assert detail["session"]["active_agent_id"] == "cmo"
+    assert detail["turns"][0]["agent_id"] == "cmo"
 
     missing = _call_mcp("kompany_channel_session", {"session_id": "nope"}, engine, monkeypatch)
     assert "error" in missing
@@ -2609,6 +2696,45 @@ def test_cli_directive_interactive_clarify_loop(monkeypatch):
     assert "which platform?" in result.stdout
 
 
+def test_cli_directive_interactive_continues_specialist_session(monkeypatch):
+    engine = _ParityEngine()
+    first = _directive_result(
+        status="completed",
+        message="CMO owns this conversation.",
+        session_id="s-cmo",
+    )
+    first.active_agent_id = "cmo"
+    first.conversation_continues = True
+    second = _directive_result(
+        status="completed",
+        message="Follow-up answered.",
+        session_id="s-cmo",
+    )
+    seq = iter([first, second])
+
+    def process(text, session_id=None):
+        engine.send_calls.append((text, session_id))
+        return next(seq)
+
+    engine.process_directive = process  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "kompany.interfaces.cli._get_engine",
+        lambda config=None: engine,
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["directive", "review campaign", "--interactive"],
+        input="what next?\n",
+    )
+
+    assert result.exit_code == 0
+    assert engine.send_calls == [
+        ("review campaign", None),
+        ("what next?", "s-cmo"),
+    ]
+
+
 def test_cli_directive_interactive_gate_go(monkeypatch):
     """Interactive gate: status=gated prompts GO; typing 'go' executes."""
     engine = _ParityEngine()
@@ -2629,10 +2755,18 @@ def test_cli_channel_sessions_and_show(monkeypatch):
     from kompany.state.models import ConversationSession, SessionStatus
 
     engine = _ParityEngine()
-    s = engine.channel.add_session(ConversationSession(state=SessionStatus.OPEN))
+    s = engine.channel.add_session(ConversationSession(
+        state=SessionStatus.OPEN,
+        active_agent_id="cmo",
+    ))
     engine.channel.add_turn(s.id, role="founder", content="build a CRM")
-    engine.channel.add_turn(s.id, role="ceo", content="which segment?",
-                            kind="clarify_question")
+    engine.channel.add_turn(
+        s.id,
+        role="ceo",
+        agent_id="cmo",
+        content="which segment?",
+        kind="clarify_question",
+    )
     monkeypatch.setattr("kompany.interfaces.cli._get_engine", lambda config=None: engine)
 
     listing = runner.invoke(cli_app, ["channel", "sessions", "--json"])
@@ -2644,7 +2778,9 @@ def test_cli_channel_sessions_and_show(monkeypatch):
     assert show.exit_code == 0
     detail = json.loads(show.stdout)
     assert detail["session"]["session_id"] == s.id
+    assert detail["session"]["active_agent_id"] == "cmo"
     assert [t["turn_index"] for t in detail["turns"]] == [0, 1]
+    assert detail["turns"][1]["agent_id"] == "cmo"
 
     missing = runner.invoke(cli_app, ["channel", "show", "nope"])
     assert missing.exit_code == 1

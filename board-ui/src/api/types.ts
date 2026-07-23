@@ -122,6 +122,12 @@ export interface DirectiveResult {
   agents_used: string[];
   run_id: string | null;
   session_id: string | null;
+  active_agent_id: string;
+  previous_agent_id: string | null;
+  handoff_id: string | null;
+  conversation_continues: boolean;
+  delegation_id: string | null;
+  delegation_status: string | null;
   error_code?: string;
 }
 
@@ -136,6 +142,7 @@ export type DirectiveErrorCode =
 export interface ChannelTurn {
   turn_index: number;
   role: 'founder' | 'ceo';
+  agent_id: string | null;
   content: string;
   kind: 'message' | 'clarify_question' | 'preview' | 'final' | 'progress_summary';
   cost: number;
@@ -148,13 +155,25 @@ export interface ChannelTurn {
 export interface ChannelSession {
   session_id: string;
   state: string;
-  route: string;
+  route: string | null;
   clarify_turns: number;
   created_at: string | null;
   closed_at: string | null;
   run_id: string | null;
   directive_id: string | null;
+  company_id: string;
   project_id: string | null;
+  channel: string | null;
+  account_id: string | null;
+  chat_id: string | null;
+  thread_id: string | null;
+  sender_id: string | null;
+  active_agent_id: string;
+  previous_agent_id: string | null;
+  handoff_id: string | null;
+  handoff_reason: string | null;
+  handoff_confidence: number | null;
+  session_epoch: number;
   approval_id: string | null;
 }
 

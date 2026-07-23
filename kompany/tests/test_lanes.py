@@ -22,6 +22,7 @@ import pytest
 
 from kompany.core.lane_dispatcher import LaneDispatcher
 from kompany.core.lane_registry import DEFAULT_LANE_ID, LaneRegistry
+from kompany.core.run_context import current_run_id, new_run_id, parent_run_id
 from kompany.core.watchdog import LLMUnavailable, Watchdog
 from kompany.llm.client import LLMClient, LLMResponse
 from kompany.state.agent_status import AgentStatusStore
@@ -30,10 +31,17 @@ from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
 from kompany.state.daemon_ticks import DaemonTickStore
 from kompany.state.database import Database
+from kompany.state.delegations import DelegationStore
 from kompany.state.health_events import HEALTH_KINDS, HealthEvents
 from kompany.state.intake_queue import IntakeQueueStore
 from kompany.state.memory import AgentMemory
-from kompany.state.models import Project, ProjectType, Task, TaskStatus
+from kompany.state.models import (
+    Delegation,
+    Project,
+    ProjectType,
+    Task,
+    TaskStatus,
+)
 from kompany.state.projects import Projects
 from kompany.state.runtime import RuntimeStateStore
 
@@ -59,6 +67,7 @@ class FakeEngine:
     def __init__(self, tmp_path):
         self.db = Database(tmp_path)
         self.projects = Projects(self.db)
+        self.delegations = DelegationStore(self.db, self.projects)
         self.audit = AuditLog(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
@@ -82,6 +91,9 @@ class FakeEngine:
             registry=self.lane_registry,
             intake=self.intake_queue,
         )
+
+    def reconcile_delegated_task(self, task_id):
+        return None
 
 
 def _seed_project(engine, name="proj", age_minutes=0, task_titles=("Do thing",)):
@@ -227,6 +239,41 @@ def test_dispatch_single_default_lane_runs_exactly_one_task(tmp_path):
 def test_dispatch_no_work_when_nothing_pending(tmp_path):
     engine = FakeEngine(tmp_path)
     assert engine.lane_dispatcher.dispatch_once() == ["no_work"]
+
+
+def test_dispatch_links_delegated_child_run_to_parent_run(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    parent_id = new_run_id()
+    delegation = engine.delegations.create(Delegation(
+        session_id="s-1",
+        directive_id="dir-1",
+        project_id=project.id,
+        parent_run_id=parent_id,
+        context_packet={"user_intent": "Review campaign"},
+        children=[Task(
+            project_id=project.id,
+            title="Review campaign",
+            assigned_agent="cmo",
+        )],
+    ))
+    observed = {}
+
+    def run_one_pending(project_id):
+        observed["run_id"] = current_run_id()
+        observed["parent_run_id"] = parent_run_id()
+        return delegation.children[0].id
+
+    engine.lane_dispatcher._run_one_pending = run_one_pending
+
+    engine.lane_dispatcher.dispatch_once()
+
+    assert observed["run_id"] != parent_id
+    assert observed["parent_run_id"] == parent_id
 
 
 def test_dispatch_honours_suspend(tmp_path):

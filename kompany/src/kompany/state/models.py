@@ -195,13 +195,15 @@ TURN_ROLES: frozenset[str] = frozenset({"founder", "ceo"})
 # Turn ``kind`` enumeration. Mirrors the cost-visibility surfaces:
 # ``message`` (founder input), ``clarify_question`` (CEO asks back),
 # ``preview`` (PR2 gate plan + est cost), ``final`` (CEO terminal reply),
-# ``progress_summary`` (collapsed STREAM summary).
+# ``progress_summary`` (collapsed STREAM summary), ``delegation_result``
+# (parent synthesis after all delegated children complete).
 TURN_KINDS: frozenset[str] = frozenset({
     "message",
     "clarify_question",
     "preview",
     "final",
     "progress_summary",
+    "delegation_result",
 })
 
 
@@ -213,7 +215,19 @@ class ConversationSession(BaseModel):
     route: str | None = None  # last classified route: execute|clarify|answer
     clarify_turns: int = 0    # count of clarify questions asked this session
     directive_id: str | None = None
+    company_id: str = "default"
     project_id: str | None = None
+    channel: str | None = None
+    account_id: str | None = None
+    chat_id: str | None = None
+    thread_id: str | None = None
+    sender_id: str | None = None
+    active_agent_id: str = "ceo"
+    previous_agent_id: str | None = None
+    handoff_id: str | None = None
+    handoff_reason: str | None = None
+    handoff_confidence: float | None = None
+    session_epoch: int = 0
     approval_id: str | None = None
     run_id: str | None = None
     # Server-side scratch payload for a session. PR2 stores the gated
@@ -233,6 +247,7 @@ class ConversationTurn(BaseModel):
     session_id: str
     turn_index: int = 0
     role: str  # "founder" | "ceo"
+    agent_id: str | None = None
     content: str
     kind: str = "message"
     cost: float = 0.0
@@ -443,6 +458,8 @@ class Task(BaseModel):
     completed_at: datetime | None = None
     result: dict[str, Any] | None = None
     parent_task_id: str | None = None
+    delegation_id: str | None = None
+    execution_run_id: str | None = None
     # Harness execution leg (06-11-harness-execution-leg PR4). Per-task
     # caps assigned at decomposition time (PRD D3) and the vehicle session
     # identity persisted after each run so an engine restart can resume
@@ -452,6 +469,35 @@ class Task(BaseModel):
     max_turns: int | None = None
     harness_session_id: str | None = None
     harness_vehicle: str | None = None
+
+
+class DelegationStatus(str, Enum):
+    QUEUED = "queued"
+    ACTIVE = "active"
+    SYNTHESIZING = "synthesizing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class Delegation(BaseModel):
+    id: str = Field(default_factory=_short_id)
+    session_id: str
+    directive_id: str
+    project_id: str
+    parent_agent_id: str = "ceo"
+    parent_run_id: str | None = None
+    status: DelegationStatus = DelegationStatus.QUEUED
+    context_packet: dict[str, Any] = Field(default_factory=dict)
+    budget_cap_usd: float | None = None
+    depth: int = 1
+    max_depth: int = 1
+    max_concurrency: int = 3
+    children: list[Task] = Field(default_factory=list)
+    result: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime | None = None
 
 
 class Decision(BaseModel):

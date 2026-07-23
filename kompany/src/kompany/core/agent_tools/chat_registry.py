@@ -3,7 +3,7 @@
 Builds the ``ToolRegistry`` the CEO chat loop runs with:
 
 - the P1 read-only web tools (``web_fetch`` / ``web_search``) — run inline,
-- the P4 Edge-CDP browser tools (navigate/read/find/screenshot inline;
+- the P4 CDP browser tools (navigate/read/find/screenshot inline;
   click/type gated) — degrade gracefully when Playwright/Edge are absent,
 - the P4 external MCP client tools (``mcp__<server>__<tool>``) — read-only by
   config else gated; servers that are unreachable are skipped with a note,
@@ -127,7 +127,7 @@ def build_chat_registry(engine: Any) -> ToolRegistry:
     for tool in memory_tools():
         reg.register(tool)
 
-    # P4 Edge-CDP browser tools. Registering is pure (no Edge connection
+    # P4 CDP browser tools. Registering is pure (no browser connection
     # happens until a tool runs), so this never needs a backend present.
     for tool in browser_tools():
         reg.register(tool)

@@ -126,6 +126,17 @@ class FakeRegistry:
         return FakeAgent()
 
 
+class FakeDelegations:
+    def __init__(self):
+        self.failed = []
+
+    def get(self, delegation_id):
+        return SimpleNamespace(context_packet={})
+
+    def fail(self, delegation_id, error):
+        self.failed.append((delegation_id, error))
+
+
 class FakeEngine:
     def __init__(self, tmp_path, remaining=10.0, model_source=None):
         self.db = Database(tmp_path)
@@ -137,6 +148,9 @@ class FakeEngine:
         self.approvals = ApprovalRequests(self.db)
         self.health_events = HealthEvents(self.db)
         self.registry = FakeRegistry()
+        self.delegations = FakeDelegations()
+        self.reconciled_delegated_tasks = []
+        self.reconcile_error = None
         self.cost_tracker = FakeCostTracker()
         self.remaining = remaining
         self.settings = SimpleNamespace(
@@ -152,6 +166,14 @@ class FakeEngine:
 
     def get_company_state(self):
         return {}
+
+    def reconcile_delegated_task(self, task_id):
+        if self.reconcile_error:
+            raise self.reconcile_error
+        self.reconciled_delegated_tasks.append(task_id)
+
+    def _fail_delegation_reconciliation(self, task, project, exc):
+        return self.delegations.fail(task.delegation_id, str(exc))
 
 
 def _make_project(engine, name="Revenue") -> Project:
@@ -834,6 +856,55 @@ def test_hard_error_without_evidence_marks_task_failed(tmp_path, exit_status):
     assert "task.failed" in events
     assert "task.completed" not in events
     assert engine.agent_status.get("builder")["status"] == "idle"
+
+
+def test_harness_failure_pushes_delegated_child_result(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project, delegation_id="d-1")
+    runner = FakeRunner(result=HarnessResult(
+        final_text="",
+        session_id="s-err",
+        cost_usd=0.03,
+        exit_status="error",
+        error="vehicle failed",
+    ))
+
+    execute_harness_task(
+        engine,
+        runner,
+        task,
+        project,
+        ProjectRunResult(project_id=project.id),
+    )
+
+    assert engine.projects.get_task(task.id).status == TaskStatus.FAILED
+    assert engine.reconciled_delegated_tasks == [task.id]
+
+
+def test_harness_reconciliation_failure_preserves_child_failure(tmp_path):
+    engine = FakeEngine(tmp_path)
+    engine.reconcile_error = RuntimeError("delegation store unavailable")
+    project = _make_project(engine)
+    task = _make_task(engine, project, delegation_id="d-1")
+    runner = FakeRunner(result=HarnessResult(
+        final_text="",
+        session_id="s-err",
+        cost_usd=0.03,
+        exit_status="error",
+        error="vehicle failed",
+    ))
+    result = ProjectRunResult(project_id=project.id)
+
+    execute_harness_task(engine, runner, task, project, result)
+
+    persisted = engine.projects.get_task(task.id)
+    assert persisted.status == TaskStatus.FAILED
+    assert persisted.result["error"] == "vehicle failed"
+    assert result.tasks_failed == 1
+    assert engine.delegations.failed == [
+        ("d-1", "delegation store unavailable"),
+    ]
 
 
 def test_error_with_diff_evidence_stays_delivered(tmp_path):

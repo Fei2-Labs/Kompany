@@ -12,7 +12,6 @@ import {
   channelAbandon,
   channelGo,
   channelSend,
-  sendDirective,
 } from '../api/client';
 import type { DirectiveResult } from '../api/types';
 import {
@@ -20,7 +19,7 @@ import {
   canReply,
   isTerminal,
   nextSessionId,
-  phaseForStatus,
+  phaseForResult,
   type ChannelPhase,
 } from './state';
 
@@ -28,6 +27,7 @@ import {
 export interface ThreadTurn {
   id: number;
   role: 'founder' | 'ceo';
+  agentId?: string;
   text: string;
   kind: string;
   cost: number;
@@ -99,8 +99,21 @@ export function useChannel(): UseChannel {
             cost: 0,
           });
         }
+        if (
+          result.previous_agent_id &&
+          result.previous_agent_id !== result.active_agent_id
+        ) {
+          turns.push({
+            id: nextId(),
+            role: 'ceo',
+            agentId: result.active_agent_id,
+            text: `${result.previous_agent_id.toUpperCase()} → ${result.active_agent_id.toUpperCase()}`,
+            kind: 'handoff',
+            cost: 0,
+          });
+        }
         // The CEO reply line is the result message; kind reflects the phase.
-        const phase = phaseForStatus(result.status);
+        const phase = phaseForResult(result);
         const ceoKind =
           phase === 'clarify'
             ? 'clarify_question'
@@ -113,6 +126,7 @@ export function useChannel(): UseChannel {
           turns.push({
             id: nextId(),
             role: 'ceo',
+            agentId: result.active_agent_id,
             text: result.message,
             kind: ceoKind,
             cost: result.total_ai_cost ?? 0,
@@ -155,7 +169,7 @@ export function useChannel(): UseChannel {
       setS((prev) => ({ ...prev, busy: true, error: null }));
       // Reply on the open session only while clarifying; otherwise open fresh.
       const sessionId =
-        canReply(phaseForStatus(s.last?.status)) ? s.sessionId : null;
+        canReply(phaseForResult(s.last)) ? s.sessionId : null;
       try {
         const result = await channelSend(trimmed, sessionId);
         applyResult(result, trimmed);
@@ -163,7 +177,7 @@ export function useChannel(): UseChannel {
         fail(err);
       }
     },
-    [applyResult, fail, s.last?.status, s.sessionId],
+    [applyResult, fail, s.last, s.sessionId],
   );
 
   const quickSend = useCallback(
@@ -172,7 +186,7 @@ export function useChannel(): UseChannel {
       if (!trimmed) return;
       setS((prev) => ({ ...prev, busy: true, error: null }));
       try {
-        const result = await sendDirective(trimmed);
+        const result = await channelSend(trimmed, null);
         applyResult(result, trimmed);
       } catch (err) {
         fail(err);

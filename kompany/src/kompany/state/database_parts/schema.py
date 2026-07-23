@@ -51,10 +51,55 @@ CREATE TABLE IF NOT EXISTS tasks (
     completed_at TEXT,
     result TEXT,
     parent_task_id TEXT,
+    delegation_id TEXT,
+    execution_run_id TEXT,
     budget_cap_usd REAL,
     max_turns INTEGER,
     harness_session_id TEXT,
     harness_vehicle TEXT
+);
+
+CREATE TABLE IF NOT EXISTS delegations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    directive_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    parent_agent_id TEXT NOT NULL DEFAULT 'ceo',
+    parent_run_id TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    context_packet TEXT NOT NULL DEFAULT '{}',
+    budget_cap_usd REAL,
+    depth INTEGER NOT NULL DEFAULT 1,
+    max_depth INTEGER NOT NULL DEFAULT 1,
+    max_concurrency INTEGER NOT NULL DEFAULT 3,
+    result TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS channel_progress_messages (
+    delegation_id TEXT PRIMARY KEY,
+    channel TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    sender_id TEXT,
+    thread_id TEXT,
+    message_id TEXT NOT NULL,
+    project_name TEXT NOT NULL,
+    agents TEXT NOT NULL DEFAULT '',
+    cost_usd REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS credential_approval_consumptions (
+    approval_id TEXT PRIMARY KEY,
+    request_fingerprint TEXT NOT NULL,
+    reservation_owner TEXT NOT NULL,
+    lease_id TEXT,
+    status TEXT NOT NULL DEFAULT 'reserved',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    consumed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS health_events (

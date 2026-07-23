@@ -40,6 +40,20 @@ class KompanySettings(BaseSettings):
         alias="DASHBOARD_SESSION_TTL_SECONDS",
     )
     vault_key: str = Field(default="", alias="KOMPANY_VAULT_KEY")
+    credential_broker_endpoint: str = Field(
+        default="",
+        alias="KOMPANY_CREDENTIAL_BROKER_ENDPOINT",
+    )
+    credential_broker_token: str = Field(
+        default="",
+        alias="KOMPANY_CREDENTIAL_BROKER_TOKEN",
+    )
+    credential_broker_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        le=60,
+        alias="KOMPANY_CREDENTIAL_BROKER_TIMEOUT_SECONDS",
+    )
     vault_keychain_service: str = Field(default="kompany", alias="KOMPANY_VAULT_KEYCHAIN_SERVICE")
     vault_keychain_account: str = Field(default="vault-master-key", alias="KOMPANY_VAULT_KEYCHAIN_ACCOUNT")
     remote_replay_ttl_seconds: int = Field(

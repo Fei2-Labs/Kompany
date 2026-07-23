@@ -1,5 +1,5 @@
 // Browser card — CDP endpoint selection for the agentic loop's browser
-// tools. The founder runs a real browser (Brave/Chrome/Edge) with
+// tools. A real browser (Brave/Chrome/Edge) runs with
 // --remote-debugging-port=N and a dedicated --user-data-dir so the agent
 // reuses the logged-in profile. This card lets them pick which endpoint
 // to connect to, auto-detect running browsers, and test the connection.
@@ -46,7 +46,7 @@ export function BrowserCard() {
         setResult(
           r.connected
             ? `✓ Connected — ${r.browser_type || 'browser detected'}`
-            : 'Saved, but no browser responding at that endpoint.',
+            : 'Saved, but the backend could not reach a browser at that endpoint.',
         );
         setResultOk(Boolean(r.connected));
         config.reload();
@@ -100,24 +100,29 @@ export function BrowserCard() {
       </header>
 
       <p className="settings__hint">
-        The CEO agent drives a real browser over CDP to preserve login
-        sessions. Start one with{' '}
+        The CEO agent connects from the Kompany backend host to a browser over
+        CDP so login sessions can be preserved. Start a Chromium-based browser,
+        for example with{' '}
         <code>
           brave-browser --remote-debugging-port=9223 --user-data-dir=~/.
           kompany/browser-profile --no-sandbox --remote-allow-origins=*
         </code>
-        , then set the endpoint below. If no browser is running, the agent
-        falls back to headless Chromium (public web only, no logins).
+        , then set the endpoint below. Auto-detect scans the backend host;
+        127.0.0.1 refers to that machine, not the device viewing this panel. If
+        no browser is running, the agent falls back to headless Chromium
+        (public web only, no logins).
       </p>
 
       {cfg?.browser_type && cfg.connected && (
         <p className="settings__meta">
-          detected: {cfg.browser_type}
+          backend detected: {cfg.browser_type}
         </p>
       )}
 
       <label className="settings__field">
-        <span className="settings__label">CDP endpoint</span>
+        <span className="settings__label">
+          CDP endpoint (reachable from backend)
+        </span>
         <input
           className="settings__input"
           type="text"
@@ -133,11 +138,12 @@ export function BrowserCard() {
         <div className="settings__probe-results">
           {probeResult.browsers.length === 0 ? (
             <p className="settings__meta">
-              No browsers found on common ports (9222, 9223, 9335, …).
+              No browsers found on the backend host&apos;s common CDP ports
+              (9222, 9223, 9335, …).
             </p>
           ) : (
             <>
-              <p className="settings__meta">Detected browsers:</p>
+              <p className="settings__meta">Detected on backend host:</p>
               {probeResult.browsers.map((b) => (
                 <button
                   key={b.port}

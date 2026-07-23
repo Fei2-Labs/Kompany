@@ -139,11 +139,11 @@ class Projects:
         self.db.execute(
             """INSERT INTO tasks
                (id, project_id, title, status, assigned_agent,
-                parent_task_id, run_id, budget_cap_usd, max_turns)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                parent_task_id, delegation_id, run_id, budget_cap_usd, max_turns)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task.id, task.project_id, task.title,
-             task.status.value, task.assigned_agent, task.parent_task_id, rid,
-             task.budget_cap_usd, task.max_turns),
+             task.status.value, task.assigned_agent, task.parent_task_id,
+             task.delegation_id, rid, task.budget_cap_usd, task.max_turns),
         )
         self.db.commit()
         return task
@@ -267,8 +267,31 @@ class Projects:
             assigned_agent=row["assigned_agent"],
             result=json.loads(row["result"]) if row["result"] else None,
             parent_task_id=row["parent_task_id"],
+            delegation_id=(
+                row["delegation_id"]
+                if "delegation_id" in row.keys()
+                else None
+            ),
+            execution_run_id=(
+                row["execution_run_id"]
+                if "execution_run_id" in row.keys()
+                else None
+            ),
             budget_cap_usd=row["budget_cap_usd"],
             max_turns=row["max_turns"],
             harness_session_id=row["harness_session_id"],
             harness_vehicle=row["harness_vehicle"],
         )
+
+    def set_task_execution_run(
+        self,
+        task_id: str,
+        execution_run_id: str | None,
+    ) -> None:
+        self.db.execute(
+            """UPDATE tasks
+               SET execution_run_id = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (execution_run_id, task_id),
+        )
+        self.db.commit()

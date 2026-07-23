@@ -7,11 +7,14 @@ the clarify cap, closed-session errors, and backward compatibility of the
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from kompany.agents.ceo import DirectiveClassification
+from kompany.channels.context import DirectiveContext
 from kompany.core.engine import KompanyEngine
-from kompany.state.models import ProjectStatus, SessionStatus
+from kompany.state.models import Project, ProjectStatus, ProjectType, SessionStatus
 from kompany.state.targets import CompanyTargets
 
 
@@ -65,6 +68,7 @@ def _build_engine(tmp_path, monkeypatch, initialize=True):
     from kompany.state.conversation import ConversationStore
     from kompany.state.credentials import CredentialVaultStore
     from kompany.state.database import Database
+    from kompany.state.delegations import DelegationStore
     from kompany.state.episodes import Episodes
     from kompany.state.journal import Journal
     from kompany.state.ledger import Ledger
@@ -84,6 +88,7 @@ def _build_engine(tmp_path, monkeypatch, initialize=True):
     engine.ledger = ledger
     engine.journal = Journal(db)
     engine.projects = Projects(db)
+    engine.delegations = DelegationStore(db, engine.projects)
     engine.memory = AgentMemory(db)
     engine.audit = AuditLog(db)
     engine.episodes = Episodes(db)
@@ -164,6 +169,9 @@ def _install_ceo(engine, classifications):
             if role == "ceo":
                 return fake
             return original.get(role, company_state)
+
+        def descriptor(self, role):
+            return original.descriptor(role)
 
     engine.registry = FakeRegistry()
     return fake
@@ -382,6 +390,625 @@ def test_answer_context_reads_recent_completed_work_with_limit(engine, monkeypat
     assert result.status == "completed"
     assert calls == [(None, 4)]
     assert "RECENT COMPLETED WORK:" in fake.answer_company_context
+
+
+def test_directive_context_isolates_recent_history_by_project(engine):
+    classification = DirectiveClassification(
+        directive_type="informational",
+        reasoning="project question",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )
+    fake = _install_ceo(engine, [classification, classification, classification])
+
+    project_a = DirectiveContext(
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="project-a",
+    )
+    project_b = DirectiveContext(
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="project-b",
+    )
+
+    engine.process_directive("Project A private detail", context=project_a)
+    engine.process_directive("Project B starting point", context=project_b)
+    result = engine.process_directive("Continue this project", context=project_b)
+
+    assert result.status == "completed"
+    assert "Project B starting point" in (fake.answer_recent_context or "")
+    assert "Project A private detail" not in (fake.answer_recent_context or "")
+
+    session = engine.channel.get_session(result.session_id)
+    assert session.project_id == "project-b"
+    assert session.channel == "board"
+    assert session.active_agent_id == "ceo"
+
+
+def test_directive_context_isolates_same_project_id_between_companies(engine):
+    classification = DirectiveClassification(
+        directive_type="informational",
+        reasoning="project question",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )
+    fake = _install_ceo(engine, [classification, classification, classification])
+    company_a = DirectiveContext(
+        company_id="company-a",
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="shared-project-id",
+    )
+    company_b = DirectiveContext(
+        company_id="company-b",
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="shared-project-id",
+    )
+
+    engine.process_directive("Company A private detail", context=company_a)
+    engine.process_directive("Company B starting point", context=company_b)
+    result = engine.process_directive("Continue this project", context=company_b)
+
+    assert result.status == "completed"
+    assert "Company B starting point" in (fake.answer_recent_context or "")
+    assert "Company A private detail" not in (fake.answer_recent_context or "")
+
+
+def test_no_project_lobby_does_not_receive_project_history(engine):
+    classification = DirectiveClassification(
+        directive_type="informational",
+        reasoning="question",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="answer",
+    )
+    fake = _install_ceo(engine, [classification, classification])
+    project = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id="private-project",
+    )
+    lobby = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+    )
+
+    engine.process_directive("Private project detail", context=project)
+    result = engine.process_directive("What should I do next?", context=lobby)
+
+    assert result.status == "completed"
+    assert "Private project detail" not in (fake.answer_recent_context or "")
+
+
+def test_session_cannot_continue_under_a_different_project_context(engine):
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="operational",
+        reasoning="needs detail",
+        primary_squad="strategy",
+        approval_tier="auto",
+        route="clarify",
+        clarify_question="Which deliverable?",
+    )])
+    project_a = DirectiveContext(
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="project-a",
+    )
+    project_b = DirectiveContext(
+        channel="board",
+        account_id="founder",
+        chat_id="main",
+        sender_id="founder",
+        project_id="project-b",
+    )
+
+    first = engine.process_directive("Continue the launch", context=project_a)
+    result = engine.process_directive(
+        "The pricing page",
+        session_id=first.session_id,
+        context=project_b,
+    )
+
+    assert result.status == "failed"
+    assert "does not match" in result.message
+    assert len(engine.channel.session_turns(first.session_id)) == 2
+
+
+def test_legacy_session_binds_transport_identity_on_first_continuation(engine):
+    session = engine.channel.create_session()
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+    )
+
+    result = engine.process_directive(
+        "/status",
+        session_id=session.id,
+        context=context,
+    )
+
+    assert result.status == "completed"
+    bound = engine.channel.get_session(session.id)
+    assert bound.channel == "board"
+    assert bound.account_id == "local"
+    assert bound.chat_id == "main"
+    assert bound.sender_id == "founder"
+
+
+def test_directive_records_project_and_agent_shadow_route_decisions(engine):
+    engine.projects.create(
+        Project(
+            id="vinted",
+            name="Vinted",
+            type=ProjectType.REVENUE,
+        )
+    )
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="campaign review",
+        primary_squad="growth",
+        agents_needed=["cmo"],
+        approval_tier="ceo",
+        route="answer",
+    )])
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id="vinted",
+    )
+
+    result = engine.process_directive(
+        "Review the Vinted campaign",
+        context=context,
+    )
+
+    assert result.status == "completed"
+    events = {row["event_type"]: row for row in engine.audit.recent(10)}
+    project_detail = json.loads(
+        events["routing.project.shadow"]["detail"]
+    )
+    agent_detail = json.loads(
+        events["routing.agent.shadow"]["detail"]
+    )
+    assert project_detail["status"] == "resolved"
+    assert project_detail["project_id"] == "vinted"
+    assert agent_detail["action"] == "handoff"
+    assert agent_detail["destination_agent_ids"] == ["cmo"]
+
+
+def test_multi_agent_request_creates_durable_ceo_owned_delegation(engine):
+    engine.projects.create(
+        Project(
+            id="vinted",
+            name="Vinted",
+            type=ProjectType.REVENUE,
+        )
+    )
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="needs coordinated growth and finance review",
+        primary_squad="strategy",
+        agents_needed=["cmo", "cfo"],
+        approval_tier="auto",
+        estimated_cost_eur=0.4,
+        route="answer",
+    )])
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id="vinted",
+    )
+
+    result = engine.process_directive(
+        "Review campaign performance and budget",
+        context=context,
+    )
+
+    assert result.status == "delegated"
+    assert result.delegation_id
+    assert result.active_agent_id == "ceo"
+    assert result.conversation_continues is True
+    delegation = engine.get_delegation(result.delegation_id)
+    assert delegation.project_id == "vinted"
+    assert delegation.parent_agent_id == "ceo"
+    assert delegation.parent_run_id == result.run_id
+    assert [child.assigned_agent for child in delegation.children] == [
+        "cmo",
+        "cfo",
+    ]
+    assert delegation.context_packet["user_intent"] == (
+        "Review campaign performance and budget"
+    )
+
+
+def test_ceo_can_cancel_delegation_without_losing_conversation_ownership(engine):
+    engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="needs coordinated review",
+        primary_squad="strategy",
+        agents_needed=["cmo", "cfo"],
+        approval_tier="auto",
+        route="answer",
+    )])
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id="vinted",
+    )
+    created = engine.process_directive(
+        "Review campaign performance and budget",
+        context=context,
+    )
+
+    cancelled = engine.cancel_delegation(created.delegation_id)
+
+    assert cancelled.status.value == "cancelled"
+    assert {child.status.value for child in cancelled.children} == {"cancelled"}
+    session = engine.channel.get_session(created.session_id)
+    assert session is not None
+    assert session.active_agent_id == "ceo"
+    assert session.state == SessionStatus.OPEN
+
+
+def test_child_results_complete_delegation_and_return_one_ceo_synthesis(engine):
+    engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="needs coordinated review",
+        primary_squad="strategy",
+        agents_needed=["cmo", "cfo"],
+        approval_tier="auto",
+        route="answer",
+    )])
+    created = engine.process_directive(
+        "Review campaign performance and budget",
+        context=DirectiveContext(
+            channel="board",
+            account_id="local",
+            chat_id="main",
+            sender_id="founder",
+            project_id="vinted",
+        ),
+    )
+    delegation = engine.get_delegation(created.delegation_id)
+
+    partial = engine.complete_delegated_task(
+        delegation.id,
+        delegation.children[0].id,
+        {"summary": "Campaign conversion improved by 12%."},
+    )
+    completed = engine.complete_delegated_task(
+        delegation.id,
+        delegation.children[1].id,
+        {"summary": "Budget remains within the approved cap."},
+    )
+
+    assert partial.status.value == "active"
+    assert completed.status.value == "completed"
+    assert completed.result["message"].startswith("ANSWER_MARKER")
+    turns = engine.channel.session_turns(created.session_id)
+    synthesis_turns = [
+        turn for turn in turns
+        if turn.kind == "delegation_result"
+    ]
+    assert len(synthesis_turns) == 1
+    assert synthesis_turns[0].agent_id == "ceo"
+    assert "Campaign conversion improved by 12%." in (
+        engine.registry.get("ceo").answer_question
+    )
+    assert "Budget remains within the approved cap." in (
+        engine.registry.get("ceo").answer_question
+    )
+
+
+def test_ceo_synthesis_failure_fails_delegation_without_clobbering_children(
+    engine,
+):
+    engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="needs coordinated review",
+        primary_squad="strategy",
+        agents_needed=["cmo", "cfo"],
+        approval_tier="auto",
+        route="answer",
+    )])
+    created = engine.process_directive(
+        "Review campaign performance and budget",
+        context=DirectiveContext(
+            channel="board",
+            account_id="local",
+            chat_id="main",
+            sender_id="founder",
+            project_id="vinted",
+        ),
+    )
+    delegation = engine.get_delegation(created.delegation_id)
+    engine.complete_delegated_task(
+        delegation.id,
+        delegation.children[0].id,
+        {"summary": "Campaign review complete."},
+    )
+
+    def fail_synthesis(*args, **kwargs):
+        raise RuntimeError("synthesis provider unavailable")
+
+    engine.registry.get("ceo").answer = fail_synthesis
+    failed = engine.complete_delegated_task(
+        delegation.id,
+        delegation.children[1].id,
+        {"summary": "Budget review complete."},
+    )
+
+    assert failed.status.value == "failed"
+    assert failed.result == {"error": "synthesis provider unavailable"}
+    assert {
+        child.status.value for child in failed.children
+    } == {"completed"}
+    assert not any(
+        turn.kind == "delegation_result"
+        for turn in engine.channel.session_turns(created.session_id)
+    )
+
+
+def test_single_specialist_handoff_owns_current_and_followup_turns(engine):
+    first_route = DirectiveClassification(
+        directive_type="informational",
+        reasoning="campaign specialist requested",
+        primary_squad="growth",
+        agents_needed=["cmo"],
+        approval_tier="auto",
+        route="answer",
+    )
+    followup_route = DirectiveClassification(
+        directive_type="informational",
+        reasoning="same campaign intent",
+        primary_squad="growth",
+        agents_needed=[],
+        approval_tier="auto",
+        route="answer",
+    )
+    _install_ceo(engine, [first_route, followup_route])
+    ceo_registry = engine.registry
+
+    class FakeCMO:
+        role = "cmo"
+        display_name = "CMO"
+
+        def __init__(self):
+            self.prompts = []
+
+        def call(self, prompt, **kwargs):
+            from kompany.llm.client import LLMResponse
+
+            self.prompts.append(prompt)
+            return LLMResponse(
+                text=f"CMO reply {len(self.prompts)}",
+                input_tokens=100,
+                output_tokens=50,
+                cost_usd=0.01,
+                model="fake",
+            )
+
+    cmo = FakeCMO()
+
+    class HandoffRegistry:
+        def get(self, role, company_state=None):
+            if role == "cmo":
+                return cmo
+            return ceo_registry.get(role, company_state)
+
+        def descriptor(self, role):
+            return ceo_registry.descriptor(role)
+
+    engine.registry = HandoffRegistry()
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id="vinted",
+    )
+
+    first = engine.process_directive(
+        "Review the Vinted campaign",
+        context=context,
+    )
+
+    assert first.status == "completed"
+    assert first.message == "CMO reply 1"
+    assert first.active_agent_id == "cmo"
+    assert first.previous_agent_id == "ceo"
+    assert first.handoff_id
+    assert first.conversation_continues is True
+    session = engine.channel.get_session(first.session_id)
+    assert session.active_agent_id == "cmo"
+    assert session.session_epoch == 1
+    assert session.state == SessionStatus.OPEN
+    assert engine.agent_status.get("cmo")["status"] == "idle"
+    assert "You have no tools in this direct channel reply" in cmo.prompts[0]
+    assert "Do not claim" in cmo.prompts[0]
+    assert "Conversation so far:" in cmo.prompts[0]
+
+    followup = engine.process_directive(
+        "What should we change first?",
+        session_id=first.session_id,
+        context=context,
+    )
+
+    assert followup.message == "CMO reply 2"
+    assert followup.active_agent_id == "cmo"
+    assert followup.previous_agent_id is None
+    assert followup.conversation_continues is True
+    assert len(cmo.prompts) == 2
+    assert "CMO: CMO reply 1" in cmo.prompts[1]
+    specialist_turns = engine.channel.session_turns(first.session_id)
+    assert specialist_turns[-1].agent_id == "cmo"
+
+
+def test_failed_specialist_startup_rolls_back_conversation_owner(engine):
+    _install_ceo(engine, [DirectiveClassification(
+        directive_type="informational",
+        reasoning="campaign specialist requested",
+        primary_squad="growth",
+        agents_needed=["cmo"],
+        approval_tier="auto",
+        route="answer",
+    )])
+    ceo_registry = engine.registry
+
+    class FailingCMO:
+        def call(self, prompt, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+    class HandoffRegistry:
+        def get(self, role, company_state=None):
+            if role == "cmo":
+                return FailingCMO()
+            return ceo_registry.get(role, company_state)
+
+        def descriptor(self, role):
+            return ceo_registry.descriptor(role)
+
+    engine.registry = HandoffRegistry()
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        engine.process_directive("Review the campaign")
+
+    session = engine.channel.open_session()
+    assert session.active_agent_id == "ceo"
+    assert session.previous_agent_id is None
+    assert session.handoff_id is None
+    assert session.session_epoch == 0
+
+
+def test_manual_agent_and_status_commands_use_persisted_owner(engine):
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+    )
+
+    selected = engine.process_directive("/agent cmo", context=context)
+
+    assert selected.status == "completed"
+    assert selected.active_agent_id == "cmo"
+    assert selected.previous_agent_id == "ceo"
+    assert selected.conversation_continues is True
+    assert "CMO" in selected.message
+
+    status = engine.process_directive(
+        "/status",
+        session_id=selected.session_id,
+        context=context,
+    )
+
+    assert status.active_agent_id == "cmo"
+    assert status.conversation_continues is True
+    assert "CMO" in status.message
+    assert "General" in status.message
+
+    returned = engine.process_directive(
+        "/ceo",
+        session_id=selected.session_id,
+        context=context,
+    )
+    assert returned.active_agent_id == "ceo"
+    assert returned.previous_agent_id == "cmo"
+    assert returned.conversation_continues is True
+
+
+def test_inbound_context_cannot_select_non_conversation_agent(engine):
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        active_agent_id="writer",
+    )
+
+    result = engine.process_directive("/status", context=context)
+
+    assert result.status == "failed"
+    assert "cannot own" in result.message
+    assert result.session_id is None
+
+
+def test_manual_project_and_new_commands_switch_isolated_sessions(engine):
+    engine.projects.create(
+        Project(
+            id="vinted",
+            name="Vinted",
+            type=ProjectType.REVENUE,
+        )
+    )
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+    )
+
+    selected = engine.process_directive("/project vinted", context=context)
+
+    assert selected.project_id == "vinted"
+    assert selected.conversation_continues is True
+    project_session = engine.channel.get_session(selected.session_id)
+    assert project_session.project_id == "vinted"
+    assert project_session.state == SessionStatus.OPEN
+
+    fresh = engine.process_directive(
+        "/new",
+        session_id=selected.session_id,
+        context=context,
+    )
+
+    assert fresh.session_id != selected.session_id
+    assert fresh.project_id == "vinted"
+    assert fresh.active_agent_id == "ceo"
+    assert fresh.conversation_continues is True
+    old_session = engine.channel.get_session(selected.session_id)
+    assert old_session.state == SessionStatus.ABANDONED
 
 
 # ----------------------------------------------------------------------

@@ -244,8 +244,8 @@ class AgenticChatMixin:
                 on_event=monitor,
             )
         finally:
-            # Close the per-run Edge-CDP browser session cleanly, if one was
-            # opened (detaches from the founder's Edge, never closes it).
+            # Close the per-run CDP browser session cleanly, if one was opened
+            # (detaches from the configured browser, never closes it).
             try:
                 from kompany.core.agent_tools.browser_tools import (
                     close_browser_session,

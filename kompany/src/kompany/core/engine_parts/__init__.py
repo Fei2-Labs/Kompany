@@ -10,6 +10,7 @@ from kompany.core.engine_parts.observe import ObservabilityMixin
 from kompany.core.engine_parts.surfaces import FounderSurfacesMixin
 from kompany.core.engine_parts.directive_flow import DirectiveProcessingMixin
 from kompany.core.engine_parts.channel_routing import ChannelRoutingMixin
+from kompany.core.engine_parts.credential_broker import CredentialBrokerMixin
 from kompany.core.engine_parts.channel_actions import ChannelActionsMixin
 from kompany.core.engine_parts.approvals import ApprovalsMixin
 from kompany.core.engine_parts.governance import GovernanceMixin
@@ -30,6 +31,7 @@ __all__ = [
     "FounderSurfacesMixin",
     "DirectiveProcessingMixin",
     "ChannelRoutingMixin",
+    "CredentialBrokerMixin",
     "ChannelActionsMixin",
     "ApprovalsMixin",
     "GovernanceMixin",

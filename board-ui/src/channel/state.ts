@@ -16,6 +16,7 @@ import type { DirectiveResult } from '../api/types';
 /** Coarse phase the UI renders the thread in. */
 export type ChannelPhase =
   | 'idle' // no result yet
+  | 'active' // a specialist owns the open conversation
   | 'clarify' // awaiting a founder text reply on the same session
   | 'awaiting-go' // gated/proposed — awaiting GO / Abandon
   | 'terminal-ok' // dispatched / answered
@@ -37,9 +38,14 @@ export function phaseForStatus(status: string | null | undefined): ChannelPhase 
   return 'terminal-ok';
 }
 
+export function phaseForResult(result: DirectiveResult | null): ChannelPhase {
+  if (result?.conversation_continues) return 'active';
+  return phaseForStatus(result?.status);
+}
+
 /** The session can accept a free-text reply only while clarifying. */
 export function canReply(phase: ChannelPhase): boolean {
-  return phase === 'clarify';
+  return phase === 'clarify' || phase === 'active';
 }
 
 /** GO / Abandon controls show only while a gated/proposed session waits. */
@@ -70,6 +76,7 @@ export function errorLabel(code: string | undefined): string {
 
 /** The id to keep replying on. Null once terminal (no session to continue). */
 export function nextSessionId(result: DirectiveResult): string | null {
+  if (result.conversation_continues) return result.session_id ?? null;
   const phase = phaseForStatus(result.status);
   if (isTerminal(phase)) return null;
   return result.session_id ?? null;

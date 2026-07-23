@@ -5,20 +5,30 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from kompany.core.runner import ProjectRunner, TaskSpec
+from kompany.core.run_context import new_run_id, run_scope
 from kompany.state.agent_status import AgentStatusStore
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
 from kompany.state.database import Database
+from kompany.state.delegations import DelegationStore
 from kompany.state.memory import AgentMemory
-from kompany.state.models import Project, ProjectType, Task, TaskStatus
+from kompany.state.models import (
+    Delegation,
+    Project,
+    ProjectType,
+    Task,
+    TaskStatus,
+)
 from kompany.state.projects import Projects
 
 
 class FakeAgent:
     calls = 0
+    last_prompt = ""
 
     def call(self, prompt, directive_id=None, max_tokens=4096, action_type=None):
         FakeAgent.calls += 1
+        FakeAgent.last_prompt = prompt
         return SimpleNamespace(text="done", cost_usd=0.01)
 
 
@@ -31,11 +41,22 @@ class FakeEngine:
     def __init__(self, tmp_path):
         self.db = Database(tmp_path)
         self.projects = Projects(self.db)
+        self.delegations = DelegationStore(self.db, self.projects)
         self.audit = AuditLog(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
         self.memory = AgentMemory(self.db)
         self.registry = FakeRegistry()
+        self.reconciled_delegated_tasks = []
+        self.reconcile_error = None
+
+    def reconcile_delegated_task(self, task_id):
+        if self.reconcile_error:
+            raise self.reconcile_error
+        self.reconciled_delegated_tasks.append(task_id)
+
+    def _fail_delegation_reconciliation(self, task, project, exc):
+        return self.delegations.fail(task.delegation_id, str(exc))
 
     def get_company_state(self):
         return {}
@@ -69,6 +90,77 @@ def test_runner_records_task_audit_status_and_checkpoint(tmp_path, monkeypatch):
     assert "checkpoint.saved" in event_types
     assert "task.completed" in event_types
     assert "project.execution_completed" in event_types
+
+
+def test_runner_uses_fresh_delegation_packet_and_pushes_child_result(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    parent_run_id = new_run_id()
+    delegation = engine.delegations.create(Delegation(
+        session_id="s-1",
+        directive_id="dir-1",
+        project_id=project.id,
+        parent_run_id=parent_run_id,
+        context_packet={
+            "user_intent": "Review campaign performance and budget",
+            "expected_outcome": "One reconciled recommendation",
+            "constraints": {"max_depth": 1},
+            "artifact_refs": [],
+        },
+        children=[Task(
+            project_id=project.id,
+            title="CMO campaign review",
+            assigned_agent="cmo",
+        )],
+    ))
+    engine.memory.remember(
+        "cmo",
+        "OTHER PROJECT SECRET",
+        category="observation",
+    )
+
+    with run_scope(parent=parent_run_id) as child_run_id:
+        task_id = ProjectRunner(engine).run_one_pending(project.id)
+
+    assert task_id == delegation.children[0].id
+    assert "Review campaign performance and budget" in FakeAgent.last_prompt
+    assert "One reconciled recommendation" in FakeAgent.last_prompt
+    assert "OTHER PROJECT SECRET" not in FakeAgent.last_prompt
+    assert engine.reconciled_delegated_tasks == [task_id]
+    persisted = engine.projects.get_task(task_id)
+    assert persisted.execution_run_id == child_run_id
+
+
+def test_runner_reconciliation_failure_preserves_child_result(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = engine.projects.create(Project(
+        id="vinted",
+        name="Vinted",
+        type=ProjectType.REVENUE,
+    ))
+    delegation = engine.delegations.create(Delegation(
+        session_id="s-1",
+        directive_id="dir-1",
+        project_id=project.id,
+        context_packet={"user_intent": "Review campaign"},
+        children=[Task(
+            project_id=project.id,
+            title="Review campaign",
+            assigned_agent="cmo",
+        )],
+    ))
+    engine.reconcile_error = RuntimeError("delegation store unavailable")
+
+    task_id = ProjectRunner(engine).run_one_pending(project.id)
+
+    assert engine.projects.get_task(task_id).status == TaskStatus.DELIVERED
+    failed = engine.delegations.get(delegation.id)
+    assert failed.status.value == "failed"
+    assert failed.result == {"error": "delegation store unavailable"}
 
 
 def test_runner_resume_skips_completed_and_retries_failed(tmp_path):

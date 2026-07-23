@@ -17,6 +17,11 @@ from kompany.core.directive import (
     DirectiveType,
 )
 from kompany.core.event_hub import get_event_hub
+from kompany.core.credential_broker import (
+    CredentialBrokerClient,
+    HttpCredentialBroker,
+    UnavailableCredentialBroker,
+)
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.core.subscription_fee import book_subscription_fee_if_due
 from kompany.core.anima import Anima
@@ -69,6 +74,7 @@ from kompany.state.debates import Debates
 from kompany.state.episodes import Episodes
 from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
+from kompany.state.delegations import DelegationStore
 from kompany.state.memory import AgentMemory
 from kompany.state.skills import SkillStore
 from kompany.state.daemon_ticks import DaemonTickStore
@@ -126,6 +132,7 @@ from kompany.core.engine_parts import (
     FounderSurfacesMixin,
     DirectiveProcessingMixin,
     ChannelRoutingMixin,
+    CredentialBrokerMixin,
     ChannelActionsMixin,
     ApprovalsMixin,
     GovernanceMixin,
@@ -146,6 +153,7 @@ class KompanyEngine(
     FounderSurfacesMixin,
     DirectiveProcessingMixin,
     ChannelRoutingMixin,
+    CredentialBrokerMixin,
     ChannelActionsMixin,
     ApprovalsMixin,
     GovernanceMixin,
@@ -165,6 +173,7 @@ class KompanyEngine(
         self.ledger = Ledger(self.db)
         self.journal = Journal(self.db)
         self.projects = Projects(self.db)
+        self.delegations = DelegationStore(self.db, self.projects)
         self.memory = AgentMemory(self.db)
         self.skills = SkillStore(self.db)
         self.audit = AuditLog(self.db)
@@ -201,6 +210,18 @@ class KompanyEngine(
             except Exception:  # noqa: BLE001 — first-boot resolution miss is fine
                 pass
         self.credentials = CredentialVaultStore(self.db, self.settings.vault_key)
+        broker_backend = (
+            HttpCredentialBroker(
+                self.settings.credential_broker_endpoint,
+                auth_token=self.settings.credential_broker_token,
+                timeout_seconds=(
+                    self.settings.credential_broker_timeout_seconds
+                ),
+            )
+            if self.settings.credential_broker_endpoint
+            else UnavailableCredentialBroker()
+        )
+        self.credential_broker = CredentialBrokerClient(broker_backend)
         self._apply_vault_credentials()
         self.tool_authorization = ToolAuthorizationStore(self.db)
         self.outward_policies = OutwardActionPolicyStore(self.db)
@@ -397,6 +418,32 @@ class KompanyEngine(
             ),
         )
 
+    def get_delegation(self, delegation_id: str):
+        return self.delegations.get(delegation_id)
+
+    def cancel_delegation(self, delegation_id: str):
+        delegation = self.delegations.cancel(delegation_id)
+        if delegation is None:
+            raise ValueError(f"delegation {delegation_id!r} not found")
+        self.audit.record(
+            "delegation.cancelled",
+            "CEO cancelled background delegation",
+            detail={"delegation_id": delegation_id},
+            agent_role="ceo",
+            directive_id=delegation.directive_id,
+            project_id=delegation.project_id,
+        )
+        get_event_hub().publish(
+            "delegation.milestone",
+            {
+                "delegation_id": delegation_id,
+                "status": "cancelled",
+                "session_id": delegation.session_id,
+                "project_id": delegation.project_id,
+            },
+        )
+        return delegation
+
     def _resolve_vault_key(self) -> None:
         vault_key, source = resolve_vault_key(
             self.settings.vault_key,
@@ -512,4 +559,3 @@ class KompanyEngine(
         await self.ticker.stop()
         if self.telegram_worker is not None:
             await self.telegram_worker.stop()
-

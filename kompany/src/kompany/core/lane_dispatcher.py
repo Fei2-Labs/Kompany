@@ -109,7 +109,7 @@ class LaneDispatcher:
         self, lane_id: str, project_id: str, item: dict[str, Any] | None
     ) -> list[str]:
         try:
-            with run_scope():
+            with run_scope(parent=self._delegation_parent_run(project_id)):
                 task_id = self._run_one_pending(project_id)
         except LLMUnavailable as exc:
             # ADR-0005 hard rule: model unavailable is a FAILURE, never a
@@ -127,6 +127,23 @@ class LaneDispatcher:
         if task_id:
             return [f"advanced_task:{task_id}"]
         return [f"lane_idle:{lane_id}"]
+
+    def _delegation_parent_run(self, project_id: str) -> str | None:
+        delegations = getattr(self._engine, "delegations", None)
+        if delegations is None:
+            return None
+        pending = next(
+            (
+                task
+                for task in self._engine.projects.list_tasks(project_id)
+                if _status_value(task.status) == TaskStatus.PENDING.value
+            ),
+            None,
+        )
+        if pending is None or not pending.delegation_id:
+            return None
+        delegation = delegations.get(pending.delegation_id)
+        return delegation.parent_run_id if delegation is not None else None
 
     def _record_lane_failure(
         self,

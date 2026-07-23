@@ -21,6 +21,7 @@ is needed later).
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 from kompany.core.event_hub import get_event_hub
 from kompany.core.run_context import current_run_id
@@ -92,16 +93,31 @@ class ConversationStore:
             session.run_id = rid
         self.db.execute(
             """INSERT INTO channel_sessions
-               (id, state, route, clarify_turns, directive_id, project_id,
-                approval_id, run_id, payload)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, state, route, clarify_turns, directive_id, company_id,
+                project_id,
+                channel, account_id, chat_id, thread_id, sender_id,
+                active_agent_id, previous_agent_id, handoff_id, handoff_reason,
+                handoff_confidence, session_epoch, approval_id, run_id, payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.state.value,
                 session.route,
                 session.clarify_turns,
                 session.directive_id,
+                session.company_id,
                 session.project_id,
+                session.channel,
+                session.account_id,
+                session.chat_id,
+                session.thread_id,
+                session.sender_id,
+                session.active_agent_id,
+                session.previous_agent_id,
+                session.handoff_id,
+                session.handoff_reason,
+                session.handoff_confidence,
+                session.session_epoch,
                 session.approval_id,
                 session.run_id,
                 json.dumps(session.payload or {}),
@@ -120,6 +136,58 @@ class ConversationStore:
             (session_id,),
         ).fetchone()
         return self._row_to_session(row) if row else None
+
+    def bind_legacy_context(
+        self,
+        session_id: str,
+        *,
+        company_id: str,
+        project_id: str | None,
+        channel: str,
+        account_id: str,
+        chat_id: str,
+        thread_id: str | None,
+        sender_id: str,
+    ) -> ConversationSession | None:
+        """Bind transport identity once for sessions created before scoping."""
+        existing = self.get_session(session_id)
+        if existing is None:
+            return None
+        transport_identity = (
+            existing.channel,
+            existing.account_id,
+            existing.chat_id,
+            existing.thread_id,
+            existing.sender_id,
+        )
+        if any(value is not None for value in transport_identity):
+            return existing
+        if existing.company_id not in {"default", company_id}:
+            return existing
+
+        self.db.execute(
+            """UPDATE channel_sessions
+               SET company_id = ?,
+                   project_id = COALESCE(project_id, ?),
+                   channel = ?,
+                   account_id = ?,
+                   chat_id = ?,
+                   thread_id = ?,
+                   sender_id = ?
+               WHERE id = ?""",
+            (
+                company_id,
+                project_id,
+                channel,
+                account_id,
+                chat_id,
+                thread_id,
+                sender_id,
+                session_id,
+            ),
+        )
+        self.db.commit()
+        return self.get_session(session_id)
 
     def list_sessions(
         self,
@@ -203,6 +271,122 @@ class ConversationStore:
         )
         return self.get_session(session_id)
 
+    def handoff(
+        self,
+        session_id: str,
+        *,
+        to_agent_id: str,
+        reason: str,
+        confidence: float,
+        directive_id: str | None = None,
+    ) -> ConversationSession:
+        """Atomically transfer a live conversation to another agent."""
+        existing = self.get_session(session_id)
+        if existing is None:
+            raise KeyError(f"Unknown channel session {session_id!r}.")
+        if existing.state in SESSION_TERMINAL_STATUSES:
+            raise IllegalSessionTransition(
+                f"cannot hand off terminal session {session_id!r}"
+            )
+        if existing.active_agent_id == to_agent_id:
+            return existing
+
+        handoff_id = uuid4().hex[:12]
+        next_epoch = existing.session_epoch + 1
+        with self.db.conn:
+            self.db.execute(
+                """INSERT INTO channel_handoffs
+                   (id, session_id, from_agent_id, to_agent_id, reason,
+                    confidence, directive_id, session_epoch)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    handoff_id,
+                    session_id,
+                    existing.active_agent_id,
+                    to_agent_id,
+                    reason,
+                    confidence,
+                    directive_id,
+                    next_epoch,
+                ),
+            )
+            self.db.execute(
+                """UPDATE channel_sessions
+                   SET previous_agent_id = ?,
+                       active_agent_id = ?,
+                       handoff_id = ?,
+                       handoff_reason = ?,
+                       handoff_confidence = ?,
+                       session_epoch = ?
+                   WHERE id = ?""",
+                (
+                    existing.active_agent_id,
+                    to_agent_id,
+                    handoff_id,
+                    reason,
+                    confidence,
+                    next_epoch,
+                    session_id,
+                ),
+            )
+        updated = self.get_session(session_id)
+        if updated is None:
+            raise RuntimeError(f"handoff lost session {session_id!r}")
+        _publish_channel_updated("handoff", session_id, updated.state.value)
+        return updated
+
+    def rollback_handoff(
+        self,
+        session_id: str,
+        *,
+        handoff_id: str,
+        restore: ConversationSession,
+    ) -> ConversationSession:
+        """Restore the exact pre-handoff owner after recipient startup fails."""
+        current = self.get_session(session_id)
+        if current is None:
+            raise KeyError(f"Unknown channel session {session_id!r}.")
+        if current.handoff_id != handoff_id:
+            raise ValueError(
+                f"handoff {handoff_id!r} is not active for session {session_id!r}"
+            )
+
+        with self.db.conn:
+            self.db.execute(
+                """UPDATE channel_handoffs
+                   SET status = 'failed'
+                   WHERE id = ? AND session_id = ?""",
+                (handoff_id, session_id),
+            )
+            self.db.execute(
+                """UPDATE channel_sessions
+                   SET active_agent_id = ?,
+                       previous_agent_id = ?,
+                       handoff_id = ?,
+                       handoff_reason = ?,
+                       handoff_confidence = ?,
+                       session_epoch = ?
+                   WHERE id = ?""",
+                (
+                    restore.active_agent_id,
+                    restore.previous_agent_id,
+                    restore.handoff_id,
+                    restore.handoff_reason,
+                    restore.handoff_confidence,
+                    restore.session_epoch,
+                    session_id,
+                ),
+            )
+        updated = self.get_session(session_id)
+        if updated is None:
+            raise RuntimeError(f"handoff rollback lost session {session_id!r}")
+        _publish_channel_updated(
+            "handoff_rolled_back",
+            session_id,
+            updated.state.value,
+        )
+        return updated
+
     def set_session_payload(
         self,
         session_id: str,
@@ -242,6 +426,7 @@ class ConversationStore:
         session_id: str,
         role: str,
         content: str,
+        agent_id: str | None = None,
         kind: str = "message",
         cost: float = 0.0,
         directive_id: str | None = None,
@@ -267,6 +452,7 @@ class ConversationStore:
             session_id=session_id,
             turn_index=turn_index,
             role=role,
+            agent_id=agent_id or ("ceo" if role == "ceo" else None),
             content=content,
             kind=kind,
             cost=cost,
@@ -275,14 +461,15 @@ class ConversationStore:
         )
         self.db.execute(
             """INSERT INTO channel_turns
-               (id, session_id, turn_index, role, content, kind, cost,
+               (id, session_id, turn_index, role, agent_id, content, kind, cost,
                 run_id, directive_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 turn.id,
                 turn.session_id,
                 turn.turn_index,
                 turn.role,
+                turn.agent_id,
                 turn.content,
                 turn.kind,
                 turn.cost,
@@ -319,20 +506,48 @@ class ConversationStore:
         ).fetchall()
         return [self._row_to_turn(r) for r in rows]
 
-    def recent_turns(self, limit: int = 6) -> list[ConversationTurn]:
-        """Return the most recent turns across ALL sessions, oldest-first.
+    def recent_turns(
+        self,
+        limit: int = 6,
+        *,
+        scope: ConversationSession | None = None,
+    ) -> list[ConversationTurn]:
+        """Return recent turns in one virtual conversation scope, oldest-first.
 
         Used to inject cross-session context into classify and answer prompts
         so short follow-ups ("批准" / "继续" / "第二个") are understood even
         when a new session is opened.  Only ``message`` and ``final`` kinds are
         included (skips progress_summary / clarify_question / preview noise).
         """
+        clauses = ["t.kind IN ('message', 'final')"]
+        params: list[Any] = []
+        if scope is not None:
+            scope_fields = (
+                "company_id",
+                "project_id",
+                "channel",
+                "account_id",
+                "chat_id",
+                "thread_id",
+                "sender_id",
+                "active_agent_id",
+                "session_epoch",
+            )
+            for field in scope_fields:
+                value = getattr(scope, field)
+                if value is None:
+                    clauses.append(f"s.{field} IS NULL")
+                else:
+                    clauses.append(f"s.{field} = ?")
+                    params.append(value)
+        params.append(limit)
         rows = self.db.execute(
-            "SELECT * FROM channel_turns "
-            "WHERE kind IN ('message', 'final') "
-            "ORDER BY created_at DESC, rowid DESC "
+            "SELECT t.* FROM channel_turns t "
+            "JOIN channel_sessions s ON s.id = t.session_id "
+            f"WHERE {' AND '.join(clauses)} "
+            "ORDER BY t.created_at DESC, t.rowid DESC "
             "LIMIT ?",
-            (limit,),
+            tuple(params),
         ).fetchall()
         # Reverse so the result is oldest-first (natural reading order).
         return [self._row_to_turn(r) for r in reversed(rows)]
@@ -409,7 +624,41 @@ class ConversationStore:
             route=row["route"] if "route" in keys else None,
             clarify_turns=row["clarify_turns"] if row["clarify_turns"] else 0,
             directive_id=row["directive_id"],
+            company_id=(
+                row["company_id"]
+                if "company_id" in keys and row["company_id"]
+                else "default"
+            ),
             project_id=row["project_id"],
+            channel=row["channel"] if "channel" in keys else None,
+            account_id=row["account_id"] if "account_id" in keys else None,
+            chat_id=row["chat_id"] if "chat_id" in keys else None,
+            thread_id=row["thread_id"] if "thread_id" in keys else None,
+            sender_id=row["sender_id"] if "sender_id" in keys else None,
+            active_agent_id=(
+                row["active_agent_id"]
+                if "active_agent_id" in keys and row["active_agent_id"]
+                else "ceo"
+            ),
+            previous_agent_id=(
+                row["previous_agent_id"]
+                if "previous_agent_id" in keys
+                else None
+            ),
+            handoff_id=row["handoff_id"] if "handoff_id" in keys else None,
+            handoff_reason=(
+                row["handoff_reason"] if "handoff_reason" in keys else None
+            ),
+            handoff_confidence=(
+                row["handoff_confidence"]
+                if "handoff_confidence" in keys
+                else None
+            ),
+            session_epoch=(
+                int(row["session_epoch"] or 0)
+                if "session_epoch" in keys
+                else 0
+            ),
             approval_id=row["approval_id"] if "approval_id" in keys else None,
             run_id=row["run_id"] if "run_id" in keys else None,
             payload=payload,
@@ -425,6 +674,11 @@ class ConversationStore:
             session_id=row["session_id"],
             turn_index=row["turn_index"] if row["turn_index"] is not None else 0,
             role=row["role"],
+            agent_id=(
+                row["agent_id"]
+                if "agent_id" in keys
+                else ("ceo" if row["role"] == "ceo" else None)
+            ),
             content=row["content"],
             kind=row["kind"] if "kind" in keys and row["kind"] else "message",
             cost=row["cost"] if row["cost"] is not None else 0.0,

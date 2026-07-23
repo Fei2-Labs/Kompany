@@ -27,10 +27,12 @@ from fastapi import (  # noqa: F401
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse  # noqa: F401
 from pydantic import BaseModel, ConfigDict, Field  # noqa: F401
 
+from kompany.channels.context import DirectiveContext
 from kompany.core.event_hub import get_event_hub  # noqa: F401
 from kompany.interfaces.api_parts.deps import get_engine, reset_engine  # noqa: F401
 from kompany.interfaces.api_parts.models import *  # noqa: F401,F403
 from kompany.interfaces.api_parts.onboarding_ping import _classify_ping_error  # noqa: F401
+from kompany.state.models import SESSION_TERMINAL_STATUSES
 
 router = APIRouter()
 
@@ -47,7 +49,11 @@ def _flatten_directive_result(result: Any) -> dict[str, Any]:
     return result.to_dict()
 
 
-def _process_directive_graceful(text: str, session_id: str | None) -> dict[str, Any]:
+def _process_directive_graceful(
+    text: str,
+    session_id: str | None,
+    context: DirectiveContext | None = None,
+) -> dict[str, Any]:
     """Run ``process_directive`` wrapped in the graceful-error contract.
 
     ``process_directive`` re-raises on LLM failure (its library contract).
@@ -62,10 +68,26 @@ def _process_directive_graceful(text: str, session_id: str | None) -> dict[str, 
     """
     engine = get_engine()
     try:
-        result = engine.process_directive(text, session_id=session_id)
+        if context is None:
+            result = engine.process_directive(text, session_id=session_id)
+        else:
+            result = engine.process_directive(
+                text,
+                session_id=session_id,
+                context=context,
+            )
     except Exception as exc:  # noqa: BLE001 — surface honestly, never 500
         detail = f"{type(exc).__name__}: {exc}"
         code = _classify_ping_error(detail)
+        session = (
+            engine.channel.get_session(session_id)
+            if session_id is not None
+            else None
+        )
+        conversation_continues = bool(
+            session is not None
+            and session.state not in SESSION_TERMINAL_STATUSES
+        )
         human = {
             "rate_limited": "Your LLM provider hit a rate/quota limit. Wait a moment and retry.",
             "unauthorized": "Your LLM provider rejected the API key. Check it in settings.",
@@ -76,12 +98,18 @@ def _process_directive_graceful(text: str, session_id: str | None) -> dict[str, 
             "status": "failed",
             "message": human,
             "error_code": code,
-            "project_id": None,
+            "project_id": session.project_id if session else None,
             "approval_id": None,
             "total_ai_cost": 0.0,
             "agents_used": [],
             "run_id": None,
             "session_id": session_id,
+            "active_agent_id": session.active_agent_id if session else "ceo",
+            "previous_agent_id": None,
+            "handoff_id": None,
+            "conversation_continues": conversation_continues,
+            "delegation_id": None,
+            "delegation_status": None,
         }
     return _flatten_directive_result(result)
 
@@ -104,6 +132,10 @@ class ChannelSendRequest(BaseModel):
     # Continue an existing session (clarify reply / gated context); omit to
     # open a fresh session.
     session_id: str | None = None
+    # Optional canonical scope for board Chat. Callers continuing a session
+    # should keep these values stable.
+    project_id: str | None = None
+    agent_id: str | None = None
 
 
 @router.post("/channel/send")
@@ -116,7 +148,19 @@ def channel_send(req: ChannelSendRequest) -> dict[str, Any]:
     GO), or any execute/answer status. LLM failures surface as a graceful 200
     with a classified ``error_code``, never a 500.
     """
-    return _process_directive_graceful(req.text, req.session_id)
+    context = DirectiveContext(
+        channel="board",
+        account_id="local",
+        chat_id="main",
+        sender_id="founder",
+        project_id=req.project_id,
+        active_agent_id=req.agent_id,
+    )
+    return _process_directive_graceful(
+        req.text,
+        req.session_id,
+        context=context,
+    )
 
 
 def _session_to_dict(session: Any) -> dict[str, Any]:
@@ -130,7 +174,19 @@ def _session_to_dict(session: Any) -> dict[str, Any]:
         "closed_at": str(session.closed_at) if session.closed_at is not None else None,
         "run_id": session.run_id,
         "directive_id": session.directive_id,
+        "company_id": session.company_id,
         "project_id": session.project_id,
+        "channel": session.channel,
+        "account_id": session.account_id,
+        "chat_id": session.chat_id,
+        "thread_id": session.thread_id,
+        "sender_id": session.sender_id,
+        "active_agent_id": session.active_agent_id,
+        "previous_agent_id": session.previous_agent_id,
+        "handoff_id": session.handoff_id,
+        "handoff_reason": session.handoff_reason,
+        "handoff_confidence": session.handoff_confidence,
+        "session_epoch": session.session_epoch,
         "approval_id": session.approval_id,
     }
 
@@ -140,6 +196,7 @@ def _turn_to_dict(turn: Any) -> dict[str, Any]:
     return {
         "turn_index": turn.turn_index,
         "role": turn.role,
+        "agent_id": turn.agent_id,
         "content": turn.content,
         "kind": turn.kind,
         "cost": turn.cost,
@@ -250,4 +307,3 @@ def resume_project(project_id: str) -> dict[str, Any]:
         return engine.resume_project(project_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-

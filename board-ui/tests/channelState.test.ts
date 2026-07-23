@@ -5,6 +5,7 @@ import {
   errorLabel,
   isTerminal,
   nextSessionId,
+  phaseForResult,
   phaseForStatus,
 } from '../src/channel/state';
 import type { DirectiveResult } from '../src/api/types';
@@ -19,6 +20,12 @@ function result(over: Partial<DirectiveResult>): DirectiveResult {
     agents_used: [],
     run_id: null,
     session_id: null,
+    active_agent_id: 'ceo',
+    previous_agent_id: null,
+    handoff_id: null,
+    conversation_continues: false,
+    delegation_id: null,
+    delegation_status: null,
     ...over,
   };
 }
@@ -92,6 +99,18 @@ describe('state-machine transitions', () => {
     expect(nextSessionId(result({ status: 'dispatched', session_id: 'sess-4' }))).toBeNull();
     expect(nextSessionId(result({ status: 'answered', session_id: 'sess-5' }))).toBeNull();
     expect(nextSessionId(result({ status: 'failed', session_id: 'sess-6' }))).toBeNull();
+  });
+
+  it('completed specialist reply keeps its active conversation session', () => {
+    const specialist = result({
+      status: 'completed',
+      session_id: 'sess-cmo',
+      active_agent_id: 'cmo',
+      conversation_continues: true,
+    });
+
+    expect(nextSessionId(specialist)).toBe('sess-cmo');
+    expect(isTerminal(phaseForResult(specialist))).toBe(false);
   });
 
   it('full clarify → gated → dispatched walk', () => {

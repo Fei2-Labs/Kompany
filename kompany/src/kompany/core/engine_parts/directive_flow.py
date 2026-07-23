@@ -6,8 +6,11 @@ Extracted verbatim from core/engine.py (ADR-0003 split).
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from typing import Any
 
+from kompany.channels.context import DirectiveContext
+from kompany.channels.routing import plan_agent_route, resolve_project
 from kompany.core.directive import (
     Directive,
     DirectiveResult,
@@ -15,7 +18,17 @@ from kompany.core.directive import (
     DirectiveType,
 )
 from kompany.core.run_context import current_run_id, run_scope
-from kompany.state.models import CLevelReview, Decision, ApprovalRequest, DecisionChainPacket, Project, ProjectType, SESSION_TERMINAL_STATUSES, SessionStatus
+from kompany.state.models import (
+    CLevelReview,
+    ConversationSession,
+    Decision,
+    ApprovalRequest,
+    DecisionChainPacket,
+    Project,
+    ProjectType,
+    SESSION_TERMINAL_STATUSES,
+    SessionStatus,
+)
 
 
 
@@ -131,6 +144,7 @@ class DirectiveProcessingMixin:
         self,
         raw_input: str,
         session_id: str | None = None,
+        context: DirectiveContext | None = None,
     ) -> DirectiveResult:
         """Main entry point. Takes natural language, returns result.
 
@@ -141,15 +155,16 @@ class DirectiveProcessingMixin:
         ``parent_run_id`` automatically — see
         :func:`kompany.core.run_context.run_scope`.
 
-        ``session_id`` is the CEO-channel session this message belongs to
-        (06-03-ceo-channel). It is **optional**: internal callers
+        ``session_id`` is the channel session this message belongs to. It is
+        **optional**: internal callers
         (run_context replay, onboarding kickoff) pass only ``raw_input`` and a
         fresh session is opened for them. When provided, the message continues
         that session (a clarify reply); a closed session yields an error
-        result.
+        result. ``context`` carries transport-neutral company, project, channel,
+        sender, and active-agent identity.
         """
         with run_scope() as run_id:
-            result = self._process_directive_inner(raw_input, session_id)
+            result = self._process_directive_inner(raw_input, session_id, context)
             # Stamp the run id onto the result so callers can scope per-run
             # SSE events (llm.spend / agent.activity both carry run_id) and
             # reconcile per-run cost. Done here — inside the scope — so even
@@ -165,12 +180,23 @@ class DirectiveProcessingMixin:
         """
         lines: list[str] = []
         for turn in self.channel.session_turns(session_id):
-            who = "Founder" if turn.role == "founder" else "CEO"
+            who = self._conversation_speaker(turn)
             lines.append(f"{who}: {turn.content}")
         return "\n".join(lines)
 
-    def _compose_recent_context(self, limit: int = 6) -> str:
-        """Render last N turns across ALL sessions for cross-session context.
+    @staticmethod
+    def _conversation_speaker(turn) -> str:
+        if turn.role == "founder":
+            return "Founder"
+        return (turn.agent_id or "ceo").upper()
+
+    def _compose_recent_context(
+        self,
+        limit: int = 6,
+        *,
+        scope: ConversationSession | None = None,
+    ) -> str:
+        """Render recent turns within one project/agent context.
 
         Decision 3 (Option B): inject into classify + answer so short
         follow-ups ("批准" / "继续" / "第二个") are understood in new sessions.
@@ -178,8 +204,11 @@ class DirectiveProcessingMixin:
         :meth:`ConversationStore.recent_turns`). Empty string when no history.
         """
         lines: list[str] = []
-        for turn in self.channel.recent_turns(limit):
-            who = "Founder" if turn.role == "founder" else "CEO"
+        for turn in self.channel.recent_turns(
+            limit,
+            scope=scope,
+        ):
+            who = self._conversation_speaker(turn)
             lines.append(f"{who}: {turn.content}")
         return "\n".join(lines)
 
@@ -187,14 +216,69 @@ class DirectiveProcessingMixin:
         self,
         raw_input: str,
         session_id: str | None = None,
+        context: DirectiveContext | None = None,
     ) -> DirectiveResult:
         directive = Directive(raw_input=raw_input)
 
         # ----- Resolve / open the CEO-channel session -----
         # No session_id → open a fresh session. session_id given → continue an
         # existing one (must be open/clarifying); a closed session is an error.
+        if (
+            session_id is None
+            and context is not None
+            and context.active_agent_id
+        ):
+            try:
+                descriptor = self.registry.descriptor(
+                    context.active_agent_id
+                )
+                if not descriptor.can_own_conversation:
+                    return DirectiveResult(
+                        directive=directive,
+                        status="failed",
+                        message=(
+                            f"Agent {context.active_agent_id!r} cannot own "
+                            "a conversation."
+                        ),
+                        agents_used=[],
+                    )
+                self.registry.get(
+                    context.active_agent_id,
+                    company_state=self.get_company_state(),
+                )
+            except (ValueError, KeyError):
+                return DirectiveResult(
+                    directive=directive,
+                    status="failed",
+                    message=(
+                        "Unknown or unavailable conversation agent: "
+                        f"{context.active_agent_id}"
+                    ),
+                    agents_used=[],
+                )
+
         if session_id is None:
-            session = self.channel.create_session()
+            session = self.channel.create_session(
+                ConversationSession(
+                    company_id=context.company_id if context else "default",
+                    project_id=context.project_id if context else None,
+                    channel=context.channel if context else None,
+                    account_id=context.account_id if context else None,
+                    chat_id=context.chat_id if context else None,
+                    thread_id=context.thread_id if context else None,
+                    sender_id=context.sender_id if context else None,
+                    active_agent_id=(
+                        context.active_agent_id
+                        if context and context.active_agent_id
+                        else "ceo"
+                    ),
+                    session_epoch=(
+                        context.session_epoch
+                        if context and context.session_epoch is not None
+                        else 0
+                    ),
+                )
+            )
         else:
             session = self.channel.get_session(session_id)
             if session is None:
@@ -206,6 +290,54 @@ class DirectiveProcessingMixin:
                     agents_used=[],
                     total_ai_cost=0.0,
                 )
+            if context is not None:
+                session = self.channel.bind_legacy_context(
+                    session.id,
+                    company_id=context.company_id,
+                    project_id=context.project_id,
+                    channel=context.channel,
+                    account_id=context.account_id,
+                    chat_id=context.chat_id,
+                    thread_id=context.thread_id,
+                    sender_id=context.sender_id,
+                ) or session
+                identity_fields = (
+                    "company_id",
+                    "project_id",
+                    "channel",
+                    "account_id",
+                    "chat_id",
+                    "thread_id",
+                    "sender_id",
+                    "active_agent_id",
+                    "session_epoch",
+                )
+                mismatched = []
+                for field in identity_fields:
+                    incoming = getattr(context, field)
+                    if (
+                        field in {
+                            "project_id",
+                            "active_agent_id",
+                            "session_epoch",
+                        }
+                        and incoming is None
+                    ):
+                        continue
+                    if getattr(session, field) != incoming:
+                        mismatched.append(field)
+                if mismatched:
+                    return DirectiveResult(
+                        directive=directive,
+                        status="failed",
+                        message=(
+                            "Directive context does not match the existing "
+                            f"session ({', '.join(mismatched)})."
+                        ),
+                        session_id=session.id,
+                        agents_used=[],
+                        total_ai_cost=0.0,
+                    )
             if session.state in SESSION_TERMINAL_STATUSES:
                 return DirectiveResult(
                     directive=directive,
@@ -219,6 +351,14 @@ class DirectiveProcessingMixin:
                     total_ai_cost=0.0,
                 )
         session_id = session.id
+
+        command_result = self._handle_channel_command(
+            raw_input,
+            directive,
+            session,
+        )
+        if command_result is not None:
+            return command_result
 
         # One-shot GO/abandon replies on a paused session. The gate's CLI
         # hint tells the founder to continue with
@@ -263,6 +403,25 @@ class DirectiveProcessingMixin:
             detail={"input_length": len(raw_input)},
             directive_id=directive.id,
         )
+        route_projects = self.projects.list_active()
+        if session.project_id and not any(
+            project.id == session.project_id for project in route_projects
+        ):
+            explicit_project = self.projects.get(session.project_id)
+            if explicit_project is not None:
+                route_projects.append(explicit_project)
+        project_route = resolve_project(
+            raw_input,
+            route_projects,
+            explicit_project_id=session.project_id,
+        )
+        self.audit.record(
+            "routing.project.shadow",
+            "Planned project route without changing execution",
+            detail=asdict(project_route),
+            directive_id=directive.id,
+            project_id=project_route.project_id,
+        )
 
         # Record the founder's turn before classification so the conversation
         # thread reflects what was sent even if classify fails.
@@ -285,7 +444,9 @@ class DirectiveProcessingMixin:
             # the prior turns of THIS session only (Decision 2).
             clarify_capped = self.channel.at_clarify_cap(session_id)
             session_context = self._compose_session_context(session_id) or None
-            recent_context = self._compose_recent_context() or None
+            recent_context = self._compose_recent_context(
+                scope=session,
+            ) or None
             classification = ceo.classify(
                 raw_input,
                 directive_id=directive.id,
@@ -301,6 +462,19 @@ class DirectiveProcessingMixin:
                 detail=classification.model_dump(),
                 agent_role="ceo",
                 directive_id=directive.id,
+            )
+            agent_route = plan_agent_route(
+                classification,
+                self.registry,
+                active_agent_id=session.active_agent_id,
+            )
+            self.audit.record(
+                "routing.agent.shadow",
+                "Planned agent route without changing execution",
+                detail=asdict(agent_route),
+                agent_role=session.active_agent_id,
+                directive_id=directive.id,
+                project_id=session.project_id,
             )
 
             directive.directive_type = DirectiveType(classification.directive_type)
@@ -322,6 +496,115 @@ class DirectiveProcessingMixin:
                 return self._handle_clarify(
                     directive, classification, session_id, start_time
                 )
+
+            if (
+                agent_route.action == "delegate"
+                and agent_route.destination_agent_ids
+                and not agent_route.requires_confirmation
+                and session.project_id
+                and not (
+                    route == "execute"
+                    and self._should_gate(classification)
+                )
+            ):
+                return self._handle_delegation(
+                    directive,
+                    classification,
+                    agent_route.destination_agent_ids,
+                    session,
+                    start_time,
+                )
+
+            transition_from: str | None = None
+            handoff_origin: ConversationSession | None = None
+            if (
+                agent_route.action in {"handoff", "return_to_ceo"}
+                and agent_route.destination_agent_ids
+                and agent_route.confidence >= 0.85
+                and not agent_route.requires_confirmation
+                and not (
+                    route == "execute"
+                    and self._should_gate(classification)
+                )
+            ):
+                destination = agent_route.destination_agent_ids[0]
+                try:
+                    self.registry.get(destination, company_state=state)
+                except Exception as exc:  # noqa: BLE001 — safe CEO fallback
+                    self.audit.record(
+                        "routing.handoff_failed",
+                        "Recipient startup failed; kept current owner",
+                        detail={
+                            "destination": destination,
+                            "error": f"{type(exc).__name__}: {exc}",
+                        },
+                        agent_role=session.active_agent_id,
+                        directive_id=directive.id,
+                        project_id=session.project_id,
+                    )
+                else:
+                    transition_from = session.active_agent_id
+                    handoff_origin = session
+                    session = self.channel.handoff(
+                        session_id,
+                        to_agent_id=destination,
+                        reason=agent_route.reason,
+                        confidence=agent_route.confidence,
+                        directive_id=directive.id,
+                    )
+                    self.audit.record(
+                        "routing.handoff",
+                        "Transferred active conversation owner",
+                        detail={
+                            "handoff_id": session.handoff_id,
+                            "from_agent_id": transition_from,
+                            "to_agent_id": session.active_agent_id,
+                            "confidence": agent_route.confidence,
+                            "reason": agent_route.reason,
+                        },
+                        agent_role=session.active_agent_id,
+                        directive_id=directive.id,
+                        project_id=session.project_id,
+                    )
+
+            if (
+                route in {"answer", "execute"}
+                and session.active_agent_id != "ceo"
+            ):
+                specialist = self.registry.get(
+                    session.active_agent_id,
+                    company_state=state,
+                )
+                try:
+                    return self._handle_specialist_chat(
+                        directive,
+                        classification,
+                        specialist,
+                        session,
+                        start_time,
+                        transition_from=transition_from,
+                        session_context=session_context,
+                    )
+                except Exception as exc:
+                    if handoff_origin is not None and session.handoff_id:
+                        failed_destination = session.active_agent_id
+                        session = self.channel.rollback_handoff(
+                            session.id,
+                            handoff_id=session.handoff_id,
+                            restore=handoff_origin,
+                        )
+                        self.audit.record(
+                            "routing.handoff_failed",
+                            "Recipient reply failed; restored previous owner",
+                            detail={
+                                "destination": failed_destination,
+                                "error": f"{type(exc).__name__}: {exc}",
+                            },
+                            agent_role=session.active_agent_id,
+                            directive_id=directive.id,
+                            project_id=session.project_id,
+                        )
+                    raise
 
             # ----- Agentic CEO chat (06-16 P2) -----
             # A real ``answer``/``execute`` request runs the upgraded
@@ -444,4 +727,3 @@ class DirectiveProcessingMixin:
             raise
         finally:
             self.agent_status.set("ceo", "idle")
-

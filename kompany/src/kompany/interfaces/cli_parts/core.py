@@ -190,8 +190,15 @@ def directive(
 
     _render_directive_result(result)
     # One-shot: tell a scripting founder how to continue a paused session.
-    if result.status in _CHANNEL_PAUSE_STATUSES and result.session_id:
-        verb = "GO/abandon" if result.status == "gated" else "reply"
+    if (
+        result.status in _CHANNEL_PAUSE_STATUSES
+        or result.conversation_continues
+    ) and result.session_id:
+        verb = (
+            "GO/abandon"
+            if result.status == "gated"
+            else "next message"
+        )
         console.print(
             f"[dim]Session {result.session_id} awaits your {verb}. "
             f"Continue with:[/dim] kompany directive \"<reply>\" "
@@ -201,7 +208,8 @@ def directive(
 
 def _render_directive_result(result) -> None:
     """Render one channel turn as a titled panel (CEO reply / question)."""
-    title = f"Kompany [{result.status}]"
+    active_agent = (result.active_agent_id or "ceo").upper()
+    title = f"{active_agent} [{result.status}]"
     if result.status == "clarify":
         title = "CEO asks"
     elif result.status == "gated":
@@ -216,7 +224,10 @@ def _run_channel_interactive(engine, result) -> None:
     while True:
         _render_directive_result(result)
         sid = result.session_id
-        if result.status not in _CHANNEL_PAUSE_STATUSES or not sid:
+        if (
+            result.status not in _CHANNEL_PAUSE_STATUSES
+            and not result.conversation_continues
+        ) or not sid:
             return
 
         if result.status == "gated":
@@ -232,8 +243,13 @@ def _run_channel_interactive(engine, result) -> None:
                 console.print("[dim]Type 'go' to execute or 'abandon' to cancel.[/dim]")
             continue
 
-        # clarify: read the founder's reply, continue the same session.
-        reply = typer.prompt("Your reply").strip()
+        # Clarify or open specialist chat: continue the same session.
+        prompt = (
+            "Your reply"
+            if result.status == "clarify"
+            else "Your message"
+        )
+        reply = typer.prompt(prompt).strip()
         if not reply:
             console.print("[dim]Empty reply; abandoning session.[/dim]")
             result = engine.channel_abandon(sid)
@@ -314,7 +330,7 @@ def channel_show(
     for turn in turns:
         table.add_row(
             str(turn.turn_index),
-            turn.role,
+            turn.agent_id or turn.role,
             turn.kind,
             turn.content[:120],
             f"{turn.cost:.4f}",
@@ -333,7 +349,19 @@ def _cli_session_to_dict(session) -> dict:
         "closed_at": str(session.closed_at) if session.closed_at is not None else None,
         "run_id": session.run_id,
         "directive_id": session.directive_id,
+        "company_id": session.company_id,
         "project_id": session.project_id,
+        "channel": session.channel,
+        "account_id": session.account_id,
+        "chat_id": session.chat_id,
+        "thread_id": session.thread_id,
+        "sender_id": session.sender_id,
+        "active_agent_id": session.active_agent_id,
+        "previous_agent_id": session.previous_agent_id,
+        "handoff_id": session.handoff_id,
+        "handoff_reason": session.handoff_reason,
+        "handoff_confidence": session.handoff_confidence,
+        "session_epoch": session.session_epoch,
         "approval_id": session.approval_id,
     }
 
@@ -343,6 +371,7 @@ def _cli_turn_to_dict(turn) -> dict:
     return {
         "turn_index": turn.turn_index,
         "role": turn.role,
+        "agent_id": turn.agent_id,
         "content": turn.content,
         "kind": turn.kind,
         "cost": turn.cost,
@@ -350,5 +379,3 @@ def _cli_turn_to_dict(turn) -> dict:
         "directive_id": turn.directive_id,
         "created_at": str(turn.created_at) if turn.created_at is not None else None,
     }
-
-

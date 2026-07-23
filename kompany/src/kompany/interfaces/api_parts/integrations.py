@@ -58,6 +58,12 @@ def list_integrations() -> list[dict[str, Any]]:
     return get_engine().integrations_list()
 
 
+@router.get("/credential-broker/status")
+def credential_broker_status() -> dict[str, Any]:
+    """Return provider-neutral broker health without secret material."""
+    return get_engine().credential_broker_status()
+
+
 @router.post("/integrations/email/connect", response_model=IntegrationActionResponse)
 def connect_email(req: ConnectEmailRequest) -> IntegrationActionResponse:
     """Store SMTP credentials in the vault + verify them with a login.
@@ -307,4 +313,3 @@ def test_email(req: TestEmailRequest | None = Body(default=None)) -> Integration
 # handler path (no behaviour change for existing callers). All directive-result
 # responses flow through one flattener so SDK/REST stay key-identical.
 # ---------------------------------------------------------------------------
-

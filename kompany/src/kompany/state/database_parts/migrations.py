@@ -255,7 +255,19 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                route TEXT,
                clarify_turns INTEGER NOT NULL DEFAULT 0,
                directive_id TEXT,
+               company_id TEXT NOT NULL DEFAULT 'default',
                project_id TEXT,
+               channel TEXT,
+               account_id TEXT,
+               chat_id TEXT,
+               thread_id TEXT,
+               sender_id TEXT,
+               active_agent_id TEXT NOT NULL DEFAULT 'ceo',
+               previous_agent_id TEXT,
+               handoff_id TEXT,
+               handoff_reason TEXT,
+               handoff_confidence REAL,
+               session_epoch INTEGER NOT NULL DEFAULT 0,
                approval_id TEXT,
                run_id TEXT,
                payload TEXT NOT NULL DEFAULT '{}',
@@ -274,6 +286,24 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         )
     except sqlite3.OperationalError:
         pass  # column already exists
+    for col, defn in [
+        ("company_id", "TEXT NOT NULL DEFAULT 'default'"),
+        ("channel", "TEXT"),
+        ("account_id", "TEXT"),
+        ("chat_id", "TEXT"),
+        ("thread_id", "TEXT"),
+        ("sender_id", "TEXT"),
+        ("active_agent_id", "TEXT NOT NULL DEFAULT 'ceo'"),
+        ("previous_agent_id", "TEXT"),
+        ("handoff_id", "TEXT"),
+        ("handoff_reason", "TEXT"),
+        ("handoff_confidence", "REAL"),
+        ("session_epoch", "INTEGER NOT NULL DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE channel_sessions ADD COLUMN {col} {defn}")
+        except sqlite3.OperationalError:
+            pass
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_channel_sessions_state "
         "ON channel_sessions(state)"
@@ -283,11 +313,30 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "ON channel_sessions(run_id)"
     )
     conn.execute(
+        """CREATE TABLE IF NOT EXISTS channel_handoffs (
+               id TEXT PRIMARY KEY,
+               session_id TEXT NOT NULL,
+               from_agent_id TEXT NOT NULL,
+               to_agent_id TEXT NOT NULL,
+               reason TEXT NOT NULL,
+               confidence REAL NOT NULL,
+               directive_id TEXT,
+               session_epoch INTEGER NOT NULL,
+               status TEXT NOT NULL DEFAULT 'active',
+               created_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_channel_handoffs_session "
+        "ON channel_handoffs(session_id, created_at)"
+    )
+    conn.execute(
         """CREATE TABLE IF NOT EXISTS channel_turns (
                id TEXT PRIMARY KEY,
                session_id TEXT NOT NULL,
                turn_index INTEGER NOT NULL DEFAULT 0,
                role TEXT NOT NULL,
+               agent_id TEXT,
                content TEXT NOT NULL,
                kind TEXT NOT NULL DEFAULT 'message',
                cost REAL NOT NULL DEFAULT 0.0,
@@ -295,6 +344,14 @@ def run_migrations(conn: sqlite3.Connection) -> None:
                directive_id TEXT,
                created_at TEXT NOT NULL DEFAULT (datetime('now'))
            )"""
+    )
+    try:
+        conn.execute("ALTER TABLE channel_turns ADD COLUMN agent_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.execute(
+        "UPDATE channel_turns SET agent_id = 'ceo' "
+        "WHERE role = 'ceo' AND agent_id IS NULL"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_channel_turns_session_id "
@@ -304,6 +361,96 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_channel_turns_run_id "
         "ON channel_turns(run_id)"
     )
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN delegation_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE tasks ADD COLUMN execution_run_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS delegations (
+               id TEXT PRIMARY KEY,
+               session_id TEXT NOT NULL,
+               directive_id TEXT NOT NULL,
+               project_id TEXT NOT NULL,
+               parent_agent_id TEXT NOT NULL DEFAULT 'ceo',
+               parent_run_id TEXT,
+               status TEXT NOT NULL DEFAULT 'queued',
+               context_packet TEXT NOT NULL DEFAULT '{}',
+               budget_cap_usd REAL,
+               depth INTEGER NOT NULL DEFAULT 1,
+               max_depth INTEGER NOT NULL DEFAULT 1,
+               max_concurrency INTEGER NOT NULL DEFAULT 3,
+               result TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+               completed_at TEXT
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_delegations_session "
+        "ON delegations(session_id, created_at)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_delegation "
+        "ON tasks(delegation_id, created_at)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS channel_progress_messages (
+               delegation_id TEXT PRIMARY KEY,
+               channel TEXT NOT NULL,
+               chat_id TEXT NOT NULL,
+               sender_id TEXT,
+               thread_id TEXT,
+               message_id TEXT NOT NULL,
+               project_name TEXT NOT NULL,
+               agents TEXT NOT NULL DEFAULT '',
+               cost_usd REAL NOT NULL DEFAULT 0,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS credential_approval_consumptions (
+               approval_id TEXT PRIMARY KEY,
+               request_fingerprint TEXT NOT NULL,
+               reservation_owner TEXT NOT NULL,
+               lease_id TEXT,
+               status TEXT NOT NULL DEFAULT 'reserved',
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               consumed_at TEXT
+           )"""
+    )
+    try:
+        conn.execute(
+            "ALTER TABLE credential_approval_consumptions "
+            "ADD COLUMN reservation_owner TEXT"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE channel_progress_messages "
+            "ADD COLUMN agents TEXT NOT NULL DEFAULT ''"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE channel_progress_messages "
+            "ADD COLUMN sender_id TEXT"
+        )
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute(
+            "ALTER TABLE channel_progress_messages "
+            "ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass
 
     # Learned-skill store (06-16-agentic-chat-engine P5). The L3 "task
     # skills" layer of the GenericAgent no-embedding memory model: one row

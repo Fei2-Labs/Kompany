@@ -81,6 +81,12 @@ class DirectiveResult(BaseModel):
     # in ``message`` and the session_id here so the founder's reply continues
     # the same session.
     session_id: str | None = None
+    active_agent_id: str = "ceo"
+    previous_agent_id: str | None = None
+    handoff_id: str | None = None
+    conversation_continues: bool = False
+    delegation_id: str | None = None
+    delegation_status: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """The shared parity dict every non-web interface serializes.
@@ -89,11 +95,9 @@ class DirectiveResult(BaseModel):
         (``/directive`` + ``/channel/*``), CLI, MCP, and SDK all flatten a
         ``DirectiveResult`` through this method so their top-level keys stay
         identical (interfaces.md equivalence rule, enforced by
-        ``test_interfaces.py``). The six legacy keys (status / message /
-        project_id / approval_id / total_ai_cost / agents_used) plus
-        ``run_id`` (PR0) and ``session_id`` (PR1) — never ``directive`` or
-        ``debate_id`` (those stay internal). Drift here is a bug across four
-        surfaces at once, so they must not hand-roll their own dicts.
+        ``test_interfaces.py``). Internal objects such as ``directive`` and
+        ``debate_id`` are intentionally excluded. Drift here is a bug across
+        four surfaces at once, so they must not hand-roll their own dicts.
         """
         return {
             "status": self.status,
@@ -104,4 +108,10 @@ class DirectiveResult(BaseModel):
             "agents_used": self.agents_used,
             "run_id": self.run_id,
             "session_id": self.session_id,
+            "active_agent_id": self.active_agent_id,
+            "previous_agent_id": self.previous_agent_id,
+            "handoff_id": self.handoff_id,
+            "conversation_continues": self.conversation_continues,
+            "delegation_id": self.delegation_id,
+            "delegation_status": self.delegation_status,
         }

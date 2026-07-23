@@ -82,7 +82,9 @@ export function TalkToCeo({ channel, focusSignal }: TalkToCeoProps) {
         {ch.turns.map((t) => (
           <div key={t.id} className={`turn turn--${t.role}`}>
             <div className="turn__meta">
-              <span className="turn__role">{t.role === 'ceo' ? 'CEO' : 'You'}</span>
+              <span className="turn__role">
+                {t.role === 'ceo' ? (t.agentId ?? 'ceo').toUpperCase() : 'You'}
+              </span>
               {t.kind !== 'message' && (
                 <span className="turn__kind">{t.kind.replace(/_/g, ' ')}</span>
               )}

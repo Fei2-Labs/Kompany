@@ -122,6 +122,9 @@ You should see the available commands, including the core set: `init`, `directiv
 | `CUSTOM_LLM_BASE_URL` | Custom OpenAI-compatible base URL | No |
 | `KOMPANY_DB_PATH` | SQLite database path | No (defaults to `./kompany.db`) |
 | `KOMPANY_CONFIG_PATH` | YAML config file path | No |
+| `KOMPANY_CREDENTIAL_BROKER_ENDPOINT` | Customer-operated credential broker URL (HTTPS, or loopback HTTP) | No |
+| `KOMPANY_CREDENTIAL_BROKER_TOKEN` | Broker bearer token; never exposed to agents | No |
+| `KOMPANY_CREDENTIAL_BROKER_TIMEOUT_SECONDS` | Broker request timeout (1–60 seconds) | No (defaults to `10`) |
 
 ### Company Config (YAML)
 

@@ -51,10 +51,36 @@ class FakeEngine:
         )
         self.script = list(script or [])
         self.directive_calls: list[tuple[str, str | None]] = []
+        self.cancelled_delegations = []
+        self.resumed_credential_tasks = []
+        self.delegation = SimpleNamespace(
+            id="d-1",
+            status=SimpleNamespace(value="active"),
+            children=[
+                SimpleNamespace(
+                    assigned_agent="cmo",
+                    status=SimpleNamespace(value="completed"),
+                    result={"cost": 0.02},
+                ),
+            ],
+        )
+        self.contexts = []
 
-    def process_directive(self, text, session_id=None):
+    def process_directive(self, text, session_id=None, context=None):
         self.directive_calls.append((text, session_id))
+        self.contexts.append(context)
         return self.script.pop(0)
+
+    def cancel_delegation(self, delegation_id):
+        self.cancelled_delegations.append(delegation_id)
+        return SimpleNamespace(status=SimpleNamespace(value="cancelled"))
+
+    def get_delegation(self, delegation_id):
+        return self.delegation if delegation_id == self.delegation.id else None
+
+    def resume_credential_task(self, task_id, action_id):
+        self.resumed_credential_tasks.append((task_id, action_id))
+        return self.delegation
 
 
 def _result(status, message, session_id):
@@ -64,6 +90,265 @@ def _result(status, message, session_id):
         message=message,
         session_id=session_id,
     )
+
+
+def test_delegation_progress_edits_status_and_sends_final_ceo_synthesis(tmp_path):
+    delegated = _result("delegated", "Background review started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo", "cfo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    update = _update(1, 111, "review performance and budget")
+    update["message"]["message_thread_id"] = 44
+    transport = FakeTransport([[update]])
+    worker = TelegramWorker(
+        FakeEngine(tmp_path, script=[delegated]),
+        transport=transport,
+    )
+
+    worker.poll_once()
+    worker.handle_delegation_event({
+        "delegation_id": "d-1",
+        "status": "active",
+        "completed_tasks": 1,
+        "total_tasks": 2,
+    })
+    worker.handle_delegation_event({
+        "delegation_id": "d-1",
+        "status": "completed",
+        "message": "Campaign is improving and budget remains on plan.",
+    })
+
+    edits = [
+        params for method, params in transport.calls
+        if method == "editMessageText"
+    ]
+    assert "Agents: CMO, CFO" in transport.sent[0]["text"]
+    assert edits[-1]["chat_id"] == "111"
+    assert edits[-1]["message_id"] == 1
+    assert "Completed" in edits[-1]["text"]
+    assert "Agents: CMO, CFO" in edits[-1]["text"]
+    assert len(transport.sent) == 2
+    assert transport.sent[-1]["text"].startswith("CEO · vinted")
+    assert "Campaign is improving" in transport.sent[-1]["text"]
+    assert transport.sent[-1]["message_thread_id"] == "44"
+
+
+def test_credential_action_edits_progress_and_resumes_original_task(tmp_path):
+    delegated = _result("delegated", "Background work started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    engine = FakeEngine(tmp_path, script=[delegated])
+    transport = FakeTransport([[_update(1, 111, "operate vinted")]])
+    worker = TelegramWorker(engine, transport=transport)
+    worker.poll_once()
+
+    worker.handle_credential_action_event({
+        "delegation_id": "d-1",
+        "task_id": "t-1",
+        "action": {
+            "id": "a-1",
+            "kind": "reauth",
+            "reason": "The Vinted browser session expired.",
+            "action_url": "https://broker.example/actions/a-1",
+        },
+    })
+
+    edit = [
+        params for method, params in transport.calls
+        if method == "editMessageText"
+    ][-1]
+    assert "Pending action: Re-authenticate" in edit["text"]
+    buttons = [
+        button
+        for row in edit["reply_markup"]["inline_keyboard"]
+        for button in row
+    ]
+    assert any(button.get("url") == "https://broker.example/actions/a-1"
+               for button in buttons)
+    retry = next(button for button in buttons if button["text"] == "Retry")
+
+    outcome = worker.handle_update({
+        "update_id": 2,
+        "callback_query": {
+            "id": "cb-credential",
+            "data": retry["callback_data"],
+            "message": {
+                "message_id": 1,
+                "chat": {"id": 111},
+            },
+        },
+    })
+
+    assert engine.resumed_credential_tasks == [("t-1", "a-1")]
+    assert outcome["status"] == "active"
+
+
+def test_credential_retry_rejects_other_sender_in_allowed_group(tmp_path):
+    delegated = _result("delegated", "Background work started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    update = _update(1, 111, "operate vinted")
+    update["message"]["from"] = {"id": 222}
+    engine = FakeEngine(tmp_path, script=[delegated])
+    transport = FakeTransport([[update]])
+    worker = TelegramWorker(engine, transport=transport)
+    worker.poll_once()
+    worker.handle_credential_action_event({
+        "delegation_id": "d-1",
+        "task_id": "t-1",
+        "action": {
+            "id": "a-1",
+            "kind": "reauth",
+            "reason": "Session expired",
+        },
+    })
+    edit = [
+        params for method, params in transport.calls
+        if method == "editMessageText"
+    ][-1]
+    retry = edit["reply_markup"]["inline_keyboard"][-1][0]
+
+    outcome = worker.handle_update({
+        "update_id": 2,
+        "callback_query": {
+            "id": "cb-credential",
+            "from": {"id": 333},
+            "data": retry["callback_data"],
+            "message": {
+                "message_id": 1,
+                "chat": {"id": 111},
+            },
+        },
+    })
+
+    assert outcome["reason"] == "delegation_context_mismatch"
+    assert engine.resumed_credential_tasks == []
+
+
+def test_delegation_status_exposes_working_cancel_control(tmp_path):
+    delegated = _result("delegated", "Background review started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    engine = FakeEngine(
+        tmp_path,
+        script=[delegated],
+    )
+    transport = FakeTransport([[_update(1, 111, "review campaign")]])
+    worker = TelegramWorker(engine, transport=transport)
+    worker.poll_once()
+
+    initial = transport.sent[0]
+    cancel_button = initial["reply_markup"]["inline_keyboard"][0][0]
+    buttons = [
+        button
+        for row in initial["reply_markup"]["inline_keyboard"]
+        for button in row
+    ]
+    outcome = worker.handle_update({
+        "update_id": 2,
+        "callback_query": {
+            "id": "callback-1",
+            "data": cancel_button["callback_data"],
+            "from": {"id": 222},
+            "message": {"chat": {"id": 111}, "message_id": 1},
+        },
+    })
+
+    assert cancel_button["text"] == "Cancel"
+    assert {button["text"] for button in buttons} == {
+        "Refresh",
+        "Details",
+        "Cancel",
+    }
+    assert engine.cancelled_delegations == ["d-1"]
+    assert outcome["status"] == "cancelled"
+    assert any(
+        method == "answerCallbackQuery"
+        for method, _params in transport.calls
+    )
+
+
+def test_delegation_cancel_rejects_callback_from_another_chat(tmp_path):
+    delegated = _result("delegated", "Background review started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    engine = FakeEngine(
+        tmp_path,
+        script=[delegated],
+        allowed="111,222",
+    )
+    transport = FakeTransport([[_update(1, 111, "review campaign")]])
+    worker = TelegramWorker(engine, transport=transport)
+    worker.poll_once()
+
+    outcome = worker.handle_update({
+        "update_id": 2,
+        "callback_query": {
+            "id": "callback-1",
+            "data": "delegation:cancel:d-1",
+            "from": {"id": 333},
+            "message": {"chat": {"id": 222}, "message_id": 9},
+        },
+    })
+
+    assert outcome == {
+        "status": "ignored",
+        "reason": "delegation_context_mismatch",
+    }
+    assert engine.cancelled_delegations == []
+
+
+def test_delegation_refresh_and_details_controls_project_current_state(tmp_path):
+    delegated = _result("delegated", "Background review started.", "s-delegated")
+    delegated.project_id = "vinted"
+    delegated.active_agent_id = "ceo"
+    delegated.agents_used = ["ceo", "cmo"]
+    delegated.conversation_continues = True
+    delegated.delegation_id = "d-1"
+    delegated.delegation_status = "queued"
+    engine = FakeEngine(tmp_path, script=[delegated])
+    transport = FakeTransport([[_update(1, 111, "review campaign")]])
+    worker = TelegramWorker(engine, transport=transport)
+    worker.poll_once()
+
+    for update_id, action in enumerate(("refresh", "details"), start=2):
+        outcome = worker.handle_update({
+            "update_id": update_id,
+            "callback_query": {
+                "id": f"callback-{update_id}",
+                "data": f"delegation:{action}:d-1",
+                "from": {"id": 222},
+                "message": {"chat": {"id": 111}, "message_id": 1},
+            },
+        })
+        assert outcome["status"] == "active"
+
+    assert any(
+        method == "editMessageText"
+        and "Tasks: 1/1" in params["text"]
+        for method, params in transport.calls
+    )
+    assert "CMO: completed" in transport.sent[-1]["text"]
+    assert "Cost: $0.02" in transport.sent[-1]["text"]
 
 
 def _update(update_id, chat_id, text):
@@ -92,6 +377,30 @@ def test_message_becomes_directive_and_reply(tmp_path):
     assert worker.offset == 2
 
 
+def test_message_passes_telegram_identity_context_to_engine(tmp_path):
+    engine = FakeEngine(tmp_path)
+    session = engine.channel.create_session()
+    engine.channel.update_session_state(session.id, SessionStatus.DISPATCHED)
+    engine.script = [_result("completed", "Done.", session.id)]
+    update = _update(1, 111, "review the campaign")
+    update["message"]["from"] = {"id": 222}
+    update["message"]["message_thread_id"] = 333
+    transport = FakeTransport([[update]])
+    worker = TelegramWorker(engine, transport=transport)
+
+    worker.poll_once()
+
+    context = engine.contexts[0]
+    assert context.channel == "telegram"
+    assert context.account_id == "default"
+    assert context.chat_id == "111"
+    assert context.thread_id == "333"
+    assert context.sender_id == "222"
+    assert context.project_id is None
+    assert context.active_agent_id is None
+    assert transport.sent[0]["message_thread_id"] == "333"
+
+
 def test_clarify_round_trip_keeps_session(tmp_path):
     engine = FakeEngine(tmp_path)
     session = engine.channel.create_session()
@@ -112,6 +421,94 @@ def test_clarify_round_trip_keeps_session(tmp_path):
     worker.poll_once()
     # Second message continued the SAME session.
     assert engine.directive_calls[1] == ("the cli tool", session.id)
+    assert ChannelSessionMapStore(engine.db).get("111") is None
+
+
+def test_specialist_reply_shows_handoff_header_and_keeps_session(tmp_path):
+    engine = FakeEngine(tmp_path)
+    session = engine.channel.create_session()
+    result = _result("completed", "Campaign reviewed.", session.id)
+    result.project_id = "Vinted"
+    result.active_agent_id = "cmo"
+    result.previous_agent_id = "ceo"
+    result.handoff_id = "handoff-1"
+    result.conversation_continues = True
+    engine.script = [result]
+    transport = FakeTransport([[_update(1, 111, "review campaign")]])
+    worker = TelegramWorker(engine, transport=transport)
+
+    worker.poll_once()
+
+    assert transport.sent[0]["text"].startswith(
+        "CEO → CMO\nCMO · Vinted\n\nCampaign reviewed."
+    )
+    assert ChannelSessionMapStore(engine.db).get("111") == session.id
+
+
+def test_threads_in_one_chat_continue_separate_sessions(tmp_path):
+    engine = FakeEngine(tmp_path)
+    first_session = engine.channel.create_session()
+    second_session = engine.channel.create_session()
+    engine.channel.update_session_state(
+        first_session.id,
+        SessionStatus.CLARIFYING,
+    )
+    engine.channel.update_session_state(
+        second_session.id,
+        SessionStatus.CLARIFYING,
+    )
+    engine.script = [
+        _result("clarify", "First question", first_session.id),
+        _result("clarify", "Second question", second_session.id),
+        _result("completed", "First done", first_session.id),
+    ]
+    first = _update(1, 111, "start first")
+    first["message"].update(
+        {"from": {"id": 222}, "message_thread_id": 10}
+    )
+    second = _update(2, 111, "start second")
+    second["message"].update(
+        {"from": {"id": 222}, "message_thread_id": 20}
+    )
+    first_reply = _update(3, 111, "answer first")
+    first_reply["message"].update(
+        {"from": {"id": 222}, "message_thread_id": 10}
+    )
+    worker = TelegramWorker(
+        engine,
+        transport=FakeTransport([[first], [second], [first_reply]]),
+    )
+
+    worker.poll_once()
+    worker.poll_once()
+    worker.poll_once()
+
+    assert engine.directive_calls == [
+        ("start first", None),
+        ("start second", None),
+        ("answer first", first_session.id),
+    ]
+
+
+def test_sender_aware_key_migrates_legacy_chat_mapping(tmp_path):
+    engine = FakeEngine(tmp_path)
+    session = engine.channel.create_session()
+    engine.channel.update_session_state(
+        session.id,
+        SessionStatus.CLARIFYING,
+    )
+    ChannelSessionMapStore(engine.db).set("111", session.id)
+    engine.script = [_result("completed", "Done.", session.id)]
+    update = _update(1, 111, "the cli tool")
+    update["message"]["from"] = {"id": 222}
+    worker = TelegramWorker(
+        engine,
+        transport=FakeTransport([[update]]),
+    )
+
+    worker.poll_once()
+
+    assert engine.directive_calls == [("the cli tool", session.id)]
     assert ChannelSessionMapStore(engine.db).get("111") is None
 
 
@@ -175,6 +572,25 @@ def test_go_flow_on_gated_session(tmp_path):
     # GO routed into the SAME gated session (engine's GO branch handles it).
     assert engine.directive_calls[1] == ("GO", session.id)
     assert "Executed." in transport.sent[1]["text"]
+
+
+def test_failed_go_keeps_retryable_gated_session_mapped(tmp_path):
+    engine = FakeEngine(tmp_path)
+    session = engine.channel.create_session()
+    engine.script = [
+        _result("gated", "Preview.", session.id),
+        _result("failed", "Execution failed; retry GO.", session.id),
+    ]
+    transport = FakeTransport(
+        [[_update(1, 111, "build it")], [_update(2, 111, "GO")]]
+    )
+    worker = TelegramWorker(engine, transport=transport)
+
+    worker.poll_once()
+    engine.channel.update_session_state(session.id, SessionStatus.GATED)
+    worker.poll_once()
+
+    assert ChannelSessionMapStore(engine.db).get("111") == session.id
 
 
 def test_stale_mapping_to_closed_session_resets(tmp_path):

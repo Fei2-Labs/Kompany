@@ -1,15 +1,15 @@
-"""Edge CDP browser tools for the agentic loop (06-16 P4).
+"""CDP browser tools for the agentic loop (06-16 P4).
 
-The founder's browser is driven over the Chrome DevTools Protocol against an
-already-running Edge instance exposing CDP at ``http://127.0.0.1:9223`` (the
-established Kompany pattern — reuse the logged-in profile, never spawn a fresh
-headless context). Python Playwright's ``connect_over_cdp`` attaches to it.
+The configured browser is driven over the Chrome DevTools Protocol against an
+already-running Chromium-based browser exposing a CDP endpoint. This lets
+Kompany reuse its logged-in profile. Python Playwright's ``connect_over_cdp``
+attaches to it.
 
 Design constraints:
 
 - ``playwright`` is an OPTIONAL dependency (``[browser]`` extra). Imports are
-  guarded; when Playwright or Edge-on-9223 is absent the tools degrade to a
-  clear observation and NEVER crash the loop.
+  guarded; when Playwright or the configured CDP browser is absent the tools
+  degrade to a clear observation and NEVER crash the loop.
 - A single reusable :class:`BrowserSession` is kept on the :class:`ToolContext`
   for the whole chat run and closed at the end (``close_browser_session``).
 - Classification: navigate / read / find / screenshot = ``READ`` (inline);
@@ -49,10 +49,9 @@ class BrowserSession:
 
     Two modes, tried in order:
 
-    1. **CDP attach** — if a browser is listening on :data:`CDP_ENDPOINT`
-       (the founder's Edge/Chrome with ``--remote-debugging-port=9223``),
+    1. **CDP attach** — if a browser is listening on :data:`CDP_ENDPOINT`,
        attach to it and reuse the logged-in profile. This is the preferred
-       mode on the founder's desktop where their real browser runs.
+       mode when a real browser is available to the backend.
     2. **Headless launch** — if no CDP endpoint responds, launch a headless
        Chromium. This is the mode on a VPS / server with no desktop browser.
        No login sessions, but full public-web browsing capability.
@@ -87,13 +86,13 @@ class BrowserSession:
             self._cleanup()
             return f"browser unavailable: playwright failed to start ({exc})."
 
-        # Try CDP attach first (founder's real browser with login sessions).
+        # Try CDP attach first so existing login sessions can be reused.
         try:
             self._browser = self._pw.chromium.connect_over_cdp(self.endpoint)
             self._connected = True
             self._is_headless = False
             return None
-        except Exception:  # noqa: BLE001 — no Edge on 9223, try headless
+        except Exception:  # noqa: BLE001 — CDP unavailable, try headless
             pass
 
         # Fall back to headless Chromium (VPS / no desktop browser).
@@ -121,7 +120,7 @@ class BrowserSession:
                 ctx = self._browser.new_context()
                 page = ctx.new_page()
             else:
-                # CDP: reuse the founder's existing context + page.
+                # CDP: reuse the configured browser's existing context + page.
                 contexts = self._browser.contexts
                 ctx = contexts[0] if contexts else self._browser.new_context()
                 pages = ctx.pages
@@ -137,7 +136,7 @@ class BrowserSession:
         self._cleanup()
 
     def _cleanup(self) -> None:
-        # CDP attach must NOT close the founder's Edge — only detach.
+        # CDP attach must NOT close the configured browser — only detach.
         # Headless launch: close the browser we created.
         try:
             if self._browser is not None:
@@ -293,8 +292,9 @@ def browser_navigate_tool() -> FunctionTool:
     return FunctionTool(
         name="browser_navigate",
         description=(
-            "Navigate the founder's logged-in Edge browser (via CDP) to a URL "
-            "and return the page title. Read-only navigation."
+            "Navigate the configured browser session to a URL and return the "
+            "page title. Uses the configured CDP browser when available; "
+            "otherwise it may use headless Chromium. Read-only navigation."
         ),
         parameters={
             "type": "object",
@@ -312,8 +312,8 @@ def browser_read_tool() -> FunctionTool:
     return FunctionTool(
         name="browser_read",
         description=(
-            "Read the visible text of the current page in the founder's Edge "
-            "browser. Read-only."
+            "Read the visible text of the current page in the configured "
+            "browser session. Read-only."
         ),
         parameters={"type": "object", "properties": {}},
         side_effect=SideEffect.READ,
@@ -344,9 +344,9 @@ def browser_click_tool() -> FunctionTool:
     return FunctionTool(
         name="browser_click",
         description=(
-            "Click an element (CSS 'target' selector) in the founder's "
-            "logged-in browser. SIDE EFFECT — operates real signed-in "
-            "accounts; routed to the founder for approval."
+            "Click an element (CSS 'target' selector) in the configured "
+            "browser session. SIDE EFFECT — may operate real signed-in "
+            "accounts; routed for approval."
         ),
         parameters={
             "type": "object",
@@ -365,8 +365,8 @@ def browser_type_tool() -> FunctionTool:
         name="browser_type",
         description=(
             "Type text into a form field (CSS 'target' selector) in the "
-            "founder's logged-in browser. SIDE EFFECT — operates real "
-            "signed-in accounts; routed to the founder for approval."
+            "configured browser session. SIDE EFFECT — may operate real "
+            "signed-in accounts; routed for approval."
         ),
         parameters={
             "type": "object",
@@ -400,7 +400,7 @@ def browser_screenshot_tool() -> FunctionTool:
 
 
 def browser_tools() -> list[FunctionTool]:
-    """All Edge-CDP browser tools (4 READ + 2 EXTERNAL_ACTION)."""
+    """All CDP browser tools (4 READ + 2 EXTERNAL_ACTION)."""
     return [
         browser_navigate_tool(),
         browser_read_tool(),
