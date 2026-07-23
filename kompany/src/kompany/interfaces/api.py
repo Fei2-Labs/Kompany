@@ -99,6 +99,7 @@ async def _stop_background_workers() -> None:
 # in-file route registration order; routers are imported after ``app`` and
 # the engine accessors exist, and resolve them lazily via api_parts.deps.
 from kompany.interfaces.api_parts import (  # noqa: E402
+    alerts as _alerts,
     channel as _channel,
     dashboard as _dashboard,
     integrations as _integrations,
@@ -125,6 +126,7 @@ _API_PART_MODULES = (
     _dashboard,
     _runtime,
     _projects,
+    _alerts,
     _system,
 )
 
