@@ -113,8 +113,37 @@ class AgentRegistry:
 
         factory = factories.get(role)
         if not factory:
-            raise ValueError(f"Unknown agent role: {role}")
+            # Pro / community AgentSoul fallback. Core ships 16 roles; any
+            # other role must resolve to a discovered ``AgentSoul`` plugin,
+            # wrapped in :class:`SoulAgent`. This keeps Core open for Pro
+            # additive roles without Pro needing to patch the registry.
+            soul = self._find_pro_soul(role)
+            if soul is None:
+                raise ValueError(f"Unknown agent role: {role}")
+            from kompany.agents.soul_agent import SoulAgent
+
+            return SoulAgent(
+                llm=self._llm,
+                settings=self._settings,
+                soul_source=soul,
+            )
         return factory()
+
+    def _find_pro_soul(self, role: str):
+        """Return the discovered ``AgentSoul`` whose ``role`` matches, or None.
+
+        Best-effort: a broken plugin scan must not block registry lookups
+        for the 16 Core roles (which never hit this path).
+        """
+        try:
+            from kompany.plugins.loader import registered
+
+            for soul in registered("soul"):
+                if getattr(soul, "role", None) == role:
+                    return soul
+        except Exception:  # noqa: BLE001
+            return None
+        return None
 
 
 # Squad membership map
