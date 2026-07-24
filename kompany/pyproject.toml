@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kompany"
-version = "0.1.1"
+version = "0.1.2"
 description = "Autonomous business operating system for solo founders"
 readme = "README.md"
 requires-python = ">=3.11"
