@@ -556,9 +556,12 @@ def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
         f"2. Read the engagement ledger (engaged.jsonl) and skip authors engaged in the last {anti_repeat} days.\n"
         f"3. Call {integration_id}.engage (comment) on up to {max_comments} on-theme posts — substantive, peer tone, no fabrication.\n"
         f"4. If a clearly on-topic, non-pitch, zero-fabrication original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
-        f"5. Call {integration_id}.metrics and record the snapshot in the journal.\n"
-        f"6. If any tool returns NOT_LOGGED_IN, stop and surface a system alert — do not retry.\n"
-        f"Every engage/post is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
+        f"5. If a {integration_id}.replies tool is available, call it and reply at most once per thread via "
+        f"{integration_id}.reply_to — only to substantive on-theme replies from a PREVIOUS cycle, never the same "
+        f"thread twice (anti-chat; log every reply to engaged.jsonl).\n"
+        f"6. Call {integration_id}.metrics and record the snapshot in the journal.\n"
+        f"7. If any tool returns NOT_LOGGED_IN, stop and surface a system alert — do not retry.\n"
+        f"Every engage/post/reply_to is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
     )
 
 

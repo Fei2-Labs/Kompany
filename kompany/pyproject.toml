@@ -81,3 +81,7 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "compat: release-blocking compatibility tests (wheel build/install, migration, concurrency) — run explicitly for release gating, e.g. `pytest -m compat`.",
+    "slow: builds a wheel and/or a scratch venv; skip with `-m 'not slow'` for a fast default run.",
+]
