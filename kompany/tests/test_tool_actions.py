@@ -190,6 +190,61 @@ def test_propose_approve_executes_with_credentials_and_audit(engine):
     assert _SendTool.calls == ["hello"]  # still exactly once
 
 
+def test_propose_auto_approves_when_policy_allows_no_approval(engine):
+    """Founder-tunable auto-approve (#4): a role+tool policy with
+    ``allowed=True, requires_approval=False`` skips the human tap —
+    ``propose_action`` files the card AND executes it inline through
+    the exact same approve pipeline, still fully audited."""
+    engine.credentials.set("custom_api_key", "k123")
+    engine.set_tool_policy("linkedin_growth", "test.send", allowed=True, requires_approval=False)
+
+    card = engine.propose_action(
+        "test.send",
+        {"text": "auto"},
+        summary="Send auto",
+        requested_by="linkedin_growth",
+    )
+
+    assert card["status"] == "approved"
+    assert card["tool_result"]["ok"] is True
+    assert _SendTool.calls == ["auto"]
+    types = [e["event_type"] for e in engine.audit.recent(50)]
+    assert "tool_action.proposed" in types
+    assert "approval.approved" in types
+    assert "tool_action.executed" in types
+
+
+def test_propose_stays_pending_when_policy_requires_approval(engine):
+    engine.set_tool_policy("linkedin_growth", "test.send", allowed=True, requires_approval=True)
+
+    card = engine.propose_action(
+        "test.send", {"text": "hi"}, summary="Send", requested_by="linkedin_growth"
+    )
+
+    assert card["status"] == "pending"
+    assert _SendTool.calls == []
+
+
+def test_propose_stays_pending_with_no_policy(engine):
+    card = engine.propose_action(
+        "test.send", {"text": "hi"}, summary="Send", requested_by="linkedin_growth"
+    )
+    assert card["status"] == "pending"
+    assert _SendTool.calls == []
+
+
+def test_propose_never_auto_approves_paid_tool_even_with_policy(engine):
+    """PAID hard gate: an auto-approve policy CANNOT unlock a SPEND
+    tool — same invariant as ``AutonomyGate.check_tool``."""
+    engine.set_tool_policy("linkedin_growth", "test.pay", allowed=True, requires_approval=False)
+
+    card = engine.propose_action(
+        "test.pay", {"text": "buy"}, summary="Pay", requested_by="linkedin_growth"
+    )
+
+    assert card["status"] == "pending"
+
+
 def test_reject_never_executes(engine):
     engine.credentials.set("custom_api_key", "k123")
     card = engine.propose_action("test.send", {"text": "no"}, summary="Send")

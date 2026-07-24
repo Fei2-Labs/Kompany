@@ -5,6 +5,7 @@ Extracted verbatim from core/engine.py (ADR-0003 split).
 
 from __future__ import annotations
 
+from typing import Any
 
 from kompany.state.credentials import CredentialVaultStore
 from kompany.state.models import ApprovalRequest, ApprovalStatus
@@ -409,6 +410,19 @@ class FounderSurfacesMixin:
         This is the founder's money/decision gate: nothing external
         happens without a yes. PAID actions are hard-gated here too —
         they can ONLY reach execution through this card.
+
+        Founder-tunable auto-approve (#4): if a ``tool_authorization``
+        policy exists for ``(requested_by, tool_name)`` with
+        ``allowed=True`` and ``requires_approval=False``, the card is
+        filed AND immediately auto-approved through the exact same
+        ``approve_request`` pipeline a human click would use — so the
+        founder still gets a full audit trail (visible in the inbox
+        history as approved by ``auto_approve_policy``), they just
+        don't have to tap it. Zero-cost READ/WRITE_LOCAL tools never
+        reach this path (they run inline via ``execute_tool``); any
+        real cost (SPEND or a non-zero estimate) is NEVER auto-approved
+        regardless of policy — same hard invariant as
+        ``AutonomyGate.check_tool``.
         """
         from kompany.core import tool_actions
         from kompany.state.models import ApprovalRequest
@@ -473,5 +487,35 @@ class FounderSurfacesMixin:
             directive_id=directive_id,
             project_id=project_id,
         )
+        if self._auto_approve_eligible(tool, payload, requested_by):
+            auto = self.approve_request(
+                request.id, approved_by="auto_approve_policy"
+            )
+            if auto is not None:
+                return auto
         return request.model_dump(mode="json")
+
+    def _auto_approve_eligible(
+        self, tool: Any, payload: dict, requested_by: str
+    ) -> bool:
+        """Founder-tunable auto-approve (#4) eligibility check.
+
+        Consults the same ``tool_authorization`` policy the founder
+        edits via ``kompany set-tool-policy`` / ``POST
+        /tools/policies`` — a role+tool row with ``allowed=True`` and
+        ``requires_approval=False`` means "run this inline, don't make
+        me click approve". Never eligible for SPEND tools or any
+        non-zero estimated/failed cost estimate, matching
+        ``AutonomyGate.check_tool``'s hard no-auto-pay invariant.
+        """
+        from kompany.plugins.contract import SideEffect
+
+        if tool.side_effect == SideEffect.SPEND:
+            return False
+        if payload.get("estimate_error"):
+            return False
+        if float(payload.get("estimated_cost_usd") or 0.0) > 0.0:
+            return False
+        policy = self.tool_authorization.get(requested_by, tool.name)
+        return bool(policy and policy.allowed and not policy.requires_approval)
 
