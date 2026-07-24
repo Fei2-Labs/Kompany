@@ -9,6 +9,31 @@ from fastapi.testclient import TestClient
 from kompany.interfaces.api import app
 
 
+def _iter_route_paths(routes) -> set[str]:
+    """Collect every route path, recursing into nested/included routers.
+
+    Newer FastAPI versions wrap ``include_router``-ed routes in an internal
+    nested-router object instead of flattening them directly onto
+    ``app.routes``, so a top-level scan for ``hasattr(r, "path")`` alone can
+    miss routes that are actually registered and dispatchable.
+    """
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            paths.add(path)
+        nested = getattr(route, "routes", None)
+        if nested:
+            paths |= _iter_route_paths(nested)
+        # FastAPI's newer ``_IncludedRouter`` wraps an ``include_router``-ed
+        # router instead of flattening its routes onto the parent, so
+        # descend into ``original_router.routes`` too.
+        original_router = getattr(route, "original_router", None)
+        if original_router is not None:
+            paths |= _iter_route_paths(getattr(original_router, "routes", ()))
+    return paths
+
+
 def test_events_endpoint_is_registered():
     """The ``/events`` route is registered as a SSE streaming endpoint.
 
@@ -17,8 +42,7 @@ def test_events_endpoint_is_registered():
     block reading it. The generator itself is exercised directly in
     :func:`test_sse_stream_serializes_envelopes`.
     """
-    routes = {r.path: r for r in app.routes if hasattr(r, "path")}
-    assert "/events" in routes
+    assert "/events" in _iter_route_paths(app.routes)
 
 
 def test_sse_stream_serializes_envelopes():

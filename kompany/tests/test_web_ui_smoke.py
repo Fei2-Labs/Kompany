@@ -97,7 +97,17 @@ async def test_audit_record_publishes_sse_event(tmp_path):
             await gen.aclose()
 
     task = asyncio.create_task(collect())
-    await asyncio.sleep(0)
+    # ``asyncio.wait_for(gen.__anext__(), ...)`` inside ``collect`` schedules
+    # an extra inner task, so the subscriber may not be registered after a
+    # single ``asyncio.sleep(0)`` tick (this varies across asyncio/pytest-
+    # asyncio versions). Poll until it's actually registered instead of
+    # assuming a fixed number of scheduler ticks.
+    for _ in range(50):
+        if hub.subscriber_count:
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("subscriber never registered on the event hub")
 
     audit.record(
         event_type="ui.test",
@@ -137,7 +147,15 @@ async def test_approvals_create_publishes_inbox_updated(tmp_path):
             await gen.aclose()
 
     task = asyncio.create_task(collect())
-    await asyncio.sleep(0)
+    # See the analogous comment in test_audit_record_publishes_sse_event:
+    # poll for actual subscriber registration rather than assuming a single
+    # scheduler tick suffices.
+    for _ in range(50):
+        if hub.subscriber_count:
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("subscriber never registered on the event hub")
 
     req = ApprovalRequest(
         action_type="test.approval",
