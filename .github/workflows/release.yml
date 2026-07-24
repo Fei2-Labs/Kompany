@@ -27,14 +27,17 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install package + dev deps
+        working-directory: kompany
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[api,mcp,dev]"
       - name: Run test suite (excluding distillation, see CI notes)
+        working-directory: kompany
         run: |
           pytest tests/ --ignore=tests/test_distillation.py -q
 
       - name: Run release-gating compat tests (wheel build/install, migration, concurrency)
+        working-directory: kompany
         run: |
           pytest -m compat -q
 
@@ -78,14 +81,17 @@ jobs:
           echo "Bumping ${CURRENT} -> ${NEW_VERSION} (${{ github.event.inputs.bump }})"
 
       - name: Update pyproject.toml version
+        working-directory: kompany
         run: |
           sed -i "s/^version = \".*\"/version = \"${{ steps.bump.outputs.version }}\"/" pyproject.toml
 
       - name: Build wheel + sdist
+        working-directory: kompany
         run: python -m build --wheel --sdist
 
       - name: Package ops/browser tarball (if present)
         id: ops
+        working-directory: kompany
         run: |
           if [ -d ops/browser ]; then
             tar -czf "dist/kompany-ops-browser-${{ steps.bump.outputs.version }}.tar.gz" -C ops browser
@@ -96,6 +102,7 @@ jobs:
           fi
 
       - name: Generate release manifest with checksums
+        working-directory: kompany
         run: |
           python - <<'PY'
           import hashlib
@@ -127,6 +134,7 @@ jobs:
           PY
 
       - name: Commit version bump
+        working-directory: kompany
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -143,6 +151,6 @@ jobs:
           name: "Kompany ${{ steps.bump.outputs.tag }}"
           generate_release_notes: true
           files: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/release-manifest.json
+            kompany/dist/*.whl
+            kompany/dist/*.tar.gz
+            kompany/dist/release-manifest.json
