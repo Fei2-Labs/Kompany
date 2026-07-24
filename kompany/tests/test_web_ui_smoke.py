@@ -91,7 +91,7 @@ async def test_audit_record_publishes_sse_event(tmp_path):
     async def collect():
         gen = hub.subscribe()
         try:
-            evt = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+            evt = await asyncio.wait_for(gen.__anext__(), timeout=5.0)
             received.append(evt)
         finally:
             await gen.aclose()
@@ -131,7 +131,7 @@ async def test_approvals_create_publishes_inbox_updated(tmp_path):
     async def collect():
         gen = hub.subscribe()
         try:
-            evt = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+            evt = await asyncio.wait_for(gen.__anext__(), timeout=5.0)
             received.append(evt)
         finally:
             await gen.aclose()

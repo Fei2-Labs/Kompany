@@ -564,7 +564,14 @@ def test_interactive_masked_prompt_reads_api_key_from_stdin(
 
 def test_cli_onboard_command_is_registered() -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["onboard", "--help"])
+    # Force a wide, non-interactive terminal: on some CI runners
+    # shutil.get_terminal_size() falls back to a very narrow width with no
+    # controlling tty, and Rich then wraps/truncates the options panel so a
+    # flag name can be split across lines — force COLUMNS wide enough that
+    # every flag renders on one line regardless of the runner environment.
+    result = runner.invoke(
+        app, ["onboard", "--help"], env={"COLUMNS": "200", "TERM": "dumb"}
+    )
     assert result.exit_code == 0
     # All five PRD-locked flags must be in the help output.
     for flag in ("--yes", "--provider", "--api-key", "--template", "--directive", "--data-dir"):
