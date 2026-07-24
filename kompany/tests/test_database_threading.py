@@ -49,3 +49,46 @@ def test_connection_usable_from_another_thread(tmp_path):
         "SELECT value FROM company_config WHERE key = 'thread_test'"
     ).fetchone()
     assert row["value"] == "ok"
+
+
+def test_concurrent_execute_does_not_corrupt_connection(tmp_path):
+    """Regression: concurrent db.execute() from many threads must not
+    corrupt the shared connection.
+
+    Before the RLock in Database.execute/commit, two threadpool workers
+    hitting the connection at once raised ``InterfaceError: bad
+    parameter or other API misuse`` and left the connection in a state
+    where every later call hung — which is why the remote settings page
+    only rendered the sections whose endpoints won the race (Telegram
+    worked, LLM model / founder profile spun forever).
+    """
+    db = Database(tmp_path)
+
+    errors: list[Exception] = []
+
+    def worker(i: int):
+        try:
+            for _ in range(20):
+                db.execute(
+                    "INSERT INTO company_config (key, value, updated_at) "
+                    "VALUES (?, ?, datetime('now'))",
+                    (f"k{i}_{_}", "v"),
+                )
+                db.commit()
+                db.execute(
+                    "SELECT value FROM company_config WHERE key = ?",
+                    (f"k{i}_{_}",),
+                ).fetchone()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent DB use raised: {errors}"
+    # Connection still usable after the storm.
+    row = db.execute("SELECT COUNT(*) AS n FROM company_config").fetchone()
+    assert row["n"] == 8 * 20

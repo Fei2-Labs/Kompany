@@ -94,6 +94,11 @@ def list_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
     """
     import openai
 
-    client = openai.OpenAI(api_key=api_key, base_url=base_url)
+    # Hard timeout: without one, a slow/hung provider /models endpoint
+    # blocks the FastAPI threadpool worker indefinitely and the whole
+    # settings page hangs on this single call. 5s is plenty for a
+    # metadata list; on timeout the settings UI shows the error inline
+    # instead of spinning forever.
+    client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=5.0)
     page = client.models.list()
     return [m.id for m in getattr(page, "data", []) if getattr(m, "id", None)]

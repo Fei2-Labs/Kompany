@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 from .database_parts.schema import _SCHEMA, _RUN_ID_TABLES
@@ -18,6 +19,15 @@ class Database:
         data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = data_dir / "kompany.db"
         self._conn: sqlite3.Connection | None = None
+        # check_same_thread=False lets FastAPI's threadpool reach the
+        # connection, but sqlite3.Connection is NOT internally
+        # thread-safe — concurrent execute/commit from two worker
+        # threads corrupts the connection state and raises
+        # InterfaceError: bad parameter or other API misuse, after
+        # which every subsequent call hangs (the settings page would
+        # load only the sections whose endpoints happened to win the
+        # race). This lock serializes all access.
+        self._lock = threading.RLock()
         self._init_schema()
         self._migrate()
 
@@ -53,12 +63,15 @@ class Database:
         self.conn.commit()
 
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        return self.conn.execute(sql, params)
+        with self._lock:
+            return self.conn.execute(sql, params)
 
     def commit(self) -> None:
-        self.conn.commit()
+        with self._lock:
+            self.conn.commit()
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None

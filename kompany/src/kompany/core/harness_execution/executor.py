@@ -50,11 +50,32 @@ def execute_harness_task(
     # Envelope guard BEFORE the run: the project budget is the hard
     # outer cap. Exhausted → park the task and propose a funding path
     # (top-up approval), never a terminal refusal (mission integrity).
+    #
+    # ``allow_envelope_overdraw`` (founder investment model): when ON,
+    # an exhausted envelope does NOT park the task — the task runs and
+    # token cost is booked to the ledger (treasury goes more negative),
+    # with the deficit expected to be offset by future revenue. The
+    # audit log records the overdraw so the founder sees the burn.
     remaining = float(engine.project_budget(project.id).get("remaining") or 0.0)
-    if remaining <= 0:
+    allow_overdraw = bool(getattr(engine.settings, "allow_envelope_overdraw", False))
+    if remaining <= 0 and not allow_overdraw:
         _park_for_envelope_topup(engine, task, project, cap)
         return
-    effective_cap = min(cap, remaining)
+    if remaining <= 0 and allow_overdraw:
+        engine.audit.record(
+            "task.envelope_overdraw",
+            "Task running with exhausted envelope (allow_envelope_overdraw=True)",
+            detail={
+                "task_id": task.id,
+                "title": task.title,
+                "task_cap_usd": cap,
+                "envelope_remaining": remaining,
+            },
+            agent_role=task.assigned_agent,
+            directive_id=project.triggers_directive_id,
+            project_id=project.id,
+        )
+    effective_cap = cap if allow_overdraw else min(cap, remaining)
 
     engine.projects.update_task_status(task.id, TaskStatus.ACTIVE)
     engine.agent_status.set(
