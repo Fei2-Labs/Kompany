@@ -119,3 +119,32 @@ def build_default_registry():
         reg.register(tool)
     reg.register(file_patch_tool())
     return reg
+
+
+def build_harness_registry(engine: Any) -> "ToolRegistry":
+    """Registry for the NativeRunner harness path.
+
+    Same as :func:`build_default_registry` (workspace + web + file_patch)
+    PLUS every registered ``kompany.integrations`` tool, wrapped in
+    :class:`IntegrationToolAdapter` so the model can call plugin tools
+    (``email.send``, ``linkedin.feed``, …) in-loop. READ plugin tools run
+    inline via ``engine.execute_tool``; side-effecting ones route to
+    ``engine.propose_action`` through the registry's gate — the same seam
+    ``build_chat_registry`` uses for the CEO chat path.
+
+    A broken integration degrades to fewer tools, never an exception that
+    blocks the harness loop (defensive — mirrors ``build_chat_registry``).
+    """
+    reg = build_default_registry()
+    try:
+        from kompany.core.agent_tools.chat_registry import IntegrationToolAdapter
+        from kompany.core import tool_actions
+
+        for entry in tool_actions.tool_registry(engine).values():
+            plugin_tool = entry.get("tool")
+            if plugin_tool is None:
+                continue
+            reg.register(IntegrationToolAdapter(plugin_tool))
+    except Exception:  # noqa: BLE001 — a broken integration can't block harness
+        pass
+    return reg

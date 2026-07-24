@@ -134,6 +134,7 @@ def select_runner(
     health_events: Any = None,
     permission_mode: str | None = None,
     llm_client: Any = None,
+    engine: Any = None,
 ) -> HarnessRunner | None:
     """Derive the loop vehicle from the active ModelSource (PRD D1).
 
@@ -153,6 +154,12 @@ def select_runner(
     wiring; selection is the one place that combines source + settings +
     runtime dependencies. Subscription kinds keep their CLIs (physical
     constraint: subscription compute is only reachable through them).
+
+    ``engine`` is threaded through so the NativeRunner can be constructed
+    with a harness registry that includes ``IntegrationToolAdapter``-
+    wrapped plugin tools (``linkedin.feed``, ``email.send``, …). Without
+    it the NativeRunner falls back to the workspace-only default registry
+    and the agent cannot call integration tools in-loop.
     """
     if settings is None:
         return None
@@ -200,7 +207,19 @@ def select_runner(
     if vehicle == "opencode":
         return OpencodeRunner(model=model)
     if vehicle == "native":
-        return NativeRunner(model=model, llm_client=llm_client)
+        registry = None
+        if engine is not None:
+            try:
+                from kompany.core.agent_tools.workspace_tools import (
+                    build_harness_registry,
+                )
+
+                registry = build_harness_registry(engine)
+            except Exception:  # noqa: BLE001 — degrade to default registry
+                registry = None
+        return NativeRunner(
+            model=model, llm_client=llm_client, engine=engine, registry=registry
+        )
     return None
 
 

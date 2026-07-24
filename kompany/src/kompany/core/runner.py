@@ -247,6 +247,7 @@ class ProjectRunner:
             getattr(self._engine, "settings", None),
             health_events=getattr(self._engine, "health_events", None),
             llm_client=getattr(self._engine, "llm", None),
+            engine=self._engine,
         )
         if runner is not None:
             execute_harness_task(self._engine, runner, task, project, result)
