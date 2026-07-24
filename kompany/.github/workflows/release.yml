@@ -1,0 +1,148 @@
+name: Release
+
+# Manually triggered only. We never auto-release on every push to main —
+# releases are a deliberate, human-initiated action (see plan.md Stage B/C).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run test suite (excluding distillation, see CI notes)
+        run: |
+          pytest tests/ --ignore=tests/test_distillation.py -q
+
+      - name: Run release-gating compat tests (wheel build/install, migration, concurrency)
+        run: |
+          pytest -m compat -q
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build hatchling
+
+      - name: Compute next version
+        id: bump
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$LAST_TAG" ]; then
+            CURRENT="0.1.0"
+          else
+            CURRENT="${LAST_TAG#v}"
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+          case "${{ github.event.inputs.bump }}" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
+          esac
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${CURRENT} -> ${NEW_VERSION} (${{ github.event.inputs.bump }})"
+
+      - name: Update pyproject.toml version
+        run: |
+          sed -i "s/^version = \".*\"/version = \"${{ steps.bump.outputs.version }}\"/" pyproject.toml
+
+      - name: Build wheel + sdist
+        run: python -m build --wheel --sdist
+
+      - name: Package ops/browser tarball (if present)
+        id: ops
+        run: |
+          if [ -d ops/browser ]; then
+            tar -czf "dist/kompany-ops-browser-${{ steps.bump.outputs.version }}.tar.gz" -C ops browser
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ops/browser not present yet — skipping ops tarball (see stage-b-migrate-browser-ops todo)"
+          fi
+
+      - name: Generate release manifest with checksums
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+
+          version = "${{ steps.bump.outputs.version }}"
+          commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
+
+          artifacts = {}
+          for name in sorted(os.listdir("dist")):
+              path = os.path.join("dist", name)
+              with open(path, "rb") as f:
+                  digest = hashlib.sha256(f.read()).hexdigest()
+              artifacts[name] = {"sha256": digest, "bytes": os.path.getsize(path)}
+
+          manifest = {
+              "version": version,
+              "commit": commit,
+              "built_at": subprocess.check_output(
+                  ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"]
+              ).decode().strip(),
+              "artifacts": artifacts,
+          }
+          with open("dist/release-manifest.json", "w") as f:
+              json.dump(manifest, f, indent=2)
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "Release ${{ steps.bump.outputs.tag }}"
+          git tag "${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: "Kompany ${{ steps.bump.outputs.tag }}"
+          generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/release-manifest.json
