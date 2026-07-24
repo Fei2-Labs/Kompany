@@ -235,6 +235,48 @@ def resume(
     console.print(Panel(f"State: {payload['state']}", title="Resume"))
 
 
+@app.command("drain")
+def drain(
+    reason: str = typer.Option("deployment", "--reason", "-r"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Begin a deployment drain (suspend + report initial drain status).
+
+    Poll ``kompany runtime drain-status`` until ``ready_for_restart`` is
+    true before restarting the process (Stage A deployment plan, step 6)."""
+    engine = _get_engine(config)
+    payload = engine.drain(reason=reason)
+    if as_json:
+        _emit_json(payload)
+        return
+    console.print(Panel(
+        f"State: {payload['state']}\n"
+        f"Active operations: {payload.get('active_operations')}\n"
+        f"Ready for restart: {payload.get('ready_for_restart')}",
+        title="Drain",
+    ))
+
+
+@app.command("drain-status")
+def drain_status(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Poll drain progress without changing runtime state."""
+    engine = _get_engine(config)
+    payload = engine.drain_status()
+    if as_json:
+        _emit_json(payload)
+        return
+    console.print(Panel(
+        f"State: {payload['state']}\n"
+        f"Active operations: {payload.get('active_operations')}\n"
+        f"Ready for restart: {payload.get('ready_for_restart')}",
+        title="Drain status",
+    ))
+
+
 @app.command("credentials")
 def credentials(
     config: str = typer.Option(None, "--config", "-c"),

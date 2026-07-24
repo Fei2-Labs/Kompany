@@ -27,6 +27,7 @@ from urllib import request as urlrequest
 from kompany.channels.context import DirectiveContext
 from kompany.core.event_hub import get_event_hub
 from kompany.core.credential_broker import CredentialActionRequired
+from kompany.core.drain import get_drain_registry
 from kompany.remote import request_from_telegram_update
 from kompany.state.channel_sessions_map import ChannelSessionMapStore
 from kompany.state.channel_progress import ChannelProgressStore
@@ -147,7 +148,21 @@ class TelegramWorker:
         return outcomes
 
     def handle_update(self, update: dict[str, Any]) -> dict[str, Any]:
-        """Authorize, replay-guard, route to the engine, reply."""
+        """Authorize, replay-guard, route to the engine, reply.
+
+        Drain tracking: wraps the whole handler (not just the
+        process_directive call) so the deployment plan's ready_for_restart
+        check waits for any in-flight Telegram message — including the
+        authorization/replay-guard bookkeeping and the reply send, not just
+        engine dispatch — before reporting the runtime drained. Rejection
+        of *new* directive work while suspended is already handled inside
+        ``process_directive`` (directive_flow.py); this tracker only counts
+        in-flight handling, it does not gate.
+        """
+        with get_drain_registry().track("channel_handler"):
+            return self._handle_update_inner(update)
+
+    def _handle_update_inner(self, update: dict[str, Any]) -> dict[str, Any]:
         callback = update.get("callback_query")
         if callback:
             return self._handle_callback(callback)

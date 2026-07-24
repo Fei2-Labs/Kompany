@@ -31,6 +31,7 @@ from kompany.core.harness_execution.outcomes import (
 from kompany.core.harness_execution.permission_gate import routing_args_for_task
 from kompany.core.harness_execution.selection import execution_caps, harness_model
 from kompany.core.run_context import current_run_id
+from kompany.core.drain import get_drain_registry
 from kompany.state.models import ApprovalRequest, Project, Task, TaskStatus
 
 # Approval action types created by this module.
@@ -113,18 +114,23 @@ def execute_harness_task(
         monitor = EventMonitor(engine.projects, task, project, max_turns)
 
         try:
-            if (
-                task.harness_session_id
-                and task.harness_vehicle == runner.vehicle_name
-            ):
-                run_result = runner.resume(
-                    task.harness_session_id, prompt, workspace, caps,
-                    on_event=monitor,
-                )
-            else:
-                run_result = runner.start(
-                    prompt, workspace, caps, on_event=monitor
-                )
+            # Drain tracking: this is the actual harness child process
+            # (claude/codex/native CLI subprocess) the deployment plan's
+            # ready_for_restart check waits on — wrap the real
+            # start/resume call, not the surrounding bookkeeping.
+            with get_drain_registry().track("harness_child"):
+                if (
+                    task.harness_session_id
+                    and task.harness_vehicle == runner.vehicle_name
+                ):
+                    run_result = runner.resume(
+                        task.harness_session_id, prompt, workspace, caps,
+                        on_event=monitor,
+                    )
+                else:
+                    run_result = runner.start(
+                        prompt, workspace, caps, on_event=monitor
+                    )
         except RunAbort as abort:
             # Turn-cap exit, not a failure: synthesize a result from what
             # streamed before the kill. Cost is non-authoritative (the

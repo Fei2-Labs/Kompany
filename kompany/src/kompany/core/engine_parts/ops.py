@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from kompany.core.event_hub import get_event_hub
+from kompany.core.drain import get_drain_registry
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.llm.cost_tracker import CostTracker
 from kompany.state.agent_status import AgentStatusStore
@@ -259,6 +260,32 @@ class EngineOpsMixin:
             detail={"previous_reason": current["reason"]},
         )
         return {**new_state, "status": "resumed"}
+
+    def drain(self, reason: str = "deployment") -> dict:
+        """Begin a deployment drain: suspends the runtime (rejecting new
+        task attempts, ticker/channel polling, and outward-lane dispatch —
+        the same gate ``suspend()`` already provides) and returns the
+        initial drain status. Distinguishing ``reason`` from a manual
+        founder suspend is cosmetic (audit/UI only) — the underlying
+        runtime state machine is intentionally the same one, so no
+        dispatch call site needs to learn a second state value.
+        """
+        result = self.suspend(reason=reason)
+        return {**result, **self.drain_status()}
+
+    def drain_status(self) -> dict:
+        """Combine the persisted suspended state with the live in-memory
+        active-operation counts (see ``core.drain``) into the
+        ``ready_for_restart`` signal the deployment plan's Stage A step 6
+        requires: true only once the runtime is suspended AND every
+        tracked category (task attempts, channel handlers, harness
+        children, connector calls) has drained to zero.
+        """
+        runtime = self.runtime.get()
+        registry = get_drain_registry()
+        active = registry.counts()
+        ready = runtime["state"] == "suspended" and registry.total() == 0
+        return {**runtime, "active_operations": active, "ready_for_restart": ready}
 
     def create_backup(self, label: str = "manual") -> dict:
         """Create a labeled SQLite snapshot of the live database."""

@@ -35,6 +35,7 @@ import logging
 from typing import Any
 
 from kompany.channels.outbox import OutboxStore
+from kompany.core.drain import get_drain_registry
 from kompany.core.outward_policy import MODE_AUTO, resolve_outward_mode
 from kompany.core.outward_preflight import run_preflight
 from kompany.core.run_context import run_scope
@@ -154,7 +155,10 @@ class OutwardLane:
     ) -> list[str]:
         row_id = row["id"]
         try:
-            outcome = executor.execute(dict(row)) or {}
+            # Drain tracking: this is the real "connector call" the
+            # deployment plan's ready_for_restart check waits on.
+            with get_drain_registry().track("connector_call"):
+                outcome = executor.execute(dict(row)) or {}
         except Exception as exc:  # noqa: BLE001 — executor failure is loud, not silent
             store.set_status(row_id, "failed")
             self._audit(

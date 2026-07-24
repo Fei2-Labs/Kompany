@@ -151,6 +151,31 @@ def runtime_resume() -> dict[str, Any]:
     return engine.resume()
 
 
+class DrainRequest(BaseModel):
+    reason: str = "deployment"
+
+
+@router.post("/runtime/drain")
+def runtime_drain(req: DrainRequest) -> dict[str, Any]:
+    """Begin a deployment drain (suspend + report initial drain status).
+
+    Stage A deployment plan, Stage A step 6: rejects new work immediately
+    (same suspend gate as ``/runtime/suspend``); poll ``GET /runtime/drain``
+    until ``ready_for_restart`` is true before restarting the process."""
+    engine = get_engine()
+    return engine.drain(reason=req.reason)
+
+
+@router.get("/runtime/drain")
+def runtime_drain_status() -> dict[str, Any]:
+    """Poll drain progress: persisted suspend state plus live in-flight
+    counts for task attempts, channel handlers, harness children, and
+    connector calls. ``ready_for_restart`` is true only when all are zero
+    and the runtime is suspended."""
+    engine = get_engine()
+    return engine.drain_status()
+
+
 class CreateBackupRequest(BaseModel):
     label: str = "manual"
 

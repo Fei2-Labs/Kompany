@@ -26,6 +26,7 @@ from typing import Any
 
 from kompany.core.run_context import run_scope
 from kompany.core.watchdog import LLMUnavailable
+from kompany.core.drain import get_drain_registry
 from kompany.state.models import TaskStatus
 
 log = logging.getLogger(__name__)
@@ -109,7 +110,15 @@ class LaneDispatcher:
         self, lane_id: str, project_id: str, item: dict[str, Any] | None
     ) -> list[str]:
         try:
-            with run_scope(parent=self._delegation_parent_run(project_id)):
+            # Drain tracking: this is the actual "task attempt" the
+            # deployment plan's ready_for_restart check waits on — wrap
+            # the real work, not the suspend-check branch above, so a
+            # deploy started mid-dispatch correctly waits for it to
+            # finish before reporting ready.
+            with (
+                get_drain_registry().track("task_attempt"),
+                run_scope(parent=self._delegation_parent_run(project_id)),
+            ):
                 task_id = self._run_one_pending(project_id)
         except LLMUnavailable as exc:
             # ADR-0005 hard rule: model unavailable is a FAILURE, never a
