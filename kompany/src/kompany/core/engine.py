@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -139,6 +140,8 @@ from kompany.core.engine_parts import (
     DirectiveHandlersMixin,
 )
 
+log = logging.getLogger(__name__)
+
 
 class KompanyEngine(
     AgenticChatMixin,
@@ -268,6 +271,7 @@ class KompanyEngine(
             # try/except so a transient ledger error never breaks the
             # tick — see ``Watchdog._scan_runway`` for the contract.
             runway_provider=self._runway_snapshot,
+            agent_status=self.agent_status,
         )
 
         # Daemon tick loop (06-12-daemon-tick-loop PR1): the autonomous
@@ -547,7 +551,20 @@ class KompanyEngine(
         self.suspend("quota_exhausted")
 
     async def start(self) -> None:
-        """Start engine background workers (watchdog + ticker + channels)."""
+        """Start engine background workers (watchdog + ticker + channels).
+
+        Runs one-shot startup reconciliation first (Stage A deployment
+        plan: session-persistence gap) — this is the real daemon boot
+        entry point, called exactly once per process lifetime, unlike a
+        one-shot CLI ``KompanyEngine()`` construction that may run
+        alongside an already-live daemon. Any task still ``active``/
+        ``in_progress`` or ``agent_status`` row still ``working`` at this
+        exact moment is provably orphaned from a previous process.
+        """
+        try:
+            self.watchdog.reconcile_on_startup()
+        except Exception:  # noqa: BLE001 — a reconciliation bug must never block boot
+            log.exception("watchdog.reconcile_on_startup failed")
         self.watchdog.start()
         self.ticker.start()
         if self.telegram_worker is not None:

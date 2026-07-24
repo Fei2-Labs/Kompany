@@ -327,3 +327,147 @@ def test_llm_call_without_watchdog_keeps_legacy_behavior(tmp_path):
     client._call_anthropic = _llm_ok
     resp = client.call("claude-sonnet-4-20250514", "s", "p")
     assert resp.text == "ok"
+
+
+# ----------------------------------------------------------------------
+# Startup reconciliation (Stage A deployment plan: session-persistence)
+# ----------------------------------------------------------------------
+
+
+def _make_world_with_agent_status(tmp_path, stale_seconds=600):
+    from kompany.state.agent_status import AgentStatusStore
+
+    db = Database(tmp_path)
+    audit = AuditLog(db)
+    projects = Projects(db)
+    health = HealthEvents(db)
+    agent_status = AgentStatusStore(db)
+    watchdog = Watchdog(
+        health_events=health,
+        projects=projects,
+        audit=audit,
+        scan_interval_seconds=1,
+        stale_threshold_seconds=stale_seconds,
+        agent_status=agent_status,
+    )
+    return {
+        "db": db,
+        "audit": audit,
+        "projects": projects,
+        "health": health,
+        "agent_status": agent_status,
+        "watchdog": watchdog,
+    }
+
+
+def _seed_fresh_active_task(world, task_id="t1", project_id="p1"):
+    """A task that was updated just now — NOT stale by any threshold.
+
+    ``scan_once`` would never touch this (its staleness window hasn't
+    elapsed), but ``reconcile_on_startup`` must catch it anyway: the
+    process is only now booting, so nothing could possibly still be
+    running it.
+    """
+    projects = world["projects"]
+    projects.create(Project(
+        id=project_id, name="P", type=ProjectType.OPERATIONAL,
+        assigned_agents=["coo"],
+    ))
+    projects.create_task(Task(
+        id=task_id, project_id=project_id, title="Do stuff",
+        assigned_agent="coo", status=TaskStatus.ACTIVE,
+    ))
+
+
+def test_reconcile_on_startup_strands_fresh_active_task(tmp_path):
+    w = _make_world_with_agent_status(tmp_path, stale_seconds=600)
+    _seed_fresh_active_task(w)
+
+    # Confirm scan_once alone would NOT catch this (proves the two
+    # mechanisms are complementary, not redundant): the task was just
+    # created, so it isn't past the staleness threshold yet.
+    assert w["watchdog"].scan_once() == []
+
+    result = w["watchdog"].reconcile_on_startup()
+
+    assert len(result["stranded_tasks"]) == 1
+    assert result["stranded_tasks"][0]["task_id"] == "t1"
+    row = w["db"].execute(
+        "SELECT status FROM tasks WHERE id = ?", ("t1",)
+    ).fetchone()
+    assert row["status"] == "stranded_in_progress"
+
+
+def test_reconcile_on_startup_skips_snoozed_task(tmp_path):
+    w = _make_world_with_agent_status(tmp_path)
+    _seed_fresh_active_task(w)
+    event = w["health"].record(
+        kind="stranded_in_progress", task_id="t1", project_id="p1", detail={},
+    )
+    w["health"].resolve(event["id"], action="snooze", snooze_minutes=60)
+
+    result = w["watchdog"].reconcile_on_startup()
+
+    assert result["stranded_tasks"] == []
+    row = w["db"].execute(
+        "SELECT status FROM tasks WHERE id = ?", ("t1",)
+    ).fetchone()
+    assert row["status"] == TaskStatus.ACTIVE.value
+
+
+def test_reconcile_on_startup_resets_stale_agent_status(tmp_path):
+    w = _make_world_with_agent_status(tmp_path)
+    w["agent_status"].set("ceo", "working", "Some task", project_id="p1")
+    w["agent_status"].set("builder", "thinking", None)
+    w["agent_status"].set("cmo", "idle", None)  # already idle — untouched
+
+    result = w["watchdog"].reconcile_on_startup()
+
+    reset_roles = {row["agent_role"] for row in result["reset_agents"]}
+    assert reset_roles == {"ceo", "builder"}
+
+    ceo = w["agent_status"].get("ceo")
+    assert ceo["status"] == "idle"
+    assert ceo["current_task"] is None
+    builder = w["agent_status"].get("builder")
+    assert builder["status"] == "idle"
+
+    types = [e["event_type"] for e in w["audit"].recent(limit=10)]
+    assert "agent_status.startup_reset" in types
+
+
+def test_reconcile_on_startup_noop_when_nothing_to_reconcile(tmp_path):
+    w = _make_world_with_agent_status(tmp_path)
+    result = w["watchdog"].reconcile_on_startup()
+    assert result == {"stranded_tasks": [], "reset_agents": []}
+
+
+def test_reconcile_on_startup_without_agent_status_store_is_safe(tmp_path):
+    """Legacy construction path (no ``agent_status=``) must not crash —
+    it simply skips the agent-status half of reconciliation."""
+    db = Database(tmp_path)
+    audit = AuditLog(db)
+    projects = Projects(db)
+    health = HealthEvents(db)
+    watchdog = Watchdog(
+        health_events=health, projects=projects, audit=audit,
+    )
+    result = watchdog.reconcile_on_startup()
+    assert result == {"stranded_tasks": [], "reset_agents": []}
+
+
+def test_list_active_tasks_ignores_updated_at(tmp_path):
+    projects = Projects(Database(tmp_path))
+    projects.create(Project(
+        id="p1", name="P", type=ProjectType.OPERATIONAL, assigned_agents=["coo"],
+    ))
+    projects.create_task(Task(
+        id="t1", project_id="p1", title="Do stuff",
+        assigned_agent="coo", status=TaskStatus.ACTIVE,
+    ))
+    projects.create_task(Task(
+        id="t2", project_id="p1", title="Done already",
+        assigned_agent="coo", status=TaskStatus.COMPLETED,
+    ))
+    active = projects.list_active_tasks()
+    assert [t.id for t in active] == ["t1"]

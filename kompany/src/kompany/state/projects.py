@@ -258,6 +258,21 @@ class Projects:
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
 
+    def list_active_tasks(self) -> list[Task]:
+        """Return every ``active``/``in_progress`` task unconditionally.
+
+        Unlike :meth:`list_stale_in_progress`, this ignores ``updated_at``
+        entirely — it is used for one-shot startup reconciliation
+        (``Watchdog.reconcile_on_startup``), where the fact that the
+        process is only now booting proves every such row is orphaned
+        from a previous process's crash/kill, regardless of how recently
+        it was last touched.
+        """
+        rows = self.db.execute(
+            "SELECT * FROM tasks WHERE status IN ('active', 'in_progress')"
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
     def _row_to_task(self, row) -> Task:
         return Task(
             id=row["id"],

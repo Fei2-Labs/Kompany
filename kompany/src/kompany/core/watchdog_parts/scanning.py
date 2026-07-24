@@ -16,6 +16,7 @@ from kompany.core.watchdog_parts.constants import (
     KIND_RUNWAY_ALERT,
     KIND_STRANDED_IN_PROGRESS,
 )
+from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.health_events import HealthEvents
 from kompany.state.projects import Projects
@@ -29,6 +30,7 @@ class ScanningMixin:
     Expects the host class to expose:
     - ``self.health_events: HealthEvents``
     - ``self.projects: Projects``
+    - ``self.agent_status: AgentStatusStore``
     - ``self.approvals: ApprovalRequests | None``
     - ``self.runway_provider: Callable | None``
     - ``self.scan_interval_seconds: int``
@@ -40,6 +42,7 @@ class ScanningMixin:
 
     health_events: HealthEvents
     projects: Projects
+    agent_status: "AgentStatusStore | None"
     approvals: "ApprovalRequests | None"
     runway_provider: "Callable[[], dict[str, Any] | None] | None"
     scan_interval_seconds: int
@@ -49,6 +52,75 @@ class ScanningMixin:
     # ------------------------------------------------------------------
     # Scanner — proactive sweep
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Startup reconciliation (Stage A deployment plan: session-persistence)
+    # ------------------------------------------------------------------
+
+    def reconcile_on_startup(self) -> dict[str, Any]:
+        """One-shot reconciliation for a fresh process boot.
+
+        Unlike the periodic ``scan_once`` sweep (staleness-threshold
+        based, meant to catch a task an *already-running* process
+        silently dropped), this runs exactly once when the daemon
+        actually starts. At that moment nothing in the new process has
+        executed a single tool call yet, so ANY task still marked
+        ``active``/``in_progress`` and ANY ``agent_status`` row still
+        showing ``working``/``thinking``/``dispatching`` is provably
+        orphaned from a previous process that crashed, was killed, or
+        was hard-restarted without a clean drain/suspend. Call this from
+        the engine's real daemon entry point (``Engine.start()``), never
+        from a one-shot CLI ``KompanyEngine()`` construction — CLI
+        commands run alongside a live daemon and must not stomp on its
+        genuinely active work.
+        """
+        stranded: list[dict[str, Any]] = []
+        for task in self.projects.list_active_tasks():
+            existing = self.health_events.find_active_snoozed(
+                kind=KIND_STRANDED_IN_PROGRESS,
+                task_id=task.id,
+            )
+            if existing is not None:
+                continue
+            try:
+                self.projects.update_task_status_raw(
+                    task_id=task.id,
+                    status=KIND_STRANDED_IN_PROGRESS,
+                )
+            except Exception as exc:  # defensive — db errors don't kill boot
+                log.warning(
+                    "watchdog startup reconciliation: failed to mark task %s stranded: %s",
+                    task.id,
+                    exc,
+                )
+                continue
+            event = self.record_stranded_in_progress(  # type: ignore[attr-defined]
+                task_id=task.id,
+                project_id=task.project_id,
+                detail={
+                    "title": task.title,
+                    "assigned_agent": task.assigned_agent,
+                    "reason": "startup_reconciliation",
+                },
+            )
+            stranded.append(event)
+
+        reset_agents: list[dict[str, Any]] = []
+        if self.agent_status is not None:
+            reset_agents = self.agent_status.reset_all_working_to_idle()
+        if reset_agents:
+            try:
+                self.audit.record(
+                    "agent_status.startup_reset",
+                    f"Reset {len(reset_agents)} stale agent_status row(s) to idle on boot",
+                    detail={
+                        "agents": [row["agent_role"] for row in reset_agents],
+                    },
+                )
+            except Exception:  # noqa: BLE001 — audit mirror is best-effort
+                log.debug("watchdog: audit mirror for agent_status reset failed", exc_info=True)
+
+        return {"stranded_tasks": stranded, "reset_agents": reset_agents}
 
     def scan_once(self) -> list[dict[str, Any]]:
         """One stranded-task sweep. Returns the events written this pass.

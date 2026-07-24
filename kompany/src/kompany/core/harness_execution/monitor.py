@@ -40,6 +40,7 @@ class EventMonitor:
         max_turns: int,
         hub: Any = None,
         clock: Any = time.monotonic,
+        vehicle: str | None = None,
     ) -> None:
         self._projects = projects
         self._task = task
@@ -47,6 +48,7 @@ class EventMonitor:
         self._max_turns = max_turns
         self._hub = hub if hub is not None else get_event_hub()
         self._clock = clock
+        self._vehicle = vehicle
         self._last_touch: float | None = None
         self.turns = 0
         self.tool_events = 0
@@ -58,6 +60,7 @@ class EventMonitor:
             sid = event.payload.get("session_id")
             if sid:
                 self.session_id = str(sid)
+                self._persist_session_id()
         elif event.kind == "turn":
             self.turns += 1
         elif event.kind == "tool_use":
@@ -101,6 +104,30 @@ class EventMonitor:
         try:
             self._projects.touch_task(self._task.id)
         except Exception:  # noqa: BLE001 — a touch miss must not kill the run
+            pass
+
+    def _persist_session_id(self) -> None:
+        """Write the vehicle session id to SQLite as soon as it is known.
+
+        Stage A deployment plan (session-persistence gap): previously the
+        task row was only updated with ``set_task_harness_session`` after
+        the *entire* run finished (``execute_harness_task``'s post-run
+        book-keeping). A crash, kill, or hard process restart mid-run lost
+        the session id entirely — the next attempt fell back to
+        ``runner.start()`` instead of ``runner.resume()``, silently
+        dropping the in-progress harness conversation/context. Persisting
+        immediately on ``session_started`` closes that window; the
+        post-run write in executor.py stays as a harmless idempotent
+        no-op re-write (covers vehicles/paths where no explicit
+        ``session_started`` event is emitted, e.g. some resume flows).
+        """
+        if not self._vehicle:
+            return
+        try:
+            self._projects.set_task_harness_session(
+                self._task.id, self.session_id, self._vehicle
+            )
+        except Exception:  # noqa: BLE001 — best-effort; post-run write still covers it
             pass
 
     @staticmethod

@@ -55,6 +55,7 @@ from kompany.core.watchdog_parts.constants import (
 )
 from kompany.core.watchdog_parts.recording import RecordingMixin
 from kompany.core.watchdog_parts.scanning import ScanningMixin
+from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.audit import AuditLog
 from kompany.state.health_events import HealthEvents
@@ -76,10 +77,16 @@ class Watchdog(RecordingMixin, ScanningMixin):
         clock: Callable[[], float] | None = None,
         approvals: ApprovalRequests | None = None,
         runway_provider: Callable[[], dict[str, Any] | None] | None = None,
+        agent_status: AgentStatusStore | None = None,
     ):
         self.health_events = health_events
         self.projects = projects
         self.audit = audit
+        # ``agent_status`` is optional so legacy tests that construct a
+        # watchdog without it keep working; ``reconcile_on_startup`` is
+        # the only caller and simply skips the agent-status reset when
+        # it is None.
+        self.agent_status = agent_status
         # Approvals is optional so legacy tests that construct a watchdog
         # without an approvals store keep working. The snooze scanner
         # silently no-ops when ``approvals`` is None.

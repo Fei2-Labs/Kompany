@@ -418,12 +418,16 @@ class FakeHub:
 class FakeProjects:
     def __init__(self):
         self.touches: list[str] = []
+        self.session_writes: list[tuple[str, str, str]] = []
 
     def touch_task(self, task_id):
         self.touches.append(task_id)
 
+    def set_task_harness_session(self, task_id, session_id, vehicle):
+        self.session_writes.append((task_id, session_id, vehicle))
 
-def _monitor(max_turns=50, clock=None):
+
+def _monitor(max_turns=50, clock=None, vehicle=None):
     hub = FakeHub()
     projects = FakeProjects()
     task = Task(project_id="p1", title="t", assigned_agent="builder")
@@ -432,6 +436,7 @@ def _monitor(max_turns=50, clock=None):
     monitor = EventMonitor(
         projects, task, project, max_turns,
         hub=hub, clock=clock or (lambda: times["now"]),
+        vehicle=vehicle,
     )
     return monitor, hub, projects, times, task
 
@@ -452,6 +457,34 @@ def test_events_republished_with_activity_kind_harness():
     assert hub.published[2][1]["summary"] == "Write"
     assert monitor.session_id == "s9"
     assert monitor.tool_events == 1
+
+
+def test_session_started_persists_immediately_when_vehicle_given():
+    # Stage A session-persistence gap: previously the session id was only
+    # written to SQLite after the entire run finished. A crash mid-run
+    # lost it, forcing the next attempt to runner.start() instead of
+    # runner.resume(). EventMonitor must now write it the moment the
+    # vehicle reports session_started, not at the end of the run.
+    monitor, _hub, projects, _times, task = _monitor(vehicle="claude_code")
+    assert projects.session_writes == []
+
+    monitor(HarnessEvent(kind="session_started", payload={"session_id": "sess-live"}))
+
+    assert projects.session_writes == [(task.id, "sess-live", "claude_code")]
+
+    # A second session_started (e.g. reconnection) re-persists — harmless
+    # idempotent overwrite of the same task row.
+    monitor(HarnessEvent(kind="session_started", payload={"session_id": "sess-live-2"}))
+    assert projects.session_writes[-1] == (task.id, "sess-live-2", "claude_code")
+
+
+def test_session_started_no_write_without_vehicle():
+    # Back-compat: callers that don't pass vehicle= (or old callers before
+    # this change) must not crash — persistence is simply skipped.
+    monitor, _hub, projects, _times, _task = _monitor(vehicle=None)
+    monitor(HarnessEvent(kind="session_started", payload={"session_id": "s1"}))
+    assert projects.session_writes == []
+    assert monitor.session_id == "s1"
 
 
 def test_task_touch_is_throttled_to_ten_seconds():
@@ -563,6 +596,33 @@ def test_vehicle_mismatch_starts_fresh_instead_of_resume(tmp_path):
     )
     assert len(runner.start_calls) == 1
     assert runner.resume_calls == []
+
+
+def test_session_id_persisted_mid_run_before_result_returns(tmp_path):
+    # Stage A session-persistence gap: the vehicle's session_started event
+    # must land in SQLite the moment it streams, not only after start()/
+    # resume() returns. Simulate a run that streams session_started and
+    # THEN aborts (e.g. process kill mid-turn) — the session id must
+    # already be durable so a restart can resume() instead of start()ing
+    # a brand-new, context-less session.
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project)
+    runner = FakeRunner(
+        events=[("session_started", {"session_id": "sess-mid-run"})],
+        result=HarnessResult(final_text="", session_id=None, exit_status="error"),
+        vehicle="claude_code",
+    )
+    execute_harness_task(
+        engine, runner, task, project, ProjectRunResult(project_id=project.id)
+    )
+
+    row = engine.projects.list_tasks(project.id)[0]
+    # Persisted from the mid-run event, even though the final HarnessResult
+    # itself carried no session_id (simulating a crash/abort before the
+    # vehicle's own summary line arrived).
+    assert row.harness_session_id == "sess-mid-run"
+    assert row.harness_vehicle == "claude_code"
 
 
 def test_budget_exceeded_pauses_to_pending_with_approval(tmp_path):

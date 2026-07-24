@@ -111,7 +111,9 @@ def execute_harness_task(
                 engine.settings, runner.vehicle_name, task, project
             ),
         )
-        monitor = EventMonitor(engine.projects, task, project, max_turns)
+        monitor = EventMonitor(
+            engine.projects, task, project, max_turns, vehicle=runner.vehicle_name
+        )
 
         try:
             # Drain tracking: this is the actual harness child process

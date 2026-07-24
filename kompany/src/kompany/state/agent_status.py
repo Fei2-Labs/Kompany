@@ -63,6 +63,31 @@ class AgentStatusStore:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def reset_all_working_to_idle(self) -> list[dict]:
+        """One-shot startup reconciliation: flip every non-idle row to
+        ``idle`` and clear ``current_task``.
+
+        A process crash/kill leaves ``agent_status`` rows showing
+        ``working``/``thinking``/``dispatching`` for agents that are not
+        actually running anything in the *new* process — there is no
+        heartbeat/liveness signal on this table (see module docstring),
+        so nothing else corrects it until the agent happens to be
+        dispatched again. Returns the rows that were changed, for audit
+        logging by the caller.
+        """
+        rows = self.db.execute(
+            "SELECT * FROM agent_status WHERE status != 'idle'",
+        ).fetchall()
+        changed = [dict(row) for row in rows]
+        if changed:
+            self.db.execute(
+                """UPDATE agent_status SET status = 'idle', current_task = NULL,
+                       updated_at = datetime('now')
+                   WHERE status != 'idle'""",
+            )
+            self.db.commit()
+        return changed
+
     @staticmethod
     def _emit(
         agent_role: str,
