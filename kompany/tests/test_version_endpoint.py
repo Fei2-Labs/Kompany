@@ -34,12 +34,18 @@ def client() -> TestClient:
 
 
 def test_version_endpoint_returns_build_info(client: TestClient) -> None:
+    import kompany
+
     res = client.get("/version")
     assert res.status_code == 200
     body = res.json()
     assert set(body.keys()) == {"version", "commit", "git_describe"}
+    # kompany.__version__ resolves dynamically from installed package
+    # metadata (see kompany/__init__.py) — assert parity with it rather
+    # than a hardcoded literal, which silently goes stale every release
+    # since release.yml only bumps pyproject.toml, not a test fixture.
+    assert body["version"] == kompany.__version__
     # Running tests from a git checkout → commit resolves to a real short sha.
-    assert body["version"] == "0.1.0"
     assert body["commit"] != "unknown"
     assert len(body["commit"]) >= 7
 
