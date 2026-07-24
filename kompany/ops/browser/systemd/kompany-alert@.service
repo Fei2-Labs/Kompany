@@ -1,0 +1,12 @@
+[Unit]
+Description=File Kompany alert for %i
+# Do not cascade — if this unit itself fails, do not trigger another alert.
+StopFailureIsolation=yes
+
+[Service]
+Type=oneshot
+User=kosonen
+Environment=KOMPANY_ENGINE_URL=http://127.0.0.1:55352
+ExecStart=/home/kosonen/kompany-browser/send-alert.sh %i
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,20 @@
+[Unit]
+Description=Kompany browser for %i
+After=xvfb.service
+Requires=xvfb.service
+# On failure, file an alert. %i = integration name -> source "browser-<name>".
+OnFailure=kompany-alert@browser-%i.service
+
+[Service]
+Type=simple
+User=kosonen
+Group=kosonen
+Environment=DISPLAY=:99
+ExecStart=/home/kosonen/kompany-browser/start-browser.sh %i
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

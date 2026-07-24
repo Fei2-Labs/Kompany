@@ -1,0 +1,12 @@
+[Unit]
+Description=Xvfb virtual display :99
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1200x24
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
