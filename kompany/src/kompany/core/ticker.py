@@ -93,6 +93,7 @@ class Ticker:
         # Ordered tick steps — PRD 3/4 persona intents extend this list.
         self.actions: list[tuple[str, Callable[[], list[str]]]] = [
             ("heartbeat", self._action_heartbeat),
+            ("soul_cycles", self._action_soul_cycles),
             ("advance", self._action_advance),
             ("housekeeping", self._action_housekeeping),
         ]
@@ -225,6 +226,67 @@ class Ticker:
             actions.append("no_work")
         return actions
 
+    def _action_soul_cycles(self) -> list[str]:
+        """File recurring cycle tasks for souls that declare ``cycle_cadence``.
+
+        Scans discovered ``AgentSoul`` plugins for a ``cycle_cadence`` block
+        in their YAML. For each soul whose ``hours_local`` (or legacy
+        ``hours_cet``) contains the current Stockholm-local hour, finds the
+        active project whose name contains ``project_name_substring`` and —
+        if no pending cycle task for that role already exists in it — files
+        one. The task is then picked up by ``_action_advance`` like any
+        other pending task.
+
+        This is the single authoritative external-action scheduler (e.g.
+        LinkedIn growth cycles): a soul's YAML declares its own cadence, so
+        no separate systemd timer / cron process should also drive the same
+        integration — that duplicates external actions (posts, comments).
+
+        Idempotent within an hour: a second tick in the same local hour
+        will see the just-filed task still pending and skip. Recurrence
+        across days falls out of "task completes → next day's hour hits →
+        new task filed" — no recurring-task model needed.
+
+        Best-effort: a broken soul YAML or missing project is logged and
+        skipped, never fatal to the tick.
+        """
+        actions: list[str] = []
+        try:
+            from kompany.plugins.loader import registered
+
+            souls = registered("soul")
+        except Exception:  # noqa: BLE001
+            return actions
+        local_hour = _current_local_hour()
+        if local_hour is None:
+            return actions
+        for soul in souls:
+            try:
+                cadence = _soul_cycle_cadence(soul)
+            except Exception:  # noqa: BLE001
+                continue
+            if not cadence:
+                continue
+            hours = cadence.get("hours_local") or cadence.get("hours_cet") or []
+            if local_hour not in hours:
+                continue
+            role = getattr(soul, "role", "")
+            if not role:
+                continue
+            project = _find_cycle_project(self._engine, cadence)
+            if project is None:
+                continue
+            if _has_pending_cycle_task(self._engine, project.id, role):
+                continue
+            integration_id = _soul_integration_id(soul)
+            task_id = _file_cycle_task(
+                self._engine, project, role, cadence,
+                integration_id=integration_id,
+            )
+            if task_id:
+                actions.append(f"soul_cycle_filed:{role}:{task_id}")
+        return actions
+
     def _action_housekeeping(self) -> list[str]:
         """Prune tick history + reuse the existing episodes retention hook."""
         actions: list[str] = []
@@ -333,6 +395,171 @@ class Ticker:
         except asyncio.CancelledError:
             log.debug("ticker loop cancelled")
             raise
+
+
+# ---------------------------------------------------------------------------
+# Soul-cycle helpers (module-level so they're testable without a Ticker)
+# ---------------------------------------------------------------------------
+
+_CYCLE_TASK_TITLE_PREFIX = "Soul cycle:"
+
+
+def _current_local_hour() -> int | None:
+    """Return the current hour (0-23) in Europe/Stockholm, or None if the
+    zoneinfo data is unavailable (best-effort — never fatal to the tick).
+
+    Named ``_local`` not ``_cet`` because Europe/Stockholm observes
+    summer time (CEST, UTC+2) — the hour returned is Stockholm local,
+    which is CET only outside DST. Soul YAMLs should declare
+    ``hours_local`` (not ``hours_cet``) to match; ``hours_cet`` is read
+    as a fallback for backwards compatibility.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("Europe/Stockholm")).hour
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _soul_cycle_cadence(soul: Any) -> dict[str, Any] | None:
+    """Read a soul's ``cycle_cadence`` block from its YAML. Returns None if
+    the soul has no ``soul_yaml`` or no ``cycle_cadence`` key."""
+    import yaml as _yaml
+
+    path = getattr(soul, "soul_yaml", None)
+    if not path:
+        return None
+    from pathlib import Path
+
+    p = Path(path) if not isinstance(path, Path) else path
+    if not p.is_file():
+        return None
+    data = _yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    cadence = data.get("cycle_cadence")
+    if not isinstance(cadence, dict):
+        return None
+    return cadence
+
+
+def _soul_integration_id(soul: Any) -> str | None:
+    """Read a soul's top-level ``integration_id`` from its YAML.
+
+    Tool names are ``{integration_id}.{action}`` (e.g. ``linkedin.feed``),
+    not ``{role}.{action}`` — the integration_id is the link between a
+    soul and the integration whose tools it calls in-loop.
+    """
+    import yaml as _yaml
+    from pathlib import Path
+
+    path = getattr(soul, "soul_yaml", None)
+    if not path:
+        return None
+    p = Path(path) if not isinstance(path, Path) else path
+    if not p.is_file():
+        return None
+    data = _yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    return data.get("integration_id")
+
+
+def _find_cycle_project(engine: Any, cadence: dict[str, Any]) -> Any:
+    """Find the active project whose name contains
+    ``cadence["project_name_substring"]`` (case-insensitive). Returns None
+    if no such project or no substring declared."""
+    substring = (cadence.get("project_name_substring") or "").strip()
+    if not substring:
+        return None
+    needle = substring.lower()
+    for project in engine.projects.list_active():
+        if needle in (project.name or "").lower():
+            return project
+    return None
+
+
+def _has_pending_cycle_task(
+    engine: Any, project_id: str, role: str
+) -> bool:
+    """True if the project already has a PENDING task assigned to ``role``
+    whose title starts with the cycle marker — prevents filing a second
+    cycle task in the same hour."""
+    marker = _CYCLE_TASK_TITLE_PREFIX
+    for task in engine.projects.list_tasks(project_id):
+        if (
+            _status_value(task.status) == TaskStatus.PENDING.value
+            and task.assigned_agent == role
+            and (task.title or "").startswith(marker)
+        ):
+            return True
+    return False
+
+
+def _file_cycle_task(
+    engine: Any, project: Any, role: str, cadence: dict[str, Any],
+    integration_id: str | None = None,
+) -> str | None:
+    """File one cycle task for ``role`` in ``project``. Returns the task id
+    or None on failure (best-effort).
+
+    ``integration_id`` is threaded into the cycle prompt so tool names are
+    correct (``linkedin.feed``, not ``linkedin_growth.feed``). Defaults to
+    ``role`` when not provided (backwards compat).
+    """
+    from kompany.state.models import Task
+
+    title = f"{_CYCLE_TASK_TITLE_PREFIX} {role} daily growth cycle"
+    if integration_id and "integration_id" not in cadence:
+        cadence = {**cadence, "integration_id": integration_id}
+    prompt_body = _cycle_task_prompt(role, cadence)
+    task = Task(
+        project_id=project.id,
+        title=title,
+        assigned_agent=role,
+    )
+    try:
+        engine.projects.create_task(task)
+        # Stash the prompt body in the task result so the runner/harness
+        # can pick it up as the cycle instruction. The runner builds its
+        # own prompt from task.title + project.name; the soul agent reads
+        # its YAML for the deep playbook, so this body is a fallback hint
+        # rather than the primary prompt.
+        engine.projects.update_task_status(
+            task.id, TaskStatus.PENDING, result={"cycle_prompt": prompt_body}
+        )
+        engine.audit.record(
+            "soul_cycle.filed",
+            f"Filed recurring cycle task for {role}",
+            detail={"task_id": task.id, "role": role, "project_id": project.id},
+            agent_role=role,
+            project_id=project.id,
+        )
+        return task.id
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
+    """Build the cycle instruction body for the task.
+
+    ``role`` is the soul's role (e.g. ``linkedin_growth``). Tool names are
+    ``{integration_id}.{action}`` (e.g. ``linkedin.feed``), NOT
+    ``{role}.{action}`` — the integration_id is read from the soul YAML
+    and threaded in via ``cadence["integration_id"]`` by the caller. Falls
+    back to ``role`` as the integration_id for backwards compatibility.
+    """
+    integration_id = cadence.get("integration_id") or role
+    max_comments = cadence.get("max_comments_per_cycle", 5)
+    max_posts = cadence.get("max_original_posts_per_day", 2)
+    anti_repeat = cadence.get("anti_repeat_days", 7)
+    return (
+        f"Run one {role} growth cycle now:\n"
+        f"1. Call {integration_id}.feed to discover on-theme posts (use a content-search query, not the home feed).\n"
+        f"2. Read the engagement ledger (engaged.jsonl) and skip authors engaged in the last {anti_repeat} days.\n"
+        f"3. Call {integration_id}.engage (comment) on up to {max_comments} on-theme posts — substantive, peer tone, no fabrication.\n"
+        f"4. If a clearly on-topic, non-pitch, zero-fabrication original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
+        f"5. Call {integration_id}.metrics and record the snapshot in the journal.\n"
+        f"6. If any tool returns NOT_LOGGED_IN, stop and surface a system alert — do not retry.\n"
+        f"Every engage/post is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
+    )
 
 
 __all__ = ["TICK_HISTORY_KEEP", "Ticker"]
