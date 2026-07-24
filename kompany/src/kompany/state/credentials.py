@@ -39,6 +39,11 @@ ALLOWED_CREDENTIALS = {
     # {access_token, refresh_token, expires_at, account_id}. Encrypted at
     # rest like every other vault row; never written to settings/env.
     "openai_oauth_tokens",
+    # Pro integrations (Fei2-Labs/kompany-pro) — declared via each
+    # integration's `required_credentials`. Core owns the vault
+    # allowlist since it's the single security boundary for what may be
+    # stored/read, even though the integration itself lives in Pro.
+    "stripe_api_key",
 }
 
 

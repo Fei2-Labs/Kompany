@@ -66,10 +66,16 @@ def tool_registry(engine: Any) -> dict[str, dict[str, Any]]:
 
 
 def _integration_connected(engine: Any, integ: Any) -> bool:
-    return all(
-        bool(engine.credentials.get(key))
-        for key in (integ.required_credentials or ())
-    )
+    try:
+        return all(
+            bool(engine.credentials.get(key))
+            for key in (integ.required_credentials or ())
+        )
+    except Exception:  # noqa: BLE001 — one broken plugin can't block
+        # A plugin declaring a `required_credentials` name outside the
+        # vault's allowlist must not 500 the whole tools/integrations
+        # listing; surface it as simply "not connected".
+        return False
 
 
 def tools_list(engine: Any) -> list[dict[str, Any]]:
