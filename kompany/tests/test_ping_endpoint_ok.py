@@ -23,6 +23,7 @@ def _isolate_env(
 ) -> None:
     for var in PROVIDER_ENV_VARS.values():
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("KOMPANY_DATA_DIR", str(tmp_path / "data"))
     # Ensure tests can't accidentally exercise the real network path.
     monkeypatch.setenv("KOMPANY_TEST_MODE", "1")

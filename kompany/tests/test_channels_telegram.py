@@ -593,6 +593,21 @@ def test_failed_go_keeps_retryable_gated_session_mapped(tmp_path):
     assert ChannelSessionMapStore(engine.db).get("111") == session.id
 
 
+def test_freeform_message_does_not_continue_gated_session(tmp_path):
+    engine = FakeEngine(tmp_path)
+    gated = engine.channel.create_session()
+    engine.channel.update_session_state(gated.id, SessionStatus.GATED)
+    ChannelSessionMapStore(engine.db).set("111", gated.id)
+    engine.script = [_result("completed", "Fresh.", "new-session")]
+    worker = TelegramWorker(
+        engine, transport=FakeTransport([[_update(1, 111, "do something else")]])
+    )
+
+    worker.poll_once()
+
+    assert engine.directive_calls == [("do something else", None)]
+
+
 def test_stale_mapping_to_closed_session_resets(tmp_path):
     engine = FakeEngine(tmp_path)
     closed = engine.channel.create_session()

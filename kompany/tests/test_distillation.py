@@ -468,8 +468,9 @@ def _make_engine(tmp_path, cos_agent: _FakeCoSAgent):
     return engine
 
 
-def _seed_episode(engine, project_id: str, updated_at: str = "2026-05-18 00:00:00"):
+def _seed_episode(engine, project_id: str, updated_at: str | None = None):
     """Insert a project_episodes row with a real EpisodePayloadV1 payload."""
+    updated_at = updated_at or datetime.now(timezone.utc).isoformat()
     payload = _make_payload(project_id).model_dump_json()
     engine.db.execute(
         """INSERT INTO project_episodes
@@ -678,7 +679,8 @@ def test_engine_distill_malformed_payload_audit_event(tmp_path):
             run_id, created_at, updated_at)
            VALUES (?, ?, ?, 'full', NULL, ?, ?)""",
         ("p_bad", "x", '{"oops": true}',
-         "2026-05-18 00:00:00", "2026-05-18 00:00:00"),
+         datetime.now(timezone.utc).isoformat(),
+         datetime.now(timezone.utc).isoformat()),
     )
     engine.db.commit()
 

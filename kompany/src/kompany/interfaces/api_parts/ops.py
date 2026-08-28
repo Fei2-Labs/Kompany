@@ -127,6 +127,31 @@ def list_memories(
     )
 
 
+@router.post("/memories")
+def ingest_memory(req: MemoryIngestRequest) -> dict[str, Any]:
+    """Persist one bounded external observation for a project agent."""
+    engine = get_engine()
+    if req.project_id and engine.projects.get(req.project_id) is None:
+        raise HTTPException(status_code=404, detail=f"Project '{req.project_id}' not found")
+    context = req.context or (f"project:{req.project_id}" if req.project_id else None)
+    memory_id = engine.memory.remember(
+        agent_role=req.agent_role,
+        content=req.content.strip(),
+        category=req.category,
+        knowledge_type=req.knowledge_type,
+        context=context,
+    )
+    engine.audit.record(
+        "learning.external_memory_ingested",
+        "Ingested bounded external observation",
+        detail={"agent_role": req.agent_role, "category": req.category},
+        project_id=req.project_id,
+    )
+    if req.project_id:
+        engine.rebuild_episode(req.project_id)
+    return {"id": memory_id, "project_id": req.project_id, "context": context}
+
+
 @router.post("/remote/command")
 def remote_command(req: RemoteCommandAPIRequest) -> dict[str, Any]:
     """Handle an authenticated inbound remote command."""
@@ -273,4 +298,3 @@ def cleanup_remote_replays(req: RemoteReplayCleanupRequest | None = None) -> dic
     engine = get_engine()
     req = req or RemoteReplayCleanupRequest()
     return engine.cleanup_remote_replays(ttl_seconds=req.ttl_seconds)
-

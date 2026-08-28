@@ -217,7 +217,7 @@ class TelegramWorker:
         *,
         legacy_key: str | None = None,
     ) -> str | None:
-        """Mapped session id, dropping mappings to closed or gated sessions.
+        """Mapped session id, dropping mappings that cannot continue.
 
         Terminal sessions (dispatched/answered/abandoned) are obviously done.
         Gated/proposed sessions are non-terminal but are waiting for an
