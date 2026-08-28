@@ -644,11 +644,12 @@ wheels = [
 
 [[package]]
 name = "kompany"
-version = "0.1.0"
+version = "0.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
     { name = "cryptography" },
+    { name = "httpx" },
     { name = "keyring" },
     { name = "openai" },
     { name = "pydantic" },
@@ -687,8 +688,9 @@ requires-dist = [
     { name = "boto3", marker = "extra == 'backup'", specifier = ">=1.34" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "keyring", specifier = ">=25.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "openai", specifier = ">=1.40.0" },
     { name = "pillow", marker = "extra == 'desktop'", specifier = ">=10" },
     { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40" },

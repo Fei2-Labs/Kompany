@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
-mcp = ["mcp>=1.0"]
+mcp = ["mcp>=1.0,<2"]
 # CDP browser tools for the agentic loop (06-16 P4). Optional: the
 # browser tools degrade to a clear observation when Playwright is absent.
 browser = ["playwright>=1.40"]
