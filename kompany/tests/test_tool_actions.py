@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import BaseModel
 
+from kompany.core import tool_actions
 from kompany.core.autonomy import AutonomyGate
 from kompany.core.engine import KompanyEngine
 from kompany.plugins.contract import (
@@ -33,6 +34,12 @@ class _Out(BaseModel):
     ok: bool = True
     detail: str = ""
     spent_usd: float = 0.0
+
+
+class _StructuredOut(BaseModel):
+    status: str
+    detail: str = ""
+    evidence: str = ""
 
 
 class _EchoTool(Tool):
@@ -275,6 +282,42 @@ def test_missing_credentials_fail_on_card_not_crash(engine):
     assert not stored.payload.get("effect_applied")
     comments = engine.approvals.list_comments(card["id"])
     assert any("missing credential" in c.body for c in comments)
+
+
+@pytest.mark.parametrize("status", ["failed", "skipped", "error"])
+def test_structured_failure_status_does_not_stamp_effect(engine, status):
+    original_execute = _SendTool.execute
+    _SendTool.execute = lambda self, inputs, ctx: _StructuredOut(
+        status=status,
+        detail="not sent",
+    )
+    try:
+        card = engine.propose_action("test.send", {"text": "hi"}, summary="Send")
+        result = engine.approve_request(card["id"])
+    finally:
+        _SendTool.execute = original_execute
+
+    assert result["effect"]["status"] == "failed"
+    assert not engine.approvals.get(card["id"]).payload.get("effect_applied")
+
+
+def test_structured_confirmed_status_stamps_effect_once(engine):
+    calls = []
+    original_execute = _SendTool.execute
+    _SendTool.execute = lambda self, inputs, ctx: calls.append(inputs.text) or _StructuredOut(
+        status="confirmed",
+        evidence="SENT",
+    )
+    try:
+        card = engine.propose_action("test.send", {"text": "hi"}, summary="Send")
+        first = engine.approve_request(card["id"])
+        second = engine.approve_request(card["id"])
+    finally:
+        _SendTool.execute = original_execute
+
+    assert first["effect"]["status"] == "executed"
+    assert second["effect"]["status"] == "already_applied"
+    assert calls == ["hi"]
 
 
 def test_propose_unknown_tool_raises(engine):

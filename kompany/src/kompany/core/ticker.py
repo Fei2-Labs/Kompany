@@ -260,12 +260,16 @@ class Ticker:
         local_hour = _current_local_hour()
         if local_hour is None:
             return actions
+        cycle_slot = _current_cycle_slot(local_hour)
         for soul in souls:
             try:
                 cadence = _soul_cycle_cadence(soul)
             except Exception:  # noqa: BLE001
                 continue
             if not cadence:
+                continue
+            scheduler_mode = str(cadence.get("scheduler_mode", "native")).strip().lower()
+            if scheduler_mode not in {"native", "dry_run"}:
                 continue
             hours = cadence.get("hours_local") or cadence.get("hours_cet") or []
             if local_hour not in hours:
@@ -276,12 +280,18 @@ class Ticker:
             project = _find_cycle_project(self._engine, cadence)
             if project is None:
                 continue
-            if _has_pending_cycle_task(self._engine, project.id, role):
+            if _has_pending_cycle_task(
+                self._engine,
+                project.id,
+                role,
+                cycle_slot=cycle_slot,
+            ):
                 continue
             integration_id = _soul_integration_id(soul)
             task_id = _file_cycle_task(
                 self._engine, project, role, cadence,
                 integration_id=integration_id,
+                cycle_slot=cycle_slot,
             )
             if task_id:
                 actions.append(f"soul_cycle_filed:{role}:{task_id}")
@@ -422,6 +432,18 @@ def _current_local_hour() -> int | None:
         return None
 
 
+def _current_cycle_slot(local_hour: int) -> str:
+    """Return the current Stockholm date plus the already-resolved hour."""
+    from zoneinfo import ZoneInfo
+
+    local_date = datetime.now(ZoneInfo("Europe/Stockholm")).date()
+    return f"{local_date.isoformat()}T{local_hour:02d}"
+
+
+def _cycle_slot_token(cycle_slot: str) -> str:
+    return f"[slot:{cycle_slot}]"
+
+
 def _soul_cycle_cadence(soul: Any) -> dict[str, Any] | None:
     """Read a soul's ``cycle_cadence`` block from its YAML. Returns None if
     the soul has no ``soul_yaml`` or no ``cycle_cadence`` key."""
@@ -477,25 +499,34 @@ def _find_cycle_project(engine: Any, cadence: dict[str, Any]) -> Any:
 
 
 def _has_pending_cycle_task(
-    engine: Any, project_id: str, role: str
+    engine: Any,
+    project_id: str,
+    role: str,
+    *,
+    cycle_slot: str | None = None,
 ) -> bool:
-    """True if the project already has a PENDING task assigned to ``role``
-    whose title starts with the cycle marker — prevents filing a second
-    cycle task in the same hour."""
+    """True if this role already has a task for the current cycle slot.
+
+    Legacy callers without a slot retain the old pending-task behavior.
+    """
     marker = _CYCLE_TASK_TITLE_PREFIX
+    slot_token = _cycle_slot_token(cycle_slot) if cycle_slot else None
     for task in engine.projects.list_tasks(project_id):
-        if (
-            _status_value(task.status) == TaskStatus.PENDING.value
-            and task.assigned_agent == role
-            and (task.title or "").startswith(marker)
-        ):
+        title = task.title or ""
+        if task.assigned_agent != role or not title.startswith(marker):
+            continue
+        if _status_value(task.status) == TaskStatus.PENDING.value:
             return True
+        if slot_token:
+            if slot_token in title:
+                return True
     return False
 
 
 def _file_cycle_task(
     engine: Any, project: Any, role: str, cadence: dict[str, Any],
     integration_id: str | None = None,
+    cycle_slot: str | None = None,
 ) -> str | None:
     """File one cycle task for ``role`` in ``project``. Returns the task id
     or None on failure (best-effort).
@@ -507,6 +538,8 @@ def _file_cycle_task(
     from kompany.state.models import Task
 
     title = f"{_CYCLE_TASK_TITLE_PREFIX} {role} daily growth cycle"
+    if cycle_slot:
+        title = f"{title} {_cycle_slot_token(cycle_slot)}"
     if integration_id and "integration_id" not in cadence:
         cadence = {**cadence, "integration_id": integration_id}
     prompt_body = _cycle_task_prompt(role, cadence)
@@ -550,18 +583,24 @@ def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
     max_comments = cadence.get("max_comments_per_cycle", 5)
     max_posts = cadence.get("max_original_posts_per_day", 2)
     anti_repeat = cadence.get("anti_repeat_days", 7)
+    scheduler_mode = str(cadence.get("scheduler_mode", "native")).strip().lower()
+    dry_run_instruction = (
+        "DRY-RUN ONLY: read tools may run, but do not propose or execute any "
+        "external action. Produce candidate envelopes for verification.\n"
+        if scheduler_mode == "dry_run"
+        else ""
+    )
     return (
         f"Run one {role} growth cycle now:\n"
+        f"{dry_run_instruction}"
         f"1. Call {integration_id}.feed to discover on-theme posts (use a content-search query, not the home feed).\n"
-        f"2. Read the engagement ledger (engaged.jsonl) and skip authors engaged in the last {anti_repeat} days.\n"
+        f"2. Read the Native action ledger (~/.kompany/linkedin-actions.jsonl) and skip authors engaged in the last {anti_repeat} days.\n"
         f"3. Call {integration_id}.engage (comment) on up to {max_comments} on-theme posts — substantive, peer tone, no fabrication.\n"
         f"4. If a clearly on-topic, non-pitch, zero-fabrication original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
-        f"5. If a {integration_id}.replies tool is available, call it and reply at most once per thread via "
-        f"{integration_id}.reply_to — only to substantive on-theme replies from a PREVIOUS cycle, never the same "
-        f"thread twice (anti-chat; log every reply to engaged.jsonl).\n"
+        f"5. Call {integration_id}.notifications; classify substantive replies for one bounded response and record low-signal skips.\n"
         f"6. Call {integration_id}.metrics and record the snapshot in the journal.\n"
         f"7. If any tool returns NOT_LOGGED_IN, stop and surface a system alert — do not retry.\n"
-        f"Every engage/post/reply_to is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
+        f"Every engage/post is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
     )
 
 

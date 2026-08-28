@@ -46,6 +46,7 @@ from kompany.state.approvals import ApprovalRequests
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
 from kompany.state.database import Database
+from kompany.state.episodes import Episodes
 from kompany.state.health_events import HealthEvents
 from kompany.state.memory import AgentMemory
 from kompany.state.models import Project, ProjectType, Task, TaskStatus
@@ -145,6 +146,7 @@ class FakeEngine:
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
         self.memory = AgentMemory(self.db)
+        self.episodes = Episodes(self.db)
         self.approvals = ApprovalRequests(self.db)
         self.health_events = HealthEvents(self.db)
         self.registry = FakeRegistry()
@@ -798,6 +800,66 @@ def test_harness_path_via_project_runner(tmp_path, monkeypatch):
     row = engine.projects.list_tasks(project.id)[0]
     assert row.status == TaskStatus.COMPLETED  # diff evidence → completed
     assert row.harness_session_id == "s3"
+
+
+def test_soul_cycle_completion_persists_observation_and_episode(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = Task(
+        project_id=project.id,
+        title="Soul cycle: linkedin_growth daily growth cycle",
+        assigned_agent="linkedin_growth",
+    )
+    engine.projects.create_task(task)
+    result = ProjectRunResult(project_id=project.id)
+    runner = FakeRunner(result=HarnessResult(
+        final_text='{"actions": [], "metrics": {"followers": 10}}',
+        files_changed=[],
+        cost_usd=0.04,
+        session_id="cycle-dry-run",
+    ))
+
+    execute_harness_task(engine, runner, task, project, result)
+
+    observations = engine.memory.recall(
+        "linkedin_growth", category="observation", query="cycle result"
+    )
+    assert observations
+    assert "cost_usd=0.040000" in observations[0]["content"]
+    episode = engine.episodes.get(project.id)
+    assert episode is not None
+    assert "linkedin_growth" in episode["payload_json"]
+
+
+def test_soul_cycle_prompt_and_prior_observation_reach_runner(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine, name="LinkedIn Growth")
+    engine.memory.remember(
+        "linkedin_growth",
+        "Cycle result: profile views rose after governance comments.",
+        category="observation",
+        context=f"project:{project.id}",
+    )
+    task = _make_task(
+        engine,
+        project,
+        title="Soul cycle: linkedin_growth daily growth cycle",
+        assigned_agent="linkedin_growth",
+    )
+    engine.projects.update_task_status(
+        task.id,
+        TaskStatus.PENDING,
+        result={"cycle_prompt": "DRY-RUN ONLY: call linkedin.metrics."},
+    )
+    task = engine.projects.get_task(task.id)
+    result = ProjectRunResult(project_id=project.id)
+    runner = FakeRunner(result=HarnessResult(final_text="dry run", cost_usd=0.01))
+
+    execute_harness_task(engine, runner, task, project, result)
+
+    prompt = runner.start_calls[0]["prompt"]
+    assert "DRY-RUN ONLY: call linkedin.metrics." in prompt
+    assert "profile views rose after governance comments" in prompt
 
 
 # ---------------------------------------------------------------------------

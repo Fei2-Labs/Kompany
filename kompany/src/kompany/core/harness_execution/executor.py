@@ -293,10 +293,14 @@ def _build_prompt(engine: Any, task: Task, project: Project) -> str:
             task.assigned_agent,
             query=f"{task.title} {project.name}",
         )
+    cycle_prompt = ""
+    task_result = task.result if isinstance(task.result, dict) else {}
+    if (task.title or "").startswith("Soul cycle:"):
+        cycle_prompt = str(task_result.get("cycle_prompt", "")).strip()
     prompt = (
         f"Project: {project.name}\n"
         f"Task: {task.title}\n\n"
-        f"Execute this task and provide your output.\n"
+        f"{cycle_prompt or 'Execute this task and provide your output.'}\n"
     )
     if task.delegation_id:
         delegation = engine.delegations.get(task.delegation_id)
@@ -506,6 +510,29 @@ def _finish_task(
         category="task_completion",
         directive_id=project.triggers_directive_id,
     )
+    if (task.title or "").startswith("Soul cycle:"):
+        engine.memory.remember(
+            agent_role=task.assigned_agent,
+            content=(
+                f"Cycle result for project '{project.name}': "
+                f"outcome={outcome}; cost_usd={booked:.6f}; "
+                f"evidence={run_result.final_text[:4000]}"
+            ),
+            category="observation",
+            knowledge_type="experiential",
+            context=f"project:{project.id}",
+            directive_id=project.triggers_directive_id,
+        )
+        try:
+            engine.episodes.record_or_update(project.id)
+        except Exception as exc:  # learning must not erase a completed task
+            engine.audit.record(
+                "learning.episode_failed",
+                "Cycle episode materialization failed",
+                detail={"task_id": task.id, "error": str(exc)},
+                agent_role=task.assigned_agent,
+                project_id=project.id,
+            )
 
     result.tasks_completed += 1
     result.total_ai_cost += booked

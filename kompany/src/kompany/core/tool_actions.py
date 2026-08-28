@@ -230,7 +230,7 @@ def execute_approved_tool_action(engine: Any, request: "ApprovalRequest") -> dic
         out = result.model_dump() if hasattr(result, "model_dump") else dict(result)
     except Exception as exc:  # noqa: BLE001 — surface on the card, never crash
         out = {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
-    succeeded = out.get("ok") is not False and out.get("sent") is not False
+    succeeded = _tool_result_succeeded(out)
     engine.audit.record(
         "tool_action.executed" if succeeded else "tool_action.failed",
         f"Executed approved action: {tool_name}"
@@ -278,6 +278,14 @@ def _tool_context(engine: Any) -> ToolContext:
         credentials=engine.credentials,
         settings=engine.settings,
     )
+
+
+def _tool_result_succeeded(out: dict[str, Any]) -> bool:
+    """Interpret both legacy boolean and structured-status tool outputs."""
+    status = out.get("status")
+    if status is not None:
+        return str(status).strip().lower() in {"confirmed", "executed", "sent", "ok"}
+    return out.get("ok") is not False and out.get("sent") is not False
 
 
 def _book_real_spend(

@@ -77,6 +77,20 @@ def test_list_integrations_reports_connected(monkeypatch, tmp_path):
     assert email["connected"] is True
 
 
+def test_list_integrations_marks_unsupported_plugin_credential_disconnected(
+    monkeypatch, tmp_path
+):
+    from kompany.core import tool_actions
+    from kompany.core.engine import KompanyEngine
+
+    monkeypatch.setenv("KOMPANY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KOMPANY_TEST_MODE", "1")
+    engine = KompanyEngine()
+    integration = SimpleNamespace(required_credentials=("unsupported_plugin_key",))
+
+    assert tool_actions._integration_connected(engine, integration) is False
+
+
 def test_propose_then_approve_executes_send(monkeypatch, tmp_path):
     """The deferred-action pipeline (#5): propose → inbox approval →
     approve → real send executes. The action does NOT fire on propose,

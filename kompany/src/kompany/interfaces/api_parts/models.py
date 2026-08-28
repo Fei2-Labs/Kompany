@@ -65,6 +65,16 @@ class CommentApprovalRequest(BaseModel):
     by_id: str | None = None
 
 
+class MemoryIngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_role: str = Field(..., min_length=1, max_length=80)
+    content: str = Field(..., min_length=1, max_length=12000)
+    category: str = Field(default="observation", min_length=1, max_length=80)
+    context: str | None = Field(default=None, max_length=160)
+    project_id: str | None = Field(default=None, max_length=80)
+    knowledge_type: str = Field(default="experiential", min_length=1, max_length=80)
+
+
 class HeartbeatRequest(BaseModel):
     dispatch: bool = False
     adapter: str = "dry-run"
@@ -116,4 +126,3 @@ class CredentialRequest(BaseModel):
 
 class CredentialKeyRotationRequest(BaseModel):
     new_vault_key: str
-
