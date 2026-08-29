@@ -30,9 +30,10 @@ from kompany.core.harness_execution.selection import select_runner
 class FakeLLM:
     """Scripted call_structured: pops the next NativeTurn per call."""
 
-    def __init__(self, turns, cost_per_call=0.01):
+    def __init__(self, turns, cost_per_call=0.01, cost_recorded=True):
         self.turns = list(turns)
         self.cost_per_call = cost_per_call
+        self.cost_recorded = cost_recorded
         self.calls = []
 
     def call_structured(self, **kwargs):
@@ -45,6 +46,7 @@ class FakeLLM:
             input_tokens=100,
             output_tokens=50,
             model=kwargs.get("model", "m"),
+            _cost_recorded=self.cost_recorded,
         )
 
 
@@ -80,6 +82,7 @@ def test_happy_path_write_then_done(workspace):
     assert "hello.txt" in result.files_changed
     assert result.cost_usd == pytest.approx(0.02)
     assert result.cost_is_estimate is False
+    assert result.cost_already_recorded is True
     assert result.tokens_in == 200 and result.tokens_out == 100
     assert result.session_id
     # every call books through the normal cost path label
@@ -119,6 +122,19 @@ def test_budget_breach_stops_cleanly(workspace):
     assert len(llm.calls) == 2  # 0.6 < 1.0, 1.2 >= 1.0 → stop turn 2
     assert result.cost_usd == pytest.approx(1.2)
     assert "budget" in (result.error or "")
+
+
+def test_untracked_llm_client_leaves_cost_for_outer_booking(workspace):
+    llm = FakeLLM(
+        [NativeTurn(thought="done", done=True, final_text="ok")],
+        cost_recorded=False,
+    )
+    runner = NativeRunner(model="m", llm_client=llm)
+
+    result = runner.start("go", workspace, HarnessCaps(max_turns=1))
+
+    assert result.cost_usd == pytest.approx(0.01)
+    assert result.cost_already_recorded is False
 
 
 def test_turn_cap_preserves_work(workspace):

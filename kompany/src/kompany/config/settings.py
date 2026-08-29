@@ -190,6 +190,7 @@ class KompanySettings(BaseSettings):
     # housekeeping, recording) without autonomous task execution.
     tick_interval_seconds: int = 300
     daemon_auto_execute: bool = True
+    soul_cycle_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
     # Self-update pipeline (06-12-self-update-pipeline PRD D5). Code work
     # is heavier than the task default ($0.50/30) — the dedicated session
@@ -348,6 +349,11 @@ class KompanySettings(BaseSettings):
                 overrides["tick_interval_seconds"] = int(data["tick_interval_seconds"])
             if "daemon_auto_execute" in data:
                 overrides["daemon_auto_execute"] = bool(data["daemon_auto_execute"])
+            if "soul_cycle_overrides" in data:
+                raw = data["soul_cycle_overrides"]
+                overrides["soul_cycle_overrides"] = (
+                    raw if isinstance(raw, dict) else {}
+                )
             # Anima persona flags (06-12-anima-persona).
             for flag in ("anima_enabled", "anima_diary_enabled"):
                 if flag in data:

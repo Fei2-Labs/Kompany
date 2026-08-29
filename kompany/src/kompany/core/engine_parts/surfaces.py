@@ -401,6 +401,7 @@ class FounderSurfacesMixin:
         project_id: str | None = None,
         task_id: str | None = None,
         reason: str | None = None,
+        cycle_controls: dict | None = None,
     ) -> dict:
         """Queue a deferred external action for founder approval.
 
@@ -431,6 +432,45 @@ class FounderSurfacesMixin:
         if entry is None:
             raise ValueError(f"unknown tool: {tool_name}")
         tool = entry["tool"]
+        from kompany.core.soul_cycle_controls import enforce_cycle_proposal_gate
+
+        with self.db.locked():
+            enforce_cycle_proposal_gate(
+                self,
+                role=requested_by,
+                project_id=project_id,
+                task_id=task_id,
+                controls=cycle_controls,
+            )
+            return self._propose_action_unlocked(
+                tool_name,
+                inputs,
+                summary,
+                tool=tool,
+                severity=severity,
+                requested_by=requested_by,
+                directive_id=directive_id,
+                project_id=project_id,
+                task_id=task_id,
+                reason=reason,
+                manual_approval_only=cycle_controls is not None,
+            )
+
+    def _propose_action_unlocked(
+        self,
+        tool_name: str,
+        inputs: dict,
+        summary: str,
+        *,
+        tool: Any,
+        severity: str,
+        requested_by: str,
+        directive_id: str | None,
+        project_id: str | None,
+        task_id: str | None,
+        reason: str | None,
+        manual_approval_only: bool,
+    ) -> dict:
         # Founder hard rules (#6): a blocked action never even reaches
         # the inbox — refuse with the founder-readable reason.
         try:
@@ -487,7 +527,10 @@ class FounderSurfacesMixin:
             directive_id=directive_id,
             project_id=project_id,
         )
-        if self._auto_approve_eligible(tool, payload, requested_by):
+        if (
+            not manual_approval_only
+            and self._auto_approve_eligible(tool, payload, requested_by)
+        ):
             auto = self.approve_request(
                 request.id, approved_by="auto_approve_policy"
             )
@@ -518,4 +561,3 @@ class FounderSurfacesMixin:
             return False
         policy = self.tool_authorization.get(requested_by, tool.name)
         return bool(policy and policy.allowed and not policy.requires_approval)
-

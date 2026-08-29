@@ -41,6 +41,7 @@ class FakeToolLLM:
             input_tokens=100,
             output_tokens=50,
             model=kwargs.get("model", "m"),
+            _cost_recorded=True,
         )
 
 
@@ -98,6 +99,7 @@ def test_native_tool_call_dispatches_through_registry(workspace):
 
     # cost booked, action_type label preserved
     assert result.cost_usd == pytest.approx(0.02)
+    assert result.cost_already_recorded is True
     assert all(c["action_type"] == "native_runner" for c in llm.calls)
 
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from .database_parts.schema import _SCHEMA, _RUN_ID_TABLES
 from .database_parts.migrations import run_migrations
@@ -65,6 +67,11 @@ class Database:
     def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
             return self.conn.execute(sql, params)
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        with self._lock:
+            yield
 
     def commit(self) -> None:
         with self._lock:

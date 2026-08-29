@@ -20,6 +20,7 @@ from kompany.core.ticker import (
     _cycle_task_prompt,
     _find_cycle_project,
     _has_pending_cycle_task,
+    _resolved_cycle_cadence,
     _soul_cycle_cadence,
 )
 from kompany.state.models import Task, TaskStatus
@@ -63,6 +64,94 @@ def test_soul_cycle_cadence_none_when_no_yaml():
         soul_yaml = None
 
     assert _soul_cycle_cadence(_Soul()) is None
+
+
+def test_runtime_cycle_override_wins_over_soul_defaults():
+    engine = MagicMock()
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {
+            "scheduler_mode": "native",
+            "max_comments_per_cycle": 1,
+            "max_original_posts_per_day": 0,
+            "max_external_proposals_per_cycle": 1,
+        }
+    }
+
+    cadence = _resolved_cycle_cadence(
+        engine,
+        "linkedin_growth",
+        {
+            "scheduler_mode": "dry_run",
+            "max_comments_per_cycle": 5,
+            "max_original_posts_per_day": 2,
+        },
+    )
+
+    assert cadence["scheduler_mode"] == "native"
+    assert cadence["max_comments_per_cycle"] == 1
+    assert cadence["max_original_posts_per_day"] == 0
+    assert cadence["max_external_proposals_per_cycle"] == 1
+
+
+def test_unknown_runtime_scheduler_mode_fails_closed():
+    engine = MagicMock()
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {"scheduler_mode": "typo"}
+    }
+
+    cadence = _resolved_cycle_cadence(
+        engine,
+        "linkedin_growth",
+        {"scheduler_mode": "native"},
+    )
+
+    assert cadence["scheduler_mode"] == "disabled"
+
+
+def test_disabled_override_cancels_pending_cycle(tmp_path: Path, monkeypatch):
+    from kompany.core.ticker import Ticker
+
+    yaml = tmp_path / "soul.yaml"
+    yaml.write_text(
+        "role: linkedin_growth\n"
+        "cycle_cadence:\n"
+        "  scheduler_mode: dry_run\n"
+        "  project_name_substring: LinkedIn Growth\n"
+        "  hours_local: [12]\n"
+    )
+
+    class _Soul:
+        role = "linkedin_growth"
+        soul_yaml = yaml
+
+    monkeypatch.setattr(
+        "kompany.plugins.loader.registered",
+        lambda kind: [_Soul()] if kind == "soul" else [],
+    )
+    monkeypatch.setattr("kompany.core.ticker._current_local_hour", lambda: 12)
+    engine = MagicMock()
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {"scheduler_mode": "disabled"}
+    }
+    project = MagicMock()
+    project.id = "p1"
+    project.name = "LinkedIn Growth"
+    pending = MagicMock(
+        id="cycle-1",
+        status=TaskStatus.PENDING,
+        assigned_agent="linkedin_growth",
+        title=f"{_CYCLE_TASK_TITLE_PREFIX} linkedin_growth",
+    )
+    engine.projects.list_active.return_value = [project]
+    engine.projects.list_tasks.return_value = [pending]
+
+    actions = Ticker(engine=engine, ticks=MagicMock())._action_soul_cycles()
+
+    assert actions == ["soul_cycle_cancelled:linkedin_growth:cycle-1"]
+    engine.projects.update_task_status.assert_called_once_with(
+        "cycle-1", TaskStatus.CANCELLED, result={"reason": "scheduler_disabled"}
+    )
+    engine.projects.create_task.assert_not_called()
 
 
 # --- _find_cycle_project -----------------------------------------------
@@ -194,14 +283,21 @@ def test_cycle_task_prompt_dry_run_forbids_external_proposals():
     assert "linkedin.notifications" in prompt
 
 
-def test_cycle_task_prompt_uses_native_action_ledger_for_anti_repeat():
+def test_cycle_task_prompt_uses_restricted_history_tool_for_anti_repeat():
     prompt = _cycle_task_prompt(
         "linkedin_growth",
-        {"integration_id": "linkedin", "anti_repeat_days": 7},
+        {
+            "integration_id": "linkedin",
+            "anti_repeat_days": 7,
+            "engagement_history_tool": "linkedin.engagement_history",
+        },
     )
 
-    assert "linkedin-actions.jsonl" in prompt
-    assert "engaged.jsonl" not in prompt
+    assert "Call linkedin.engagement_history" in prompt
+    assert "the only completed-action anti-repeat source" in prompt
+    assert "never substitute engaged.jsonl" in prompt
+    assert "Never read its private ledger as a workspace file" in prompt
+    assert "linkedin-actions.jsonl" not in prompt
 
 
 # --- Integration: the action files a task end-to-end -------------------

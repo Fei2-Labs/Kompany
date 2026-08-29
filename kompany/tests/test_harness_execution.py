@@ -67,6 +67,10 @@ class FakeRunner:
         self._vehicle = vehicle
         self.start_calls: list[dict] = []
         self.resume_calls: list[dict] = []
+        self.execution_context: dict = {}
+
+    def bind_execution_context(self, **context):
+        self.execution_context = context
 
     @property
     def vehicle_name(self) -> str:
@@ -563,6 +567,30 @@ def test_record_external_called_with_project_and_estimate_flag(tmp_path):
     assert engine.cost_tracker.record_calls == []
 
 
+def test_already_recorded_runner_cost_is_not_booked_twice(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project)
+    runner = FakeRunner(
+        result=HarnessResult(
+            final_text="done",
+            cost_usd=0.12,
+            cost_already_recorded=True,
+            tokens_in=100,
+            tokens_out=50,
+        ),
+        vehicle="native",
+    )
+    result = ProjectRunResult(project_id=project.id)
+
+    execute_harness_task(engine, runner, task, project, result)
+
+    assert engine.cost_tracker.external_calls == []
+    assert result.total_ai_cost == pytest.approx(0.12)
+    row = engine.projects.list_tasks(project.id)[0]
+    assert row.result["cost"] == pytest.approx(0.12)
+
+
 def test_session_id_persisted_and_resume_used_on_retry(tmp_path):
     engine = FakeEngine(tmp_path)
     project = _make_project(engine)
@@ -849,7 +877,13 @@ def test_soul_cycle_prompt_and_prior_observation_reach_runner(tmp_path):
     engine.projects.update_task_status(
         task.id,
         TaskStatus.PENDING,
-        result={"cycle_prompt": "DRY-RUN ONLY: call linkedin.metrics."},
+        result={
+            "cycle_prompt": "DRY-RUN ONLY: call linkedin.metrics.",
+            "cycle_controls": {
+                "scheduler_mode": "dry_run",
+                "max_external_proposals_per_cycle": 1,
+            },
+        },
     )
     task = engine.projects.get_task(task.id)
     result = ProjectRunResult(project_id=project.id)
@@ -860,6 +894,16 @@ def test_soul_cycle_prompt_and_prior_observation_reach_runner(tmp_path):
     prompt = runner.start_calls[0]["prompt"]
     assert "DRY-RUN ONLY: call linkedin.metrics." in prompt
     assert "profile views rose after governance comments" in prompt
+    assert runner.execution_context == {
+        "project_id": project.id,
+        "task_id": task.id,
+        "agent_role": "linkedin_growth",
+        "cycle_controls": {
+            "scheduler_mode": "dry_run",
+            "max_external_proposals_per_cycle": 1,
+        },
+        "pending_approval_ids": [],
+    }
 
 
 # ---------------------------------------------------------------------------

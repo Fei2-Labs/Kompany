@@ -67,6 +67,7 @@ def test_result_defaults():
     assert result.session_id is None
     assert result.files_changed == []
     assert result.cost_usd is None
+    assert result.cost_already_recorded is False
     assert result.tokens_in == 0
     assert result.tokens_out == 0
     assert result.permission_denials == []
