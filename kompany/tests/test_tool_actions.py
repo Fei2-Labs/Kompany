@@ -7,6 +7,8 @@ loader builtin discovery; tools_list shape + four-interface parity.
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 from pydantic import BaseModel
 
@@ -318,6 +320,151 @@ def test_structured_confirmed_status_stamps_effect_once(engine):
     assert first["effect"]["status"] == "executed"
     assert second["effect"]["status"] == "already_applied"
     assert calls == ["hi"]
+
+
+def test_cycle_proposal_cap_blocks_second_approval(engine):
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {
+            "scheduler_mode": "native",
+            "max_external_proposals_per_cycle": 1,
+        }
+    }
+    first = engine.propose_action(
+        "test.send",
+        {"text": "first"},
+        summary="First",
+        project_id="p1",
+        task_id="cycle-1",
+        requested_by="linkedin_growth",
+        cycle_controls={
+            "scheduler_mode": "native",
+            "max_external_proposals_per_cycle": 1,
+        },
+    )
+
+    with pytest.raises(ValueError, match="proposal_budget_exhausted"):
+        engine.propose_action(
+            "test.send",
+            {"text": "second"},
+            summary="Second",
+            project_id="p1",
+            task_id="cycle-1",
+            requested_by="linkedin_growth",
+            cycle_controls={
+                "scheduler_mode": "native",
+                "max_external_proposals_per_cycle": 1,
+            },
+        )
+
+    assert first["action_type"] == "tool_action"
+    assert len(engine.approvals.list_pending()) == 1
+
+
+def test_cycle_proposal_never_uses_auto_approve_policy(engine):
+    engine.credentials.set("custom_api_key", "k123")
+    engine.set_tool_policy(
+        "linkedin_growth",
+        "test.send",
+        allowed=True,
+        requires_approval=False,
+    )
+
+    card = engine.propose_action(
+        "test.send",
+        {"text": "manual"},
+        summary="Manual cycle approval",
+        project_id="p1",
+        task_id="cycle-manual",
+        requested_by="linkedin_growth",
+        cycle_controls={
+            "scheduler_mode": "native",
+            "max_external_proposals_per_cycle": 1,
+        },
+    )
+
+    assert card["status"] == "pending"
+    assert _SendTool.calls == []
+
+
+def test_disabled_cycle_refuses_new_proposal(engine):
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {"scheduler_mode": "disabled"}
+    }
+
+    with pytest.raises(ValueError, match="scheduler_disabled"):
+        engine.propose_action(
+            "test.send",
+            {"text": "blocked"},
+            summary="Blocked",
+            project_id="p1",
+            task_id="cycle-1",
+            requested_by="linkedin_growth",
+            cycle_controls={"scheduler_mode": "native"},
+        )
+
+    assert engine.approvals.list_pending() == []
+
+
+def test_cycle_proposal_cap_is_atomic(engine):
+    controls = {
+        "scheduler_mode": "native",
+        "max_external_proposals_per_cycle": 1,
+    }
+    barrier = threading.Barrier(2)
+    outcomes = []
+
+    def propose(text):
+        barrier.wait()
+        try:
+            result = engine.propose_action(
+                "test.send",
+                {"text": text},
+                summary=text,
+                project_id="p1",
+                task_id="cycle-concurrent",
+                requested_by="linkedin_growth",
+                cycle_controls=controls,
+            )
+            outcomes.append(result["id"])
+        except ValueError as exc:
+            outcomes.append(str(exc))
+
+    threads = [
+        threading.Thread(target=propose, args=(text,))
+        for text in ("a", "b")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes.count("proposal_budget_exhausted") == 1
+    assert len(engine.approvals.list_pending()) == 1
+
+
+def test_cycle_controls_reach_proposal_gate_through_registry(engine):
+    from kompany.core.agent_tools.base import ToolContext
+    from kompany.core.agent_tools.chat_registry import IntegrationToolAdapter
+    from kompany.core.agent_tools.registry import ToolRegistry
+
+    engine.settings.soul_cycle_overrides = {
+        "linkedin_growth": {"scheduler_mode": "disabled"}
+    }
+    registry = ToolRegistry([IntegrationToolAdapter(_SendTool())])
+    ctx = ToolContext(
+        engine=engine,
+        extra={
+            "project_id": "p1",
+            "task_id": "cycle-1",
+            "agent_role": "linkedin_growth",
+            "cycle_controls": {"scheduler_mode": "disabled"},
+        },
+    )
+
+    observation = registry.dispatch("test_send", {"text": "blocked"}, ctx)
+
+    assert "scheduler_disabled" in observation
+    assert engine.approvals.list_pending() == []
 
 
 def test_propose_unknown_tool_raises(engine):

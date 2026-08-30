@@ -117,6 +117,10 @@ class NativeRunner:
         self._system_prompt_override = system_prompt
         self._tool_ctx_override = tool_ctx
         self._skip_workspace_safety = skip_workspace_safety
+        self._execution_context: dict[str, Any] = {}
+
+    def bind_execution_context(self, **context: Any) -> None:
+        self._execution_context = dict(context)
 
     @property
     def vehicle_name(self) -> str:
@@ -244,6 +248,7 @@ class NativeRunner:
             )
 
         total_cost = 0.0
+        cost_already_recorded = True
         tokens_in = 0
         tokens_out = 0
         budget_cap = caps.budget_cap_usd
@@ -257,6 +262,7 @@ class NativeRunner:
                 files_changed=git_files_changed(workspace),
                 cost_usd=total_cost,
                 cost_is_estimate=False,
+                cost_already_recorded=cost_already_recorded,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 exit_status=exit_status,
@@ -284,6 +290,10 @@ class NativeRunner:
                 )
             turn: NativeTurn = resp.parsed
             total_cost += float(getattr(resp, "cost_usd", 0.0) or 0.0)
+            cost_already_recorded = (
+                cost_already_recorded
+                and bool(getattr(resp, "_cost_recorded", False))
+            )
             tokens_in += int(getattr(resp, "input_tokens", 0) or 0)
             tokens_out += int(getattr(resp, "output_tokens", 0) or 0)
 
@@ -367,6 +377,7 @@ class NativeRunner:
             workspace=workspace,
             settings=self._settings,
             engine=self._engine,
+            extra=dict(self._execution_context),
         )
 
     def _native_tool_system_prompt(self) -> str:
@@ -467,6 +478,7 @@ class NativeRunner:
         preserved.
         """
         total_cost = 0.0
+        cost_already_recorded = True
         tokens_in = 0
         tokens_out = 0
         budget_cap = caps.budget_cap_usd
@@ -492,6 +504,7 @@ class NativeRunner:
                 files_changed=git_files_changed(workspace),
                 cost_usd=total_cost,
                 cost_is_estimate=False,
+                cost_already_recorded=cost_already_recorded,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 exit_status=exit_status,
@@ -518,6 +531,10 @@ class NativeRunner:
                 return _result("error", error=f"{type(exc).__name__}: {exc}")
 
             total_cost += float(getattr(resp, "cost_usd", 0.0) or 0.0)
+            cost_already_recorded = (
+                cost_already_recorded
+                and bool(getattr(resp, "_cost_recorded", False))
+            )
             tokens_in += int(getattr(resp, "input_tokens", 0) or 0)
             tokens_out += int(getattr(resp, "output_tokens", 0) or 0)
             tool_calls = list(getattr(resp, "tool_calls", []) or [])

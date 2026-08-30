@@ -49,6 +49,7 @@ from kompany.core.harness_execution import (
     ACTION_BUDGET_INCREASE,
     ACTION_ENVELOPE_TOPUP,
 )
+from kompany.core.soul_cycle_controls import resolve_cycle_controls
 from kompany.state.daemon_ticks import DaemonTickStore
 from kompany.state.export_bundle import read_exported_marker
 from kompany.state.models import TaskStatus
@@ -268,14 +269,22 @@ class Ticker:
                 continue
             if not cadence:
                 continue
+            role = getattr(soul, "role", "")
+            if not role:
+                continue
+            cadence = _resolved_cycle_cadence(self._engine, role, cadence)
             scheduler_mode = str(cadence.get("scheduler_mode", "native")).strip().lower()
+            if scheduler_mode == "disabled":
+                project = _find_cycle_project(self._engine, cadence)
+                if project is not None:
+                    actions.extend(
+                        _cancel_pending_cycle_tasks(self._engine, project.id, role)
+                    )
+                continue
             if scheduler_mode not in {"native", "dry_run"}:
                 continue
             hours = cadence.get("hours_local") or cadence.get("hours_cet") or []
             if local_hour not in hours:
-                continue
-            role = getattr(soul, "role", "")
-            if not role:
                 continue
             project = _find_cycle_project(self._engine, cadence)
             if project is None:
@@ -464,6 +473,35 @@ def _soul_cycle_cadence(soul: Any) -> dict[str, Any] | None:
     return cadence
 
 
+def _resolved_cycle_cadence(
+    engine: Any,
+    role: str,
+    cadence: dict[str, Any],
+) -> dict[str, Any]:
+    return resolve_cycle_controls(engine.settings, role, cadence)
+
+
+def _cancel_pending_cycle_tasks(
+    engine: Any,
+    project_id: str,
+    role: str,
+) -> list[str]:
+    actions: list[str] = []
+    for task in engine.projects.list_tasks(project_id):
+        if (
+            _status_value(task.status) == TaskStatus.PENDING.value
+            and task.assigned_agent == role
+            and (task.title or "").startswith(_CYCLE_TASK_TITLE_PREFIX)
+        ):
+            engine.projects.update_task_status(
+                task.id,
+                TaskStatus.CANCELLED,
+                result={"reason": "scheduler_disabled"},
+            )
+            actions.append(f"soul_cycle_cancelled:{role}:{task.id}")
+    return actions
+
+
 def _soul_integration_id(soul: Any) -> str | None:
     """Read a soul's top-level ``integration_id`` from its YAML.
 
@@ -556,7 +594,9 @@ def _file_cycle_task(
         # its YAML for the deep playbook, so this body is a fallback hint
         # rather than the primary prompt.
         engine.projects.update_task_status(
-            task.id, TaskStatus.PENDING, result={"cycle_prompt": prompt_body}
+            task.id,
+            TaskStatus.PENDING,
+            result={"cycle_prompt": prompt_body, "cycle_controls": dict(cadence)},
         )
         engine.audit.record(
             "soul_cycle.filed",
@@ -583,6 +623,20 @@ def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
     max_comments = cadence.get("max_comments_per_cycle", 5)
     max_posts = cadence.get("max_original_posts_per_day", 2)
     anti_repeat = cadence.get("anti_repeat_days", 7)
+    history_tool = str(cadence.get("engagement_history_tool", "")).strip()
+    history_instruction = (
+        f"2. Call {history_tool} and skip authors engaged in the last "
+        f"{anti_repeat} days. Its recent_author_keys and "
+        "replied_thread_fingerprints are the only completed-action "
+        "anti-repeat source. Never read its private ledger as a workspace "
+        "file, and never substitute engaged.jsonl, old journals, or candidate "
+        "files for this tool result.\n"
+        if history_tool
+        else (
+            "2. Skip authors already engaged within the configured "
+            f"{anti_repeat}-day anti-repeat window.\n"
+        )
+    )
     scheduler_mode = str(cadence.get("scheduler_mode", "native")).strip().lower()
     dry_run_instruction = (
         "DRY-RUN ONLY: read tools may run, but do not propose or execute any "
@@ -594,7 +648,7 @@ def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
         f"Run one {role} growth cycle now:\n"
         f"{dry_run_instruction}"
         f"1. Call {integration_id}.feed to discover on-theme posts (use a content-search query, not the home feed).\n"
-        f"2. Read the Native action ledger (~/.kompany/linkedin-actions.jsonl) and skip authors engaged in the last {anti_repeat} days.\n"
+        f"{history_instruction}"
         f"3. Call {integration_id}.engage (comment) on up to {max_comments} on-theme posts — substantive, peer tone, no fabrication.\n"
         f"4. If a clearly on-topic, non-pitch, zero-fabrication original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
         f"5. Call {integration_id}.notifications; classify substantive replies for one bounded response and record low-signal skips.\n"

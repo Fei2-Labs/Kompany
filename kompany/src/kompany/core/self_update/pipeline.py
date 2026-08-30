@@ -213,6 +213,8 @@ def _book_cost(
     result: HarnessResult,
 ) -> float:
     """Book the session spend via the ONLY approved harness cost path."""
+    if result.cost_already_recorded:
+        return float(result.cost_usd or 0.0)
     return engine.cost_tracker.record_external(
         model=harness_model(settings, vehicle),
         cost_usd=result.cost_usd or 0.0,

@@ -67,6 +67,8 @@ class HarnessResult(BaseModel):
     ``cost_is_estimate`` flags token-only vehicles (codex) whose USD is
     computed from the pricing table, never backend-reported — the ledger
     must not book it as authoritative (evidence-traced discipline).
+    ``cost_already_recorded`` means the runner's individual LLM calls already
+    booked this aggregate cost, so the outer executor must not book it again.
     ``permission_denials`` must surface every denied tool call — a run can
     exit 0 with blocked work (research pitfall 3).
     """
@@ -76,6 +78,7 @@ class HarnessResult(BaseModel):
     files_changed: list[str] = Field(default_factory=list)
     cost_usd: float | None = None
     cost_is_estimate: bool = False
+    cost_already_recorded: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
     permission_denials: list[dict[str, Any]] = Field(default_factory=list)

@@ -109,13 +109,19 @@ class ToolRegistry:
         # engine catalog name is the original dotted form (``email.send``).
         dispatch_name = getattr(tool, "dispatch_name", None) or name
         summary = f"Agentic chat requested: {dispatch_name}"
+        project_id = ctx.extra.get("project_id")
+        task_id = ctx.extra.get("task_id")
+        requested_by = ctx.extra.get("agent_role") or "ceo"
         try:
             request = engine.propose_action(
                 tool_name=dispatch_name,
                 inputs=args,
                 summary=summary,
-                requested_by="ceo",
+                requested_by=requested_by,
                 reason="Requested by the CEO mid-chat (agentic loop).",
+                project_id=project_id,
+                task_id=task_id,
+                cycle_controls=ctx.extra.get("cycle_controls"),
             )
         except Exception as exc:  # noqa: BLE001 — observation, never a crash
             return (

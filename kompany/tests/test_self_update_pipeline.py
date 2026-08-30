@@ -102,6 +102,23 @@ class FakeRunner:
         raise NotImplementedError
 
 
+def test_prebooked_native_cost_is_not_recorded_again(tmp_path):
+    engine = FakeEngine(tmp_path)
+    result = HarnessResult(
+        cost_usd=0.25,
+        cost_already_recorded=True,
+        tokens_in=100,
+        tokens_out=200,
+    )
+
+    booked = pipeline._book_cost(
+        engine, engine.settings, "native", "proposal-1", result
+    )
+
+    assert booked == pytest.approx(0.25)
+    assert engine.cost_tracker.calls == []
+
+
 class CrashingRunner(FakeRunner):
     def start(self, prompt, workspace, caps, on_event=None):
         raise RuntimeError("vehicle exploded")

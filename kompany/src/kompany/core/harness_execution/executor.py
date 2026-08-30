@@ -78,6 +78,17 @@ def execute_harness_task(
         )
     effective_cap = cap if allow_overdraw else min(cap, remaining)
 
+    bind_context = getattr(runner, "bind_execution_context", None)
+    if callable(bind_context):
+        task_result = task.result if isinstance(task.result, dict) else {}
+        bind_context(
+            project_id=project.id,
+            task_id=task.id,
+            agent_role=task.assigned_agent,
+            cycle_controls=task_result.get("cycle_controls"),
+            pending_approval_ids=[],
+        )
+
     engine.projects.update_task_status(task.id, TaskStatus.ACTIVE)
     engine.agent_status.set(
         task.assigned_agent,
@@ -328,6 +339,8 @@ def _book_cost(
     run_result: HarnessResult,
 ) -> float:
     """Book the session cost via the ONLY approved harness cost path."""
+    if run_result.cost_already_recorded:
+        return float(run_result.cost_usd or 0.0)
     model = harness_model(engine.settings, runner.vehicle_name)
     return engine.cost_tracker.record_external(
         model=model,
