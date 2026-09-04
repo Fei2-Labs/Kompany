@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- ATS exception: the desktop shell loads a remote engine over
+         plain HTTP (e.g. http://dokploy-<vps>.ts.net:<port> on a
+         tailnet). Without this, macOS blocks non-TLS loads in the
+         WebView. The tailnet host is private and the sidecar is
+         loopback, so cleartext is fine here. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
