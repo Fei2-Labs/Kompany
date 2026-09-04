@@ -450,6 +450,7 @@ class FounderSurfacesMixin:
         with self.db.locked():
             enforce_cycle_proposal_gate(
                 self,
+                tool_name=tool_name,
                 role=requested_by,
                 project_id=project_id,
                 task_id=task_id,
@@ -466,7 +467,7 @@ class FounderSurfacesMixin:
                 project_id=project_id,
                 task_id=task_id,
                 reason=reason,
-                manual_approval_only=cycle_controls is not None,
+                manual_approval_only=False,
             )
 
     def _propose_action_unlocked(

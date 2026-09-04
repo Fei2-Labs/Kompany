@@ -35,6 +35,7 @@ def resolve_cycle_controls(
 def enforce_cycle_proposal_gate(
     engine: Any,
     *,
+    tool_name: str,
     role: str,
     project_id: str | None,
     task_id: str | None,
@@ -50,6 +51,16 @@ def enforce_cycle_proposal_gate(
         reason = "scheduler_disabled" if mode == "disabled" else "scheduler_not_native"
         _audit_refusal(engine, reason, role, project_id, task_id)
         raise ValueError(reason)
+    allowed_tools = controls.get("auto_execute_tools", [])
+    if not isinstance(allowed_tools, list) or tool_name not in allowed_tools:
+        _audit_refusal(
+            engine,
+            "tool_not_auto_authorized",
+            role,
+            project_id,
+            task_id,
+        )
+        raise ValueError("tool_not_auto_authorized")
     try:
         limit = max(
             0,
@@ -72,6 +83,24 @@ def enforce_cycle_proposal_gate(
             task_id,
         )
         raise ValueError("proposal_budget_exhausted")
+    if tool_name.endswith(".post"):
+        daily_limit = max(0, int(controls.get("max_original_posts_per_day", 0)))
+        posts_today = engine.db.execute(
+            """SELECT COUNT(*) AS n FROM approval_requests
+               WHERE action_type = 'tool_action'
+                 AND json_extract(payload, '$.tool_name') = ?
+                 AND date(created_at, 'localtime') = date('now', 'localtime')""",
+            (tool_name,),
+        ).fetchone()["n"]
+        if int(posts_today) >= daily_limit:
+            _audit_refusal(
+                engine,
+                "daily_post_budget_exhausted",
+                role,
+                project_id,
+                task_id,
+            )
+            raise ValueError("daily_post_budget_exhausted")
 
 
 def _audit_refusal(

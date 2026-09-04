@@ -264,7 +264,9 @@ def test_cycle_task_prompt_includes_role_and_limits():
     assert "2" in prompt
     assert "7" in prompt
     assert "NOT_LOGGED_IN" in prompt
-    assert "APPROVAL" in prompt
+    assert "policy-gated and audited" in prompt
+    assert "linkedin_growth.follow" in prompt
+    assert "Never send a direct message" in prompt
 
 
 def test_cycle_task_prompt_falls_back_to_role_as_integration_id():
