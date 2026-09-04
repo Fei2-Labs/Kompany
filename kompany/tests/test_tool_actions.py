@@ -339,6 +339,7 @@ def test_cycle_proposal_cap_blocks_second_approval(engine):
         cycle_controls={
             "scheduler_mode": "native",
             "max_external_proposals_per_cycle": 1,
+            "auto_execute_tools": ["test.send"],
         },
     )
 
@@ -353,14 +354,16 @@ def test_cycle_proposal_cap_blocks_second_approval(engine):
             cycle_controls={
                 "scheduler_mode": "native",
                 "max_external_proposals_per_cycle": 1,
+                "auto_execute_tools": ["test.send"],
             },
         )
 
     assert first["action_type"] == "tool_action"
+    assert first["status"] == "pending"
     assert len(engine.approvals.list_pending()) == 1
 
 
-def test_cycle_proposal_never_uses_auto_approve_policy(engine):
+def test_cycle_proposal_uses_explicit_auto_approve_policy(engine):
     engine.credentials.set("custom_api_key", "k123")
     engine.set_tool_policy(
         "linkedin_growth",
@@ -379,11 +382,13 @@ def test_cycle_proposal_never_uses_auto_approve_policy(engine):
         cycle_controls={
             "scheduler_mode": "native",
             "max_external_proposals_per_cycle": 1,
+            "auto_execute_tools": ["test.send"],
         },
     )
 
-    assert card["status"] == "pending"
-    assert _SendTool.calls == []
+    assert card["status"] == "approved"
+    assert card["effect"]["status"] == "executed"
+    assert _SendTool.calls == ["manual"]
 
 
 def test_disabled_cycle_refuses_new_proposal(engine):
@@ -405,10 +410,30 @@ def test_disabled_cycle_refuses_new_proposal(engine):
     assert engine.approvals.list_pending() == []
 
 
+def test_cycle_proposal_refuses_tool_outside_auto_execute_allowlist(engine):
+    with pytest.raises(ValueError, match="tool_not_auto_authorized"):
+        engine.propose_action(
+            "test.send",
+            {"text": "blocked"},
+            summary="Blocked cycle action",
+            project_id="p1",
+            task_id="cycle-blocked-tool",
+            requested_by="linkedin_growth",
+            cycle_controls={
+                "scheduler_mode": "native",
+                "max_external_proposals_per_cycle": 1,
+                "auto_execute_tools": ["linkedin.engage"],
+            },
+        )
+
+    assert engine.approvals.list_pending() == []
+
+
 def test_cycle_proposal_cap_is_atomic(engine):
     controls = {
         "scheduler_mode": "native",
         "max_external_proposals_per_cycle": 1,
+        "auto_execute_tools": ["test.send"],
     }
     barrier = threading.Barrier(2)
     outcomes = []

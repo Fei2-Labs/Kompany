@@ -128,6 +128,11 @@ class ToolRegistry:
                 f"{GATED_PREFIX}tool {dispatch_name!r} could not be proposed for "
                 f"approval: {type(exc).__name__}: {exc}. No action taken."
             )
+        if isinstance(request, dict) and request.get("status") == "approved":
+            return (
+                f"EXECUTED: {dispatch_name} was auto-approved by explicit "
+                f"founder policy. Result: {request.get('tool_result', {})}"
+            )
         approval_id = (request or {}).get("id") if isinstance(request, dict) else None
         if approval_id:
             ctx.extra.setdefault("pending_approval_ids", []).append(approval_id)

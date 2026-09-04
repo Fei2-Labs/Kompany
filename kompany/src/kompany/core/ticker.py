@@ -649,12 +649,16 @@ def _cycle_task_prompt(role: str, cadence: dict[str, Any]) -> str:
         f"{dry_run_instruction}"
         f"1. Call {integration_id}.feed to discover on-theme posts (use a content-search query, not the home feed).\n"
         f"{history_instruction}"
-        f"3. Call {integration_id}.engage (comment) on up to {max_comments} on-theme posts — substantive, peer tone, no fabrication.\n"
-        f"4. If a clearly on-topic, non-pitch, zero-fabrication original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
+        f"3. Choose at most one policy-compliant external action for this cycle: "
+        f"call {integration_id}.engage to comment (up to {max_comments}) or like, "
+        f"call {integration_id}.follow using a feed-provided profile URL, or call "
+        f"{integration_id}.reply for one substantive reply. Never send a direct message.\n"
+        f"4. Alternatively, if a clearly on-topic, non-pitch, zero-fabrication "
+        f"original post is ready, call {integration_id}.post (max {max_posts}/day).\n"
         f"5. Call {integration_id}.notifications; classify substantive replies for one bounded response and record low-signal skips.\n"
         f"6. Call {integration_id}.metrics and record the snapshot in the journal.\n"
         f"7. If any tool returns NOT_LOGGED_IN, stop and surface a system alert — do not retry.\n"
-        f"Every engage/post is EXTERNAL_ACTION at APPROVAL tier — the engine gates it; propose, do not force.\n"
+        f"Every external action is policy-gated and audited. Never retry a refused or failed action.\n"
     )
 
 
