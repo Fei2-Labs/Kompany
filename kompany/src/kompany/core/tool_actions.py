@@ -268,16 +268,34 @@ def reject_tool_action(engine: Any, request: "ApprovalRequest") -> dict[str, Any
 # ---------------------------------------------------------------------------
 
 
-def _tool_context(engine: Any) -> ToolContext:
+def build_tool_context(
+    engine: Any, *, project_id: str | None = None, run_id: str | None = None
+) -> ToolContext:
+    """The full service bundle a Tool / workflow callable receives (1.1.0).
+
+    Every optional store is looked up with ``getattr`` so a partial engine
+    (tests, FakeEngine) still yields a usable context.
+    """
+    from kompany.core.event_hub import get_event_hub
     from kompany.core.run_context import current_run_id
 
     return ToolContext(
-        run_id=current_run_id() or "",
+        run_id=run_id if run_id is not None else (current_run_id() or ""),
         ledger=engine.ledger,
         audit=engine.audit,
-        credentials=engine.credentials,
+        credentials=getattr(engine, "credentials", None),
         settings=engine.settings,
+        project_id=project_id,
+        documents=getattr(engine, "documents", None),
+        artifacts=getattr(engine, "artifacts", None),
+        approvals=getattr(engine, "approvals", None),
+        journal=getattr(engine, "journal", None),
+        events=get_event_hub(),
     )
+
+
+def _tool_context(engine: Any) -> ToolContext:
+    return build_tool_context(engine)
 
 
 def _tool_result_succeeded(out: dict[str, Any]) -> bool:

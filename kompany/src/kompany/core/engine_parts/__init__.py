@@ -17,6 +17,7 @@ from kompany.core.engine_parts.governance import GovernanceMixin
 from kompany.core.engine_parts.handlers import DirectiveHandlersMixin
 from kompany.core.engine_parts.agentic_chat import AgenticChatMixin
 from kompany.core.engine_parts.skill_crystallize import SkillCrystallizationMixin
+from kompany.core.engine_parts.workflows import WorkflowsMixin
 
 __all__ = [
     "AgenticChatMixin",
@@ -36,5 +37,6 @@ __all__ = [
     "ApprovalsMixin",
     "GovernanceMixin",
     "DirectiveHandlersMixin",
+    "WorkflowsMixin",
     "AgenticChatMixin",
 ]

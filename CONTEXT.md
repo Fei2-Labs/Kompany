@@ -32,4 +32,7 @@ Runtime invariants for agent routing, cost tracking, time handling, and governed
 AGPL-3.0 (dual-licensed) boundary: Core (engine + plugin contract) is open; Pro (workflow library + agent souls + integrations) is a separate private package; Cloud is a future SaaS. Rationale: [`docs/why-agpl.md`](docs/why-agpl.md) and the README "Open Core" section.
 
 ## [Plugin Contract](docs/context/plugin-contract.md)
-Stable Core↔Pro surface at `kompany.plugins.*` (v1.0.0). Five ABCs: Tool / AgentSoul / Integration / Workflow / Template. Discovery via Python entry points; compat via pip dep pinning. See [ADR-0002](docs/adr/0002-plugin-contract-design.md).
+Stable Core↔Pro surface at `kompany.plugins.*` (v1.1.0). Five ABCs: Tool / AgentSoul / Integration / Workflow / Template (+ OutwardExecutor). Discovery via Python entry points; compat via pip dep pinning. 1.1.0 adds optional `ToolContext` service stores (documents / artifacts / approvals / journal / events), `Workflow.bind(engine)`, and `engine.register_approval_effect`. See [ADR-0002](docs/adr/0002-plugin-contract-design.md).
+
+## [Branding Department](docs/context/branding-department.md)
+Brand strategy + gated visual brand-system as a Workflow/Tool plugin (no new permanent roles): CMO owns strategy/voice, CV owns visuals/Brand Lock, CEO recommends, founder approves via the existing inbox. Brand Memory = versioned documents in Core's generic `ProjectDocumentStore`; approved versions immutable; artifacts declare JSON-path dependencies and go stale on upstream change. Slice 1 (`brand-foundation`) shipped; visual/campaign/audit slices pending.

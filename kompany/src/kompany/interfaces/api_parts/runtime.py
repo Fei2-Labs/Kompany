@@ -70,6 +70,32 @@ class ToolProposeRequest(BaseModel):
     task_id: str | None = None
 
 
+class WorkflowRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    project_id: str | None = None
+
+
+@router.get("/workflows")
+def list_workflows_catalog() -> list[dict[str, Any]]:
+    """Workflow catalog (built-in + plugin) with step list + cost preview."""
+    engine = get_engine()
+    return engine.workflows_list()
+
+
+@router.post("/workflows/{workflow_id}/run")
+def run_workflow_endpoint(workflow_id: str, req: WorkflowRunRequest) -> dict[str, Any]:
+    """Run a workflow now. Gated steps file inbox approval cards; the run
+    itself never spends beyond the agents' own LLM calls (ledger-booked)."""
+    from kompany.core.workflows_registry import WorkflowNotFound
+
+    engine = get_engine()
+    try:
+        return engine.run_workflow(workflow_id, req.inputs, project_id=req.project_id)
+    except WorkflowNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/tools")
 def list_tools_registry() -> list[dict[str, Any]]:
     """Registered tools with side_effect / autonomy tier / connection state."""

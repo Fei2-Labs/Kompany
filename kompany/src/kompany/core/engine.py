@@ -34,12 +34,14 @@ from kompany.notifications import build_notifier
 from kompany.remote import RemoteCommandRequest, RemoteCommandResult, parse_remote_text
 from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
+from kompany.state.artifacts import ArtifactStore
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
 from kompany.state.conversation import ConversationStore
 from kompany.state.credentials import ALLOWED_CREDENTIALS, CredentialVaultStore
 from kompany.state.vault_keys import resolve_vault_key
 from kompany.state.database import Database
+from kompany.state.documents import ProjectDocumentStore
 from kompany.state.journal import Journal
 from kompany.state.ledger import Ledger
 from kompany.state.models import (
@@ -138,6 +140,7 @@ from kompany.core.engine_parts import (
     ApprovalsMixin,
     GovernanceMixin,
     DirectiveHandlersMixin,
+    WorkflowsMixin,
 )
 
 log = logging.getLogger(__name__)
@@ -161,6 +164,7 @@ class KompanyEngine(
     ApprovalsMixin,
     GovernanceMixin,
     DirectiveHandlersMixin,
+    WorkflowsMixin,
     TargetReviewMixin,
     DirectiveProposalMixin,
 ):
@@ -184,6 +188,10 @@ class KompanyEngine(
         self.episodes = Episodes(self.db)
         self.health_events = HealthEvents(self.db)
         self.approvals = ApprovalRequests(self.db)
+        # Generic versioned documents + artifacts (contract 1.1.0). Plugins
+        # scope by namespace; Core never interprets the content.
+        self.documents = ProjectDocumentStore(self.db)
+        self.artifacts = ArtifactStore(self.db)
         self.channel = ConversationStore(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
@@ -396,6 +404,10 @@ class KompanyEngine(
             str,
             Callable[[ApprovalRequest, str], ApprovalRequest],
         ] = {}
+        # Pluggable post-resolve effects keyed by ``action_type`` (contract
+        # 1.1.0). Workflow plugins register their approval gates here from
+        # ``Workflow.bind``; consulted before the built-in effect chain.
+        self._approval_effects: dict[str, tuple[Callable | None, Callable | None]] = {}
         # The target_feasibility action_type uses a dedicated revision
         # handler so a founder counter-proposal carries the parsed numbers
         # forward into the successor approval (not just a hint string).
@@ -421,6 +433,9 @@ class KompanyEngine(
                 self, original, hint
             ),
         )
+        # Contract 1.1.0: let discovered Workflow plugins attach their gate
+        # effects / revision handlers. Never blocks boot (see mixin).
+        self.plugin_bind_errors: list[tuple[str, str]] = self._bind_workflow_plugins()
 
     def get_delegation(self, delegation_id: str):
         return self.delegations.get(delegation_id)

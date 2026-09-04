@@ -125,6 +125,31 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kompany_workflows_list",
+        description=(
+            "List workflows (built-in + plugin): id, display name, source, "
+            "steps with agent role / autonomy tier, LLM cost preview."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="kompany_workflow_run",
+        description=(
+            "Run a workflow by id with optional initial inputs. Steps that "
+            "need the founder file inbox approval cards; nothing auto-spends "
+            "beyond the agents' own ledger-booked LLM calls."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workflow_id": {"type": "string", "description": "Workflow id"},
+                "inputs": {"type": "object", "description": "Initial inputs"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["workflow_id"],
+        },
+    ),
+    Tool(
         name="kompany_agent_work_summary",
         description=(
             "Per-agent task-history summary keyed by lowercase role: "

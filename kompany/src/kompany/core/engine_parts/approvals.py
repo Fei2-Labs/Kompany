@@ -131,6 +131,12 @@ class ApprovalsMixin:
             )
             # Action-type-specific post-resolve hook. Keep this list short
             # and inline so new action_types are easy to spot.
+            # Plugin-registered gate (contract 1.1.0) wins over built-ins.
+            plugin_effect = _plugin_approval_effect(self, request, "approve")
+            if plugin_effect is not None:
+                payload = request.model_dump(mode="json")
+                payload["effect"] = plugin_effect
+                return payload
             if request.action_type == "target_feasibility":
                 self._finalize_target_feasibility(request, outcome="approved")
             if request.action_type == "glossary_review":
@@ -189,6 +195,11 @@ class ApprovalsMixin:
                 directive_id=request.directive_id,
                 project_id=request.project_id,
             )
+            plugin_effect = _plugin_approval_effect(self, request, "reject")
+            if plugin_effect is not None:
+                payload = request.model_dump(mode="json")
+                payload["effect"] = plugin_effect
+                return payload
             if request.action_type == "target_feasibility":
                 self._finalize_target_feasibility(request, outcome="rejected")
             if request.action_type == "glossary_review":
@@ -208,6 +219,28 @@ class ApprovalsMixin:
     # ------------------------------------------------------------------
     # Approval thread + RPG inbox (05-18-approval-thread-and-rpg)
     # ------------------------------------------------------------------
+
+    def register_approval_effect(
+        self,
+        action_type: str,
+        on_approve: Callable[[object, ApprovalRequest], dict] | None = None,
+        on_reject: Callable[[object, ApprovalRequest], dict] | None = None,
+    ) -> None:
+        """Register post-resolve effects for one ``action_type`` (1.1.0).
+
+        Symmetric to :meth:`register_revision_handler`. Each callable
+        receives ``(engine, request)`` and returns a JSON-able summary
+        dict. Effects MUST be idempotent — stamp ``effect_applied`` into
+        the approval payload (``engine.approvals.update_payload``) and
+        return ``{"status": "already_applied"}`` on replay, matching
+        ``core/approval_effects.py``. Registered effects are consulted
+        before the built-in chain; re-registering replaces.
+        """
+        if on_approve is not None and not callable(on_approve):
+            raise TypeError("on_approve must be callable")
+        if on_reject is not None and not callable(on_reject):
+            raise TypeError("on_reject must be callable")
+        self._approval_effects[action_type] = (on_approve, on_reject)
 
     def register_revision_handler(
         self,
@@ -424,3 +457,33 @@ class ApprovalsMixin:
         """Persist a target snapshot keyed by ``targets.source``."""
         return set_company_targets(self.db, targets)
 
+
+def _plugin_approval_effect(
+    engine: object, request: ApprovalRequest, outcome: str
+) -> dict | None:
+    """Run the plugin-registered effect for ``request`` if any; None otherwise.
+
+    Module-level (not a mixin method) so partial engines that only borrow
+    ``approve_request`` / ``reject_request`` still work.
+    """
+    handlers = getattr(engine, "_approval_effects", {}).get(request.action_type)
+    if not handlers:
+        return None
+    fn = handlers[0] if outcome == "approve" else handlers[1]
+    if fn is None:
+        return None
+    try:
+        return fn(engine, request)
+    except Exception as exc:  # noqa: BLE001 — surface, never lose the approval
+        engine.audit.record(  # type: ignore[attr-defined]
+            "approval_effect.failed",
+            f"Plugin effect for {request.action_type} raised",
+            detail={
+                "approval_id": request.id,
+                "outcome": outcome,
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+            directive_id=request.directive_id,
+            project_id=request.project_id,
+        )
+        return {"status": "effect_failed", "error": f"{type(exc).__name__}: {exc}"}
