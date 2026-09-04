@@ -158,6 +158,21 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_tools_list":
         return engine.tools_list()
 
+    if name == "kompany_workflows_list":
+        return engine.workflows_list()
+
+    if name == "kompany_workflow_run":
+        from kompany.core.workflows_registry import WorkflowNotFound
+
+        try:
+            return engine.run_workflow(
+                arguments["workflow_id"],
+                arguments.get("inputs", {}) or {},
+                project_id=arguments.get("project_id"),
+            )
+        except WorkflowNotFound as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_integrations":
         return engine.integrations_list()
 

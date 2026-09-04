@@ -26,6 +26,7 @@ from kompany.core.workflow_runner import StepResult
 if TYPE_CHECKING:
     from kompany.agents.registry import AgentRegistry
     from kompany.core.workflow_runner import WorkflowRunner
+    from kompany.plugins.contract import ToolContext
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +52,11 @@ class ExecutorContext:
     company_state: dict[str, Any] | None = None
     directive_id: str | None = None
     initial_inputs: Mapping[str, Any] | None = None
+    tool_context: "ToolContext | None" = None
+    """Contract 1.1.0: the same service bundle Tools receive (documents,
+    artifacts, approvals, journal, events, ledger, audit, settings).
+    ``python_callable`` steps read it as ``ctx.tool_context``; None when the
+    runner is driven without an engine (unit tests, dry runs)."""
 
 
 def _format(template: str, scope: Mapping[str, Any]) -> str:

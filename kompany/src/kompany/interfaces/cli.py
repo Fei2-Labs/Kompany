@@ -66,4 +66,5 @@ app.add_typer(workspace_app, name="workspace")
 from kompany.interfaces.cli_parts import (  # noqa: E402,F401
     ops as _cli_ops,
     misc as _cli_misc,
+    workflows as _cli_workflows,
 )

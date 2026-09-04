@@ -157,6 +157,21 @@ class KompanySettingsOps:
         ``kompany_tools_list`` (action pipeline #4/#5)."""
         return self._engine.tools_list()
 
+    def workflows_list(self) -> list[dict[str, Any]]:
+        """Workflow catalog (built-in + plugin) with cost preview. Same
+        shape as REST ``GET /workflows`` and MCP ``kompany_workflows_list``."""
+        return self._engine.workflows_list()
+
+    def run_workflow(
+        self,
+        workflow_id: str,
+        inputs: dict[str, Any] | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run a workflow now; returns per-step outputs + cost. Gated steps
+        file inbox cards. Raises ``WorkflowNotFound`` for an unknown id."""
+        return self._engine.run_workflow(workflow_id, inputs or {}, project_id=project_id)
+
     def integrations_list(self) -> list[dict[str, Any]]:
         """Registered integrations with required credentials + connection
         state. Same shape as REST ``GET /integrations`` and MCP

@@ -46,7 +46,7 @@ from kompany.plugins.contract import (
 )
 from kompany.plugins.loader import discover, registered
 
-__contract_version__ = "1.0.0"
+__contract_version__ = "1.1.0"
 
 ENTRY_POINT_GROUPS = (
     "kompany.workflows",

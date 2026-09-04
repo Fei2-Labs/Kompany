@@ -1,6 +1,6 @@
 # Plugin Contract
 
-Status: v1.0.0 (decided 2026-05-22). See [ADR-0002](../adr/0002-plugin-contract-design.md) for trade-off record.
+Status: v1.1.0 (1.0.0 decided 2026-05-22; 1.1.0 additive bump 2026-09-04, see §"1.1.0 additions"). See [ADR-0002](../adr/0002-plugin-contract-design.md) for the trade-off record.
 
 The plugin contract is the stable Core↔Pro integration surface, defined in `kompany.plugins.*`. Pro / community packages register contributions via Python entry points and pin a Core version range in their `pyproject.toml`.
 
@@ -68,6 +68,20 @@ Every Tool declares:
 | `execute(inputs, ctx)` | → output | Engine has already applied AutonomyGate by the time this runs |
 
 The engine wraps every Tool invocation with: cost preview emit → AutonomyGate check → execute → ledger row → audit event → cost STREAM emit. Tool authors do not write any of that plumbing.
+
+## 1.1.0 additions (additive, 2026-09-04)
+
+All new fields default to `None` / no-op, so every 1.0.0 plugin keeps working unchanged.
+
+| Surface | Addition | Purpose |
+|---|---|---|
+| `ToolContext` | optional `company_id`, `project_id`, `documents`, `artifacts`, `approvals`, `journal`, `events` | Plugins reach Core's generic stores (versioned `ProjectDocumentStore`, `ArtifactStore` + dependencies), file gates in the existing `ApprovalRequests`, write the decision journal, publish live events — instead of inventing parallel persistence/approval systems. Plugins MUST tolerate `None` (standalone loop registries do not provide them). |
+| `ExecutorContext.tool_context` | same bundle for workflow `python_callable` steps | A callable step gets `ctx.tool_context.documents` etc. `None` when a bare `WorkflowRunner` is driven without the engine. |
+| `Workflow.bind(engine)` | boot hook, default no-op | Called once per discovered Workflow at engine init (failures are audited as `plugin.bind_failed`, never block boot). Use it to call `engine.register_approval_effect(action_type, on_approve, on_reject)` and `engine.register_revision_handler(...)` for the gates the workflow files. |
+| Engine ops | `engine.run_workflow(workflow_id, inputs, project_id=…)`, `engine.workflows_list()` | Runs a Workflow plugin with the production step executor + full `ToolContext`; audits `workflow.started/completed/failed`; publishes `workflow.cost_preview`. Exposed on CLI (`kompany workflows list|run`), REST (`GET /workflows`, `POST /workflows/{id}/run`), MCP (`kompany_workflows_list`, `kompany_workflow_run`), SDK. |
+| Approval effects | `engine.register_approval_effect` | Plugin-registered post-approve / post-reject effects are consulted before the built-in chain. Effects must be idempotent: stamp `effect_applied` in the payload and return `{"status": "already_applied"}` on replay. |
+
+Reference consumer: the branding department plugin in kompany-pro (`kompany_pro/branding`), documented in [branding-department.md](branding-department.md).
 
 ## AgentSoul YAML schema (sketch)
 
@@ -152,6 +166,6 @@ Deferred (additive bumps when needed):
 
 - ABCs: `kompany/src/kompany/plugins/contract.py`
 - Loader: `kompany/src/kompany/plugins/loader.py`
-- Tests: `kompany/tests/test_plugins_contract.py`
+- Tests: `kompany/tests/test_plugins_contract.py`, `kompany/tests/test_engine_workflows.py`, `kompany/tests/test_documents_store.py`, `kompany/tests/test_artifacts_store.py`
 - Decision: [ADR-0002](../adr/0002-plugin-contract-design.md)
 - Boundary: the README "Open Core — Core / Pro / Cloud" section

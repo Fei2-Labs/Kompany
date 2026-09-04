@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from .migrations_documents import run_migrations_documents
+
 
 def run_migrations_part2(conn: sqlite3.Connection) -> None:
     """Continuation of run_migrations; applied in the same startup pass."""
@@ -230,3 +232,7 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
            )"""
     )
+
+    # Generic versioned documents + artifacts (state/documents.py,
+    # state/artifacts.py). Domain-neutral; plugins pick namespaces.
+    run_migrations_documents(conn)

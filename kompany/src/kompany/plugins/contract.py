@@ -95,6 +95,24 @@ class ToolContext:
     credentials: Any  # kompany.state.credentials.Credentials
     settings: Any  # kompany.config.settings.KompanySettings
 
+    # --- contract 1.1.0 additions (all optional; None when the host does
+    # not provide them, e.g. a standalone agentic-loop registry). Plugins
+    # MUST tolerate None and degrade rather than crash. ---
+    company_id: str | None = None
+    """Operating company scope, when the host runs multi-company."""
+    project_id: str | None = None
+    """Project the call runs under (scopes documents / artifacts)."""
+    documents: Any = None  # kompany.state.documents.ProjectDocumentStore
+    """Versioned, domain-neutral document store (draft/propose/approve...)."""
+    artifacts: Any = None  # kompany.state.artifacts.ArtifactStore
+    """Artifact registry + document dependencies for stale-marking."""
+    approvals: Any = None  # kompany.state.approvals.ApprovalRequests
+    """Existing approval inbox — plugins file gates here, never their own."""
+    journal: Any = None  # kompany.state.journal.Journal
+    """Append-only decision journal."""
+    events: Any = None  # kompany.core.event_hub.EventHub
+    """Process-local pub/sub for live UI feeds (``publish(type, payload)``)."""
+
 
 # ---------------------------------------------------------------------------
 # The 5 plugin ABCs
@@ -186,6 +204,19 @@ class Workflow(ABC):
     @abstractmethod
     def estimate_cost(self) -> CostEstimate:
         """Sum of all step cost estimates. Engine calls before run."""
+
+    def bind(self, engine: Any) -> None:
+        """Boot-time hook (contract 1.1.0) — attach to the running engine.
+
+        Called once per discovered Workflow when the engine initializes.
+        The default is a no-op. Override to register approval-gate effects
+        (``engine.register_approval_effect``) or revision handlers
+        (``engine.register_revision_handler``) for the ``action_type``s
+        this workflow files. Must not perform LLM calls, spend, or block;
+        exceptions are caught by the engine and surfaced as a plugin-bind
+        error so one broken plugin never blocks boot.
+        """
+        return None
 
 
 class Integration(ABC):

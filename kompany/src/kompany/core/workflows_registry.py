@@ -57,6 +57,18 @@ def _pro_workflows() -> list[Any]:
         return []
 
 
+def plugin_for(workflow_id: str) -> Any | None:
+    """Return the Pro ``Workflow`` plugin instance declaring ``workflow_id``.
+
+    ``None`` for built-in YAML workflows (they have no Python side) and for
+    unknown ids. Callers use it to reach ``python_callables`` / ``bind``.
+    """
+    for plugin in _pro_workflows():
+        if getattr(plugin, "workflow_id", "") == workflow_id:
+            return plugin
+    return None
+
+
 def list_workflows() -> list[str]:
     """Return all known workflow ids — built-in + Pro."""
     ids: list[str] = []

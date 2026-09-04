@@ -30,7 +30,7 @@ from kompany.plugins import (
 
 
 def test_contract_version_pinned():
-    assert __contract_version__ == "1.0.0"
+    assert __contract_version__ == "1.1.0"
 
 
 def test_entry_point_groups_are_the_plugin_kinds():
@@ -65,8 +65,18 @@ def test_cost_estimate_total():
 
 
 def test_tool_context_required_fields():
-    fields = {f for f in ToolContext.__dataclass_fields__}
-    assert fields == {"run_id", "ledger", "audit", "credentials", "settings"}
+    """1.0.0 required fields stay required; 1.1.0 additions are optional."""
+    fields = ToolContext.__dataclass_fields__
+    required = {"run_id", "ledger", "audit", "credentials", "settings"}
+    assert required <= set(fields)
+    optional_1_1 = {
+        "company_id", "project_id", "documents", "artifacts",
+        "approvals", "journal", "events",
+    }
+    assert set(fields) == required | optional_1_1
+    # Every 1.1.0 addition defaults to None so 1.0.0 call sites still work.
+    ctx = ToolContext(run_id="r", ledger=1, audit=2, credentials=3, settings=4)
+    assert all(getattr(ctx, name) is None for name in optional_1_1)
 
 
 @pytest.mark.parametrize(
