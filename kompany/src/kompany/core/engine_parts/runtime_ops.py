@@ -5,6 +5,8 @@ Extracted verbatim from core/engine.py (ADR-0003 split).
 
 from __future__ import annotations
 
+from secrets import compare_digest
+
 
 from kompany.core.subscription_fee import book_subscription_fee_if_due
 from kompany.notifications import build_notifier
@@ -200,7 +202,7 @@ class RuntimeOpsMixin:
             expected = self.settings.mobile_remote_token
             if not expected:
                 return "mobile remote control is not configured"
-            if request.bearer_token != expected:
+            if not compare_digest(str(request.bearer_token or ""), str(expected)):
                 return "mobile bearer token is invalid"
             return ""
         return "remote source is not supported"

@@ -13,6 +13,7 @@ import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
+from kompany.core.harness.env_scrub import scrubbed_env
 
 __all__ = ["TOOL_DOCS", "execute_tool", "tool_names"]
 
@@ -109,6 +110,9 @@ def _run_shell(workspace: Path, args: dict[str, Any]) -> str:
             text=True,
             timeout=SHELL_TIMEOUT_SECONDS,
             stdin=subprocess.DEVNULL,
+            # LLM-controlled command: never hand it the engine's API keys /
+            # vault key via the inherited environment (security audit).
+            env=scrubbed_env(),
         )
     except subprocess.TimeoutExpired:
         return f"ERROR: command timed out after {SHELL_TIMEOUT_SECONDS:.0f}s."

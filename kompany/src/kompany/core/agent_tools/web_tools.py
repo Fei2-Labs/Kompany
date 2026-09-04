@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from kompany.core.agent_tools.base import FunctionTool, SideEffect, ToolContext
+from kompany.core.agent_tools.net_guard import BlockedURL, fetch_with_guard
 
 __all__ = ["web_tools", "web_fetch_tool", "web_search_tool"]
 
@@ -75,12 +76,15 @@ def _web_fetch(args: dict[str, Any], ctx: ToolContext) -> str:
     if not url.startswith(("http://", "https://")):
         return f"ERROR: url {url!r} must start with http:// or https://."
     try:
-        resp = httpx.get(
+        # SSRF guard: public hosts only, every redirect hop re-checked.
+        resp = fetch_with_guard(
             url,
+            client_get=httpx.get,
             timeout=HTTP_TIMEOUT_SECONDS,
-            follow_redirects=True,
             headers={"User-Agent": "Kompany/agentic-fetch"},
         )
+    except BlockedURL as exc:
+        return f"ERROR: web_fetch refused {url}: {exc}"
     except httpx.HTTPError as exc:
         return f"ERROR: web_fetch failed for {url}: {type(exc).__name__}: {exc}"
     ctype = resp.headers.get("content-type", "")

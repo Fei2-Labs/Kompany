@@ -6,8 +6,10 @@ sidecar's single engine. The handler reuses the exact
 :func:`dispatch_tool` the stdio MCP server uses, so tool behavior is
 identical in proxy and in-process modes by construction.
 
-Security posture: matches the rest of the loopback REST surface
-(unauthenticated on 127.0.0.1), per the task's explicit non-goal.
+Security posture: covered by ``interfaces/api_guard.py`` like every other
+route — origin-checked always, token-gated when ``web_dashboard_token`` is
+set (the stdio ``kompany-mcp`` proxy runs on the same machine and reads the
+token from settings).
 
 Long calls: ``kompany_execute`` can run for minutes. The handler is a
 sync ``def`` so FastAPI runs it in the threadpool, and uvicorn does not

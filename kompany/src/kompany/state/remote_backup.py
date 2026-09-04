@@ -30,6 +30,7 @@ import is lazy so the engine boots fine without it.
 from __future__ import annotations
 
 import io
+import os
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,11 +133,18 @@ def upload_bundle(
     if client is None:
         client = _s3_client(cfg)
     created_at = datetime.now(UTC)
-    # Create the bundle in memory (avoid touching disk on the VPS).
-    buf = io.BytesIO()
-    meta = create_bundle(data_dir, cfg.passphrase, out_path=Path("/tmp/_remote_backup.kmp"))
-    bundle_bytes = Path(meta["path"]).read_bytes()
-    Path(meta["path"]).unlink(missing_ok=True)
+    # Stage the bundle inside the (0700) data dir with a 0600 temp file —
+    # never in world-readable /tmp (security audit 2026-09-04).
+    import tempfile
+
+    fd, tmp_name = tempfile.mkstemp(prefix="_remote_backup-", suffix=".kmp", dir=str(data_dir))
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        meta = create_bundle(data_dir, cfg.passphrase, out_path=tmp_path)
+        bundle_bytes = Path(meta["path"]).read_bytes()
+    finally:
+        tmp_path.unlink(missing_ok=True)
     key = _bundle_key(cfg, created_at)
     client.put_object(
         Bucket=cfg.bucket,

@@ -626,7 +626,7 @@ kompany serve --host 0.0.0.0 --port 8000
 
 Then open `http://<your-machine's-LAN-IP>:8000/ui/` on the phone (find the IP with `ipconfig getifaddr en0` on macOS).
 
-**Security warning:** the engine's REST API uses a localhost-trust model — the approval and directive endpoints have **no authentication** (only the read-only `/dashboard` page is gated by `web_dashboard_token`). Binding to `0.0.0.0` exposes those endpoints to everyone on that network. Only do this on a network you trust (home Wi-Fi), never on café/office/public networks, and never port-forward it to the internet.
+**Authentication is required off-loopback.** Set `WEB_DASHBOARD_TOKEN` (env) or `web_dashboard_token` in `config.yaml` first — the server **refuses to bind** a non-loopback address without it (override only on purpose with `KOMPANY_ALLOW_OPEN_BIND=1`, e.g. behind an authenticating reverse proxy). With a token configured, **every** route (approvals, directives, credentials, tools, SSE) requires it: open `http://<ip>:8000/dashboard/login` once on the phone to get a session cookie, or send `Authorization: Bearer <token>` from scripts. Cross-site browser requests are refused regardless (origin check), and `KOMPANY_ALLOWED_HOSTS=<host,...>` adds a Host allowlist against DNS rebinding. Still prefer a trusted network or the overlay-network path below; never port-forward the API to the internet without TLS in front.
 
 ### Remote (away from home): use a private overlay network
 

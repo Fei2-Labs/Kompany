@@ -195,6 +195,9 @@ def test_file_patch_missing_file(ctx):
 # --------------------------------------------------------------------- #
 
 def test_web_fetch_strips_html(monkeypatch, ctx):
+    # SSRF guard resolves the host first; pin the test host to a public IP.
+    monkeypatch.setattr("kompany.core.agent_tools.net_guard._resolve", lambda h: ["93.184.216.34"])
+
     def fake_get(url, **kwargs):
         return httpx.Response(
             200,
@@ -216,6 +219,8 @@ def test_web_fetch_rejects_non_http(ctx):
 
 
 def test_web_fetch_network_error_is_observation(monkeypatch, ctx):
+    monkeypatch.setattr("kompany.core.agent_tools.net_guard._resolve", lambda h: ["93.184.216.34"])
+
     def fake_get(url, **kwargs):
         raise httpx.ConnectError("boom", request=httpx.Request("GET", url))
 

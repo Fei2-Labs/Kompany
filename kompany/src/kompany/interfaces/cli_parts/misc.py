@@ -167,6 +167,14 @@ def serve(
         )
         raise typer.Exit(1) from exc
 
+    from kompany.interfaces.api_guard import assert_bind_allowed
+
+    try:
+        assert_bind_allowed(host, _get_engine(None).settings)
+    except SystemExit as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(1) from exc
+
     url = f"http://{host}:{port}/ui/"
     console.print(f"[green]Kompany backend on[/green] http://{host}:{port}")
     console.print(f"[green]UI on[/green] {url}")

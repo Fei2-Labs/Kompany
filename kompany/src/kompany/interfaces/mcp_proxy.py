@@ -267,12 +267,13 @@ def proxy_tool_call(
     """
     body = json.dumps({"name": name, "arguments": arguments}).encode("utf-8")
     target = f"{base_url}/mcp/tool" if base_url else f"http://127.0.0.1:{port}/mcp/tool"
-    request = urllib.request.Request(
-        target,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    headers = {"Content-Type": "application/json"}
+    # The sidecar's api_guard token-gates /mcp/tool when a dashboard token is
+    # configured; present it (env override first, then settings).
+    token = _proxy_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(target, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
@@ -286,6 +287,21 @@ def proxy_tool_call(
             message = str(payload["error"])
         raise SidecarProxyError(message)
     return payload.get("result")
+
+
+def _proxy_token() -> str:
+    """Bearer token for the sidecar bridge: ``KOMPANY_REMOTE_TOKEN`` /
+    ``WEB_DASHBOARD_TOKEN`` env, else the configured ``web_dashboard_token``."""
+    for name in ("KOMPANY_REMOTE_TOKEN", "WEB_DASHBOARD_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    try:
+        from kompany.config.settings import KompanySettings
+
+        return str(KompanySettings.load(None).web_dashboard_token or "")
+    except Exception:  # noqa: BLE001 — no settings yet: send no token
+        return ""
 
 
 def _http_error_message(exc: urllib.error.HTTPError) -> str:

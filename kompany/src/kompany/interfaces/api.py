@@ -34,6 +34,13 @@ app = FastAPI(
 )
 app.include_router(mcp_bridge_router)
 
+# Access guard (security audit 2026-09-04): origin/CSRF check on every
+# request, token gate on every route when web_dashboard_token is set. Added
+# first so it wraps the CORS middleware below (outermost layer).
+from kompany.interfaces.api_guard import ApiAccessGuard  # noqa: E402
+
+app.add_middleware(ApiAccessGuard)
+
 # CORS (07-14 cloud-deploy): when the engine runs on a VPS, the
 # kompany-world UI and other browser clients need cross-origin access.
 # Opt-in via KOMPANY_CORS_ORIGINS (comma-separated). Default off —

@@ -46,6 +46,13 @@ from kompany.core.agent_tools.mcp_client import (
 from kompany.core.agent_tools.chat_registry import build_chat_registry
 
 
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """SSRF guard resolves hosts; .test names are pinned to a public IP here."""
+    monkeypatch.setattr("kompany.core.agent_tools.net_guard._resolve", lambda h: ["93.184.216.34"])
+
+
+
 # ===================================================================== #
 # Browser tools
 # ===================================================================== #

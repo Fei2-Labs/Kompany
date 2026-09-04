@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from kompany.core.agent_tools.base import FunctionTool, SideEffect, ToolContext
+from kompany.core.agent_tools.net_guard import BlockedURL, check_url
 
 __all__ = [
     "browser_tools",
@@ -193,6 +194,10 @@ def _navigate(args: dict[str, Any], ctx: ToolContext) -> str:
         return "ERROR: browser_navigate requires a 'url'."
     if not url.startswith(("http://", "https://")):
         return f"ERROR: url {url!r} must start with http:// or https://."
+    try:
+        check_url(url)  # SSRF guard: no loopback / LAN / metadata targets
+    except BlockedURL as exc:
+        return f"ERROR: browser_navigate refused {url}: {exc}"
     page, err = _session(ctx).page()
     if err:
         return err
