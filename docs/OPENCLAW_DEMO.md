@@ -351,7 +351,7 @@ Start the API server:
 
 ```bash
 pip install -e ".[api]"
-uvicorn kompany.interfaces.api:app --host 0.0.0.0 --port 8000
+WEB_DASHBOARD_TOKEN=<strong-token> uvicorn kompany.interfaces.api:app --host 0.0.0.0 --port 8000   # token required off-loopback; send Authorization: Bearer <token>
 ```
 
 Test with curl:

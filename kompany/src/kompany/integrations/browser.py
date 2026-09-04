@@ -102,7 +102,12 @@ def _run_script(
     on top of the current process env.
     """
     script_path = Path(cfg.script_dir) / script_name
-    env = dict(os.environ)
+    # Node drives a real browser on pages the agent chose: start from an
+    # environment without the engine's secrets; cfg/extra_env add back only
+    # what the script needs (security audit 2026-09-04).
+    from kompany.core.harness.env_scrub import scrubbed_env
+
+    env = scrubbed_env()
     if cfg.cdp_port:
         env["CDP_PORT"] = str(cfg.cdp_port)
     if cfg.node_modules_dir:

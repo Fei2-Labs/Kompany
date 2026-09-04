@@ -68,6 +68,12 @@ def run_server(
 
     import uvicorn
 
+    from kompany.config.settings import KompanySettings
+    from kompany.interfaces.api_guard import assert_bind_allowed
+
+    # Never expose an unauthenticated API beyond loopback by accident.
+    assert_bind_allowed(host, KompanySettings.load(None))
+
     from kompany.interfaces.mcp_proxy import (
         remove_discovery_file,
         write_discovery_file,
