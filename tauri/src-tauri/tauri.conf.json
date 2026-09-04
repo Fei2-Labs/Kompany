@@ -25,6 +25,9 @@
     "longDescription": "Kompany runs an autonomous C-suite for solo founders. The desktop app spawns a local Python sidecar and shows the cyberpunk dashboard in a native window.",
     "resources": [
       "binaries/**/*"
-    ]
+    ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }
