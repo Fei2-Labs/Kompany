@@ -1110,12 +1110,41 @@ def test_engine_credential_methods_do_not_return_or_audit_secret(engine):
 
     assert result["name"] == "telegram_bot_token"
     assert "secret-token" not in str(result)
-    assert listed[0]["name"] == "telegram_bot_token"
+    # list() now returns the full catalog (ALLOWED_CREDENTIALS), marking
+    # each row configured=True/False. Find the telegram row rather than
+    # assuming position 0.
+    tg = next(e for e in listed if e["name"] == "telegram_bot_token")
+    assert tg["configured"] is True
     assert "secret-token" not in str(listed)
     assert deleted == {"name": "telegram_bot_token", "deleted": True}
     events = engine.audit.recent(limit=5)
     assert "secret-token" not in str(events)
     assert "ciphertext" not in str(events)
+
+
+def test_engine_list_credentials_returns_full_catalog_with_configured_flag(engine):
+    """Regression: list() must surface EVERY allowed credential name,
+    not just ones already stored, so the settings UI can render an
+    "add credential" row for names the founder hasn't seeded yet
+    (the original CUSTOM_LLM_API_KEY bug: value lived only in the
+    systemd unit, so it never appeared in the UI for editing)."""
+    from kompany.state.credentials import ALLOWED_CREDENTIALS, CredentialVaultStore
+
+    engine.settings.vault_key = CredentialVaultStore.generate_key()
+    engine.credentials = CredentialVaultStore(engine.db, engine.settings.vault_key)
+    engine.set_credential("telegram_bot_token", "secret-token")
+
+    listed = engine.list_credentials()
+    names = {e["name"] for e in listed}
+    # Every allowed name appears exactly once.
+    assert names == set(ALLOWED_CREDENTIALS)
+    # Stored one is marked configured, everything else is not.
+    tg = next(e for e in listed if e["name"] == "telegram_bot_token")
+    assert tg["configured"] is True
+    assert tg["updated_at"] is not None
+    unconfigured = [e for e in listed if e["name"] != "telegram_bot_token"]
+    assert all(e["configured"] is False for e in unconfigured)
+    assert all(e["updated_at"] is None for e in unconfigured)
 
 
 def test_engine_rotate_credential_key_returns_metadata_and_audits_no_secret(engine):
@@ -1141,6 +1170,41 @@ def test_engine_rotate_credential_key_returns_metadata_and_audits_no_secret(engi
     assert old_key not in str(events)
     assert new_key not in str(events)
     assert "ciphertext" not in str(events)
+
+
+def test_engine_set_credential_overrides_already_populated_settings_field(engine):
+    """Regression test: an explicit ``set_credential`` call (API/CLI/UI)
+    must take effect live even when the settings field was already
+    populated (e.g. from an env var or config.yaml at boot). Previously
+    ``set_credential`` silently skipped ``setattr`` whenever the field was
+    already truthy, so a systemd/YAML-sourced value permanently shadowed
+    anything the user set afterward through the vault."""
+    from kompany.state.credentials import CredentialVaultStore
+
+    engine.settings.vault_key = CredentialVaultStore.generate_key()
+    engine.credentials = CredentialVaultStore(engine.db, engine.settings.vault_key)
+    engine.settings.custom_api_key = "env-sourced-key"
+
+    engine.set_credential("custom_api_key", "vault-sourced-key")
+
+    assert engine.settings.custom_api_key == "vault-sourced-key"
+    assert engine.credentials.get("custom_api_key") == "vault-sourced-key"
+
+
+def test_engine_set_credential_ignores_settings_setattr_error_for_undeclared_field(engine):
+    """Some ``ALLOWED_CREDENTIALS`` (smtp_*, resend_*, openai_oauth_tokens,
+    ...) aren't declared ``KompanySettings`` fields, so ``setattr`` raises
+    ``ValueError``. ``set_credential`` must still store the value in the
+    vault and return normally instead of propagating that error."""
+    from kompany.state.credentials import CredentialVaultStore
+
+    engine.settings.vault_key = CredentialVaultStore.generate_key()
+    engine.credentials = CredentialVaultStore(engine.db, engine.settings.vault_key)
+
+    result = engine.set_credential("smtp_host", "smtp.example.com")
+
+    assert result["name"] == "smtp_host"
+    assert engine.credentials.get("smtp_host") == "smtp.example.com"
 
 
 def test_engine_resolves_vault_key_env_wins_over_keychain(engine, monkeypatch):
