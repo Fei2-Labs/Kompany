@@ -69,14 +69,28 @@ class CredentialVaultStore:
         return Fernet.generate_key().decode("utf-8")
 
     def list(self) -> list[CredentialVaultEntry]:
+        # Return the FULL catalog of supported credentials, marking each
+        # as configured=True when a row exists in the vault (with its
+        # updated_at) and configured=False when it's allowed but not yet
+        # stored. This lets the settings UI render an "add credential"
+        # control for names the founder hasn't seeded yet (e.g. when
+        # custom_api_key currently lives only in the systemd unit) without
+        # a second endpoint — callers that only care about configured
+        # rows filter on configured=True.
         rows = self.db.execute(
             """SELECT name, updated_at FROM credential_vault
                ORDER BY name"""
         ).fetchall()
-        return [
-            CredentialVaultEntry(name=row["name"], updated_at=row["updated_at"])
-            for row in rows
-        ]
+        stored = {row["name"]: row["updated_at"] for row in rows}
+        entries: list[CredentialVaultEntry] = []
+        for name in sorted(ALLOWED_CREDENTIALS):
+            if name in stored:
+                entries.append(
+                    CredentialVaultEntry(name=name, configured=True, updated_at=stored[name])
+                )
+            else:
+                entries.append(CredentialVaultEntry(name=name, configured=False))
+        return entries
 
     def set(self, name: str, value: str) -> CredentialVaultEntry:
         self._validate_name(name)

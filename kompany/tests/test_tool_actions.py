@@ -575,15 +575,16 @@ def test_rest_credentials_set_list_delete(engine, monkeypatch):
     with TestClient(api_mod.app) as client:
         r = client.post("/credentials", json={"name": "custom_api_key", "value": "k1"})
         assert r.status_code == 200
-        names = [e["name"] for e in client.get("/credentials").json()]
-        assert "custom_api_key" in names
+        # list() returns the full catalog; presence is signalled by configured=True.
+        stored = {e["name"] for e in client.get("/credentials").json() if e["configured"]}
+        assert "custom_api_key" in stored
         assert client.get("/integrations").json()[0]["connected"] is True
 
         r = client.delete("/credentials/custom_api_key")
         assert r.status_code == 200
         assert r.json()["deleted"] is True
-        names = [e["name"] for e in client.get("/credentials").json()]
-        assert "custom_api_key" not in names
+        stored = {e["name"] for e in client.get("/credentials").json() if e["configured"]}
+        assert "custom_api_key" not in stored
         assert client.get("/integrations").json()[0]["connected"] is False
 
 

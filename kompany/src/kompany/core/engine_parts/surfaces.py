@@ -131,8 +131,21 @@ class FounderSurfacesMixin:
 
     def set_credential(self, name: str, value: str) -> dict:
         entry = self.credentials.set(name, value)
-        if not getattr(self.settings, name, ""):
+        # Always apply live — this is an explicit, user-initiated write
+        # (API/CLI/UI), so it must take effect immediately even when the
+        # field was already populated from an env var or config.yaml at
+        # boot. Unlike boot-time ``_apply_vault_credentials()`` (which
+        # intentionally leaves env/YAML values alone), a live credential
+        # update with no visible effect is just a silent bug: the vault
+        # would report the new value while the running engine keeps using
+        # the stale one. Some ``ALLOWED_CREDENTIALS`` (smtp_*, resend_*,
+        # openai_oauth_tokens, ...) aren't declared ``KompanySettings``
+        # fields, so ``setattr`` raises ``ValueError`` for those — vault
+        # storage remains the source of truth for those either way.
+        try:
             setattr(self.settings, name, value)
+        except (ValueError, TypeError):
+            pass
         self.audit.record(
             "credential_vault.updated",
             f"Credential updated: {name}",

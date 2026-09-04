@@ -155,7 +155,7 @@
 
     <div class="frame" data-label="SETTINGS // credentials">
       <h2 class="set-h">// CREDENTIALS</h2>
-      <p class="set-note">Raw vault entries (values stay encrypted — never shown). Update writes a new value; delete removes the entry (the integration using it shows as not connected).</p>
+      <p class="set-note">Raw vault entries (values stay encrypted — never shown). Each supported credential is listed; ones marked <em>(add)</em> aren't in the vault yet — type a value to store it. Update writes a new value; delete removes the entry (the integration using it shows as not connected).</p>
       <div id="cr-list" class="set-meta">loading…</div>
       <div class="set-meta" style="margin-top:14px">Rotate vault key — re-encrypts every stored credential with a new key. Save the new key: it replaces KOMPANY_VAULT_KEY.</div>
       <div class="set-row"><label for="cr-newkey">New vault key</label><input id="cr-newkey" type="password" autocomplete="off" placeholder="new Fernet key"></div>
@@ -719,15 +719,17 @@
     function crRenderRow(entry) {
       const row = document.createElement("div");
       row.className = "set-row cr-row";
+      if (!entry.configured) row.classList.add("cr-row-missing");
       const lab = document.createElement("label");
       lab.textContent = entry.name;
-      lab.title = entry.updated_at ? "updated " + entry.updated_at : "";
+      lab.title = entry.updated_at ? "updated " + entry.updated_at : "not yet stored in vault";
+      if (!entry.configured) lab.textContent = entry.name + "  (add)";
       const inp = document.createElement("input");
       inp.type = "password"; inp.autocomplete = "off";
-      inp.placeholder = "•••••• — type to replace";
+      inp.placeholder = entry.configured ? "•••••• — type to replace" : "value to store in vault";
       const save = document.createElement("button");
       save.type = "button"; save.className = "onb-btn onb-btn-submit";
-      save.textContent = "[ ▸ update ]";
+      save.textContent = entry.configured ? "[ ▸ update ]" : "[ + add ]";
       save.addEventListener("click", async () => {
         const value = inp.value.trim();
         if (!value) { crShow("type a new value first", false); return; }
