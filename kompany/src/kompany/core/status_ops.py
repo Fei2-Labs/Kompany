@@ -75,7 +75,19 @@ def build_status(engine: Any) -> dict[str, Any]:
         # Daemon tick loop visibility (06-12 D5): the ticker joins the
         # existing status operation instead of growing a new one.
         "ticker": ticker_block(engine),
+        # Running build vs repo HEAD (#26): the header shows "build abc1234
+        # (+N)" when the process predates the checkout.
+        "build": build_block(),
     }
+
+
+def build_block() -> dict[str, Any]:
+    try:
+        from kompany.interfaces.api_parts.system import build_info
+
+        return build_info()
+    except Exception:  # noqa: BLE001 — advisory; never break /status
+        return {"version": "unknown", "commit": "unknown", "stale": False, "newer_commits": 0}
 
 
 __all__ = ["build_status", "ticker_block"]

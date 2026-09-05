@@ -101,8 +101,15 @@ def doctor() -> dict[str, Any]:
     return get_engine().doctor()
 
 
+def build_info() -> dict[str, Any]:
+    """Static build identity + live staleness vs the repo on disk (#26)."""
+    from kompany.core.build_info import staleness
+
+    return {**_resolve_daemon_build_info(), **staleness()}
+
+
 @router.get("/version")
-def version() -> dict[str, str]:
+def version() -> dict[str, Any]:
     """Daemon build info — package version + git commit of the running engine.
 
     The Tauri shell fetches this after health-check passes and shows
@@ -110,7 +117,7 @@ def version() -> dict[str, str]:
     title, so a founder can tell at a glance which build is live on the
     remote VPS vs the local desktop shell.
     """
-    return _resolve_daemon_build_info()
+    return build_info()
 
 
 # ---------------------------------------------------------------------------

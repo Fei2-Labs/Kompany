@@ -175,12 +175,15 @@ def check_access(engine: Any) -> dict[str, Any]:
 def check_build(engine: Any) -> dict[str, Any]:
     info: dict[str, Any] = {}
     try:
-        from kompany.interfaces.api_parts.system import _resolve_daemon_build_info
-        info = _resolve_daemon_build_info() or {}
+        from kompany.interfaces.api_parts.system import build_info
+        info = build_info() or {}
     except Exception:  # noqa: BLE001
         info = {}
-    parts = [f"{k}={v}" for k, v in info.items() if v]
-    return node("build", "Build", "info", ", ".join(parts) or "build info unavailable")
+    stale = bool(info.get("stale"))
+    parts = [f"{k}={v}" for k, v in info.items() if v and k in ("version", "commit", "repo_head", "newer_commits")]
+    return node("build", "Build", "warn" if stale else "info",
+                ", ".join(parts) or "build info unavailable",
+                info.get("hint") if stale else None)
 
 
 CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (

@@ -2392,7 +2392,11 @@ def test_cli_status_json_output(monkeypatch):
     result = runner.invoke(cli_app, ["status", "--json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {
+    body = json.loads(result.stdout)
+    # Build/staleness block (#26) is environment-dependent; check shape only.
+    build = body.pop("build")
+    assert {"version", "commit", "stale", "newer_commits", "repo_head"} <= set(build)
+    assert body == {
         "company": "TestCo",
         "goal": "AI tools",
         "time_horizon": "12 months",
