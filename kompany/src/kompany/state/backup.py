@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -54,6 +55,8 @@ class BackupManager:
             "kind": kind,
             "path": str(target),
             "size_bytes": target.stat().st_size,
+            # Integrity (#44): restore refuses a snapshot whose bytes changed.
+            "sha256": _sha256(target),
             "created_at": datetime.now(UTC).isoformat(),
         }
         sidecar.write_text(json.dumps(meta, indent=2))
@@ -92,6 +95,11 @@ class BackupManager:
         source = Path(meta["path"])
         if not source.exists():
             raise FileNotFoundError(f"Backup file missing: {source}")
+        # Integrity gate (#44): bytes must match the recorded digest (legacy
+        # sidecars without one are only structurally checked), and SQLite
+        # itself must consider the file sound. Never overwrite a live db
+        # with a snapshot that fails either test.
+        verified = verify_backup(source, meta.get("sha256"))
 
         # Remove WAL/SHM sidecar files from previous live db so the restored
         # snapshot is the sole source of truth.
@@ -105,4 +113,48 @@ class BackupManager:
             "id": backup_id,
             "restored_from": str(source),
             "restored_at": datetime.now(UTC).isoformat(),
+            "verified": verified,
         }
+
+
+class BackupIntegrityError(RuntimeError):
+    """The snapshot is corrupt or was modified after it was written."""
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def verify_backup(source: Path, expected_sha256: str | None) -> dict:
+    """Digest + ``PRAGMA integrity_check``; raises :class:`BackupIntegrityError`.
+
+    Returns ``{"sha256": bool | None, "integrity_check": True}`` — ``sha256`` is
+    ``None`` for legacy sidecars that recorded no digest.
+    """
+    digest_ok: bool | None = None
+    if expected_sha256:
+        actual = _sha256(source)
+        if actual != expected_sha256:
+            raise BackupIntegrityError(
+                f"backup {source.name} digest mismatch: recorded {expected_sha256[:12]}…, "
+                f"file is {actual[:12]}… — refusing to restore a modified snapshot"
+            )
+        digest_ok = True
+    if source.stat().st_size == 0:
+        # An empty placeholder from a pre-db backup restores to an empty db.
+        return {"sha256": digest_ok, "integrity_check": True}
+    try:
+        conn = sqlite3.connect(f"file:{source}?mode=ro", uri=True)
+        try:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError as exc:
+        raise BackupIntegrityError(f"backup {source.name} is not a valid SQLite database: {exc}") from exc
+    if not row or str(row[0]).lower() != "ok":
+        raise BackupIntegrityError(f"backup {source.name} failed PRAGMA integrity_check: {row[0] if row else 'no result'}")
+    return {"sha256": digest_ok, "integrity_check": True}
