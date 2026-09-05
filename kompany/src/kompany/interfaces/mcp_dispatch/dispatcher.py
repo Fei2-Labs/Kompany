@@ -291,6 +291,9 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_observability":
         return engine.observability_snapshot()
 
+    if name == "kompany_doctor":
+        return engine.doctor()
+
     if name == "kompany_runtime_status":
         return engine.get_runtime_state()
 

@@ -175,6 +175,18 @@
       </div>
       <div class="set-result" id="ws-result" hidden></div>
     </div>
+
+    <div class="frame" data-label="SETTINGS // doctor">
+      <h2 class="set-h">// DOCTOR</h2>
+      <p class="set-note">What is broken and how to fix it. Offline, read-only — same tree as <code>kompany doctor</code>.</p>
+      <div class="set-row">
+        <div class="set-control">
+          <button type="button" id="doc-run" class="onb-btn onb-btn-submit">[ ▸ RUN CHECKS ]</button>
+          <span class="set-meta" id="doc-summary"></span>
+        </div>
+      </div>
+      <pre class="set-meta" id="doc-tree" style="white-space:pre-wrap;margin:0">not run yet.</pre>
+    </div>
   </div>
 
   <script type="module">
@@ -237,6 +249,34 @@
     });
 
     load();
+
+    // Doctor card: fetch the health tree and render it as text (theme tokens
+    // via existing .set-meta styling; no new CSS).
+    const docBtn = document.getElementById("doc-run");
+    const docTree = document.getElementById("doc-tree");
+    const docSummary = document.getElementById("doc-summary");
+    const GLYPH = { ok: "✓", info: "·", warn: "!", fail: "✗" };
+    function walk(n, depth, out) {
+      const pad = "  ".repeat(depth);
+      out.push(`${pad}${GLYPH[n.status] || "?"} ${n.label}${n.detail ? " — " + n.detail : ""}`);
+      if (n.fix && (n.status === "warn" || n.status === "fail")) out.push(`${pad}    fix: ${n.fix}`);
+      for (const c of n.children || []) walk(c, depth + 1, out);
+    }
+    async function runDoctor() {
+      docBtn.disabled = true; docTree.textContent = "checking…";
+      try {
+        const r = await fetch("/doctor", { headers: { Accept: "application/json" } });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const rep = await r.json();
+        const lines = []; for (const c of rep.children || []) walk(c, 0, lines);
+        docTree.textContent = lines.join("\n");
+        const s = rep.summary || {};
+        docSummary.textContent = `${(s.status || "?").toUpperCase()} · ${s.ok || 0} ok · ${s.warn || 0} warn · ${s.fail || 0} fail`;
+      } catch (e) {
+        docTree.textContent = `doctor failed: ${e.message}`;
+      } finally { docBtn.disabled = false; }
+    }
+    docBtn.addEventListener("click", runDoctor);
 
     // ---- Model source ----
     // Tauri WebView: window.confirm/alert are dead — clearing uses an

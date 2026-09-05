@@ -546,6 +546,15 @@ kompany daemon uninstall   # remove the launchd plist or systemd unit
 
 These four commands are deliberately CLI-only — they manage a process on *this* machine. Tick visibility lives on the existing surfaces instead: `kompany status` (and `GET /status`, `kompany_status`, `k.status()`) carries a `ticker` block (`running`, `last_tick_at`, `tick_count`, `interval_seconds`), and `kompany observability` shows the most recent ticks.
 
+### `kompany doctor` — what is broken and how to fix it
+
+```bash
+kompany doctor          # health tree; exit code 1 when anything is red
+kompany doctor --json   # same tree for scripts
+```
+
+Offline and read-only: SQLite `quick_check`, runtime state, LLM provider configured, open watchdog events, blocked tasks and pending approvals, integration connections, backup freshness, API access mode, build info. Every red or yellow node carries a one-line fix. Same payload on `GET /doctor`, MCP `kompany_doctor`, `k.doctor()`, and the **Doctor** card on the Settings page.
+
 ### One engine, shared by app and daemon
 
 Exactly one Kompany server runs per data directory — the discovery file `<data_dir>/server.json` is the lock:

@@ -125,6 +125,11 @@ class KompanyCoreOps:
         """Return an operational observability/RPG snapshot."""
         return self._engine.observability_snapshot()
 
+    def doctor(self) -> dict[str, Any]:
+        """Health tree with fix hints — same payload as `kompany doctor --json`,
+        REST ``GET /doctor`` and MCP ``kompany_doctor``."""
+        return self._engine.doctor()
+
     def status(self) -> dict[str, Any]:
         """Get company status (canonical dict — see core/status_ops.py)."""
         from kompany.core.status_ops import build_status

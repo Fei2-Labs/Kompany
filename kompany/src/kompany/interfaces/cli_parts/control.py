@@ -264,3 +264,39 @@ def agents(
     console.print(table)
 
 
+@app.command("doctor")
+def doctor(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Health tree: what is broken and how to fix it (offline, read-only)."""
+    from rich.tree import Tree
+
+    from kompany.core.doctor import render_tree
+
+    engine = _get_engine(config)
+    report = engine.doctor()
+    if as_json:
+        _emit_json(report)
+        return
+    colour = {"ok": "green", "info": "dim", "warn": "yellow", "fail": "red"}
+    glyph = {"ok": "✓", "info": "·", "warn": "!", "fail": "✗"}
+
+    def add(branch, n):
+        label = f"[{colour[n['status']]}]{glyph[n['status']]} {n['label']}[/{colour[n['status']]}]"
+        if n.get("detail"):
+            label += f" [dim]— {n['detail']}[/dim]"
+        sub = branch.add(label)
+        if n.get("fix") and n["status"] in ("warn", "fail"):
+            sub.add(f"[cyan]fix:[/cyan] {n['fix']}")
+        for c in n.get("children", []):
+            add(sub, c)
+
+    s = report["summary"]
+    tree = Tree(f"[bold]Kompany doctor[/bold] — {s['status'].upper()} ({s['ok']} ok, {s['warn']} warn, {s['fail']} fail)")
+    for c in report["children"]:
+        add(tree, c)
+    console.print(tree)
+    if s["status"] != "ok" and not console.is_terminal:
+        console.print(render_tree(report))
+    raise typer.Exit(1 if s["fail"] else 0)
