@@ -1,20 +1,22 @@
 // Kompany web UI entry point. Orchestrates store + REST initial load +
 // SSE live updates. Vanilla ES modules — no build step.
 
-import { store } from "/ui/static/modules/store.js";
-import { api } from "/ui/static/modules/api.js";
+import { store } from "/ui/static/modules/store.js?v=2";
+import { api } from "/ui/static/modules/api.js?v=3";
 import { connectSSE } from "/ui/static/modules/sse.js";
 import { renderOffice, noteAgentActivity } from "/ui/static/modules/ui/office.js?v=2";
-import { renderInbox } from "/ui/static/modules/ui/inbox.js";
+import { renderInbox } from "/ui/static/modules/ui/inbox.js?v=3";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
 import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
-import { renderEpisodes, showAgentTasks } from "/ui/static/modules/ui/episodes.js?v=6";
-import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=4";
+import { renderEpisodes } from "/ui/static/modules/ui/episodes.js?v=8";
+import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=5";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";
 import { initTheme } from "/ui/static/modules/theme.js";
 import { initThemePanel } from "/ui/static/modules/ui/theme_panel.js?v=2";
 import { initAmbient } from "/ui/static/modules/ui/ambient.js";
+import { initAgentDrawer, openAgentDrawer } from "/ui/static/modules/ui/agent_drawer.js?v=2";
+import { blockedTasksFromProject } from "/ui/static/modules/ui/needs_you.js?v=1";
 
 async function boot() {
   // Re-assert theme/motion (the inline <head> script set them for first paint)
@@ -68,12 +70,14 @@ async function boot() {
   }
 
   // 1. Fetch initial snapshot in parallel.
-  const [inboxData, episodesData, agentsData, statusData] =
+  const [inboxData, episodesData, agentsData, statusData, healthData, blockedData] =
     await Promise.allSettled([
       api.inbox(),
       api.episodes(),
       api.agentsStatus(),
       api.status(),
+      api.healthEvents(),
+      loadBlockedTasks(),
     ]);
 
   if (inboxData.status === "fulfilled") {
@@ -88,10 +92,20 @@ async function boot() {
   if (statusData.status === "fulfilled") {
     store.update("status", statusData.value);
   }
+  if (healthData.status === "fulfilled") {
+    store.update("health", healthData.value);
+  }
+  if (blockedData.status === "fulfilled") {
+    store.update("blocked", blockedData.value);
+  }
 
   // 2. Wire UI modules to store updates.
   store.subscribe("agents", renderOffice);
   store.subscribe("inbox", renderInbox);
+  // NEEDS YOU merges approvals + open health events + BLOCKED tasks; any
+  // of the three slices changing re-renders the one list.
+  store.subscribe("health", () => renderInbox(store.state.inbox || []));
+  store.subscribe("blocked", () => renderInbox(store.state.inbox || []));
   store.subscribe("episodes", renderEpisodes);
   store.subscribe("status", renderLedger);
   store.subscribe("sse", onSseStatus);
@@ -118,21 +132,23 @@ async function boot() {
   // background project execution surfaces in the UI without SSE.
   setInterval(async () => {
     try {
-      const [a, i, e] = await Promise.allSettled([
-        api.agentsStatus(), api.inbox(), api.episodes(),
+      const [a, i, e, b] = await Promise.allSettled([
+        api.agentsStatus(), api.inbox(), api.episodes(), loadBlockedTasks(),
       ]);
       if (a.status === "fulfilled") store.update("agents", a.value);
       if (i.status === "fulfilled") store.update("inbox", i.value);
       if (e.status === "fulfilled") store.update("episodes", e.value);
+      if (b.status === "fulfilled") store.update("blocked", b.value);
     } catch (_) {}
   }, 7000);
 
-  // Staff-panel click → show that agent's tasks in the episode panel.
+  // Staff-panel click → open the live agent drawer (stream + tasks).
   document.addEventListener("agent-click", (e) => {
     const role = e.detail && e.detail.role;
-    if (role) showAgentTasks(role);
+    if (role) openAgentDrawer(role);
   });
 
+  initAgentDrawer();
   initCostChip();
   initThemePanel();
   initAmbient();
@@ -179,6 +195,30 @@ function onSseStatus({ online }) {
   el.classList.add(online ? "online" : "offline");
 }
 
+// BLOCKED tasks live on /projects/{id} (no list endpoint carries tasks):
+// fan out over the active projects and keep only status=blocked rows.
+// R3: existing endpoints only.
+async function loadBlockedTasks() {
+  const projects = await api.projects();
+  const details = await Promise.allSettled(
+    (projects || []).map((p) => api.project(p.id)),
+  );
+  const out = [];
+  for (const d of details) {
+    if (d.status === "fulfilled") out.push(...blockedTasksFromProject(d.value));
+  }
+  return out;
+}
+
+let _blockedTimer = null;
+function scheduleBlockedRefresh() {
+  if (_blockedTimer) return;
+  _blockedTimer = setTimeout(() => {
+    _blockedTimer = null;
+    loadBlockedTasks().then((rows) => store.update("blocked", rows)).catch(() => {});
+  }, 500);
+}
+
 function handleEvent(evt) {
   // evt: { type, data, id }
   const { type, data } = evt;
@@ -201,6 +241,12 @@ function handleEvent(evt) {
     // agent_status, so flip the spending agent's card from the stream.
     if (data.agent_name) {
       noteAgentActivity(data.agent_name, data.action_type || "thinking");
+      store.pushActivity(data.agent_name, {
+        ts: Date.now(),
+        kind: "spend",
+        text: `$${Number(data.cost_usd || 0).toFixed(4)} ${data.action_type || ""}`,
+        source: "spend",
+      });
     }
   }
 
@@ -209,6 +255,24 @@ function handleEvent(evt) {
   if (type === "agent.activity" && data.agent_role) {
     const working = (data.status || "").toLowerCase() !== "idle";
     if (working) noteAgentActivity(data.agent_role, data.current_task || data.status);
+    scheduleBlockedRefresh();
+    store.pushActivity(data.agent_role, {
+      ts: Date.now(),
+      kind: "status",
+      text: `${data.status || "?"}${data.current_task ? " — " + data.current_task : ""}`,
+      source: "activity",
+    });
+  }
+
+  // Live agent drawer stream: harness events carry the per-agent work
+  // detail (text / tool_use / turn summaries).
+  if (type === "harness.event" && data.agent_role) {
+    store.pushActivity(data.agent_role, {
+      ts: Date.now(),
+      kind: data.kind || "event",
+      text: data.summary || "",
+      source: data.activity_kind || "harness",
+    });
   }
 
   // CEO channel bubble: live cost (llm.spend), status lines (audit.*),
@@ -229,7 +293,8 @@ function handleEvent(evt) {
       api.status().then((s) => store.update("status", s)).catch(() => {});
     }
   } else if (type === "health.event") {
-    // No store data to refresh — the timeline line already covers it.
+    // NEEDS YOU feed: refresh the open health events slice.
+    api.healthEvents().then((rows) => store.update("health", rows)).catch(() => {});
   }
 }
 

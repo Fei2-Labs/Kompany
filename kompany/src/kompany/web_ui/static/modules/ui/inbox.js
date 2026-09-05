@@ -1,7 +1,8 @@
 // Render the inbox: pending approval cards with action buttons.
 
-import { api } from "/ui/static/modules/api.js";
-import { store } from "/ui/static/modules/store.js";
+import { api } from "/ui/static/modules/api.js?v=3";
+import { buildNeedsYouItems, healthSeverity } from "/ui/static/modules/ui/needs_you.js?v=1";
+import { store } from "/ui/static/modules/store.js?v=2";
 
 function escapeHTML(s) {
   return String(s || "").replace(/[&<>"']/g, (c) => ({
@@ -167,6 +168,43 @@ function bindRow(card, row) {
   });
 }
 
+function healthCardHTML(ev) {
+  const sev = healthSeverity(ev.kind);
+  const idShort = (ev.id || "").replace(/^he_/, "").slice(0, 4);
+  const detail = ev.detail_json
+    ? (() => { try { return JSON.parse(ev.detail_json); } catch (_) { return null; } })()
+    : (ev.detail || null);
+  const bits = [];
+  if (detail && typeof detail === "object") {
+    for (const key of ["project_id", "task_id", "agent_role", "reason"]) {
+      if (detail[key]) bits.push(`${key}=${detail[key]}`);
+    }
+  }
+  const detailLine = bits.length ? `<div class="body-line dim">› ${escapeHTML(bits.join(" · "))}</div>` : "";
+  return `<div class="inbox-entry health-entry ${severityClass(sev)}" data-health-id="${escapeHTML(ev.id)}">
+    <div class="id-line">[#${escapeHTML(idShort)}] WATCHDOG :: ${escapeHTML(ev.kind)} :: severity=${escapeHTML(sev)}</div>
+    <div class="body-line">${escapeHTML(detail?.message || detail?.summary || ev.kind || "")}</div>
+    ${detailLine}
+    <div class="actions">
+      <button class="key" data-health-action="continue">[c] continue</button>
+      <button class="key" data-health-action="snooze">[s] snooze</button>
+      <button class="key danger" data-health-action="dismiss">[x] dismiss</button>
+    </div>
+  </div>`;
+}
+
+function blockedCardHTML(t) {
+  const role = String(t.assigned_agent || "team").toUpperCase();
+  return `<div class="inbox-entry blocked-entry severity-high" data-blocked-task="${escapeHTML(t.task_id)}" data-blocked-role="${escapeHTML(t.assigned_agent || "")}">
+    <div class="id-line">[BLOCKED] ${escapeHTML(role)} :: ${escapeHTML(t.project_name || t.project_id || "")}</div>
+    <div class="body-line">${escapeHTML(t.title)}</div>
+    <div class="body-line dim">› ${escapeHTML(t.founder_action)}</div>
+    <div class="actions">
+      ${t.assigned_agent ? `<button class="key" data-blocked-view>[v] view live</button>` : ""}
+    </div>
+  </div>`;
+}
+
 export function renderInbox(rows) {
   const list = document.getElementById("inbox-list");
   const frame = document.getElementById("inbox-frame");
@@ -177,39 +215,88 @@ export function renderInbox(rows) {
     return s === "pending" || s === "snoozed";
   });
 
+  // Merge approvals + open health events + BLOCKED tasks into one
+  // severity-sorted NEEDS YOU list (pure logic in needs_you.js).
+  const items = buildNeedsYouItems({
+    pending,
+    health: store.state.health || [],
+    blocked: store.state.blocked || [],
+  });
+
   if (frame) {
-    frame.setAttribute("data-label", `INBOX [${pending.length} pending]`);
+    frame.setAttribute("data-label", `NEEDS YOU [${items.length}]`);
   }
 
-  if (!pending.length) {
-    list.innerHTML = `<div class="empty">inbox is empty.</div>`;
+  if (!items.length) {
+    list.innerHTML = `<div class="empty">nothing needs you.</div>`;
     return;
   }
 
-  list.innerHTML = pending.map((r) => {
-    const sevCls = severityClass(r.severity);
-    const requestedBy = (r.requested_by || "?").toUpperCase();
-    const idShort = (r.id || "").slice(0, 4);
-    return `<div class="inbox-entry ${sevCls}" data-id="${escapeHTML(r.id)}">
-      <div class="id-line">[#${escapeHTML(idShort)}] ${escapeHTML(requestedBy)} :: ${escapeHTML(r.action_type)} :: severity=${escapeHTML(r.severity || "high")}</div>
-      <div class="body-line">${escapeHTML(r.summary || "")}</div>
-      ${r.status === "snoozed" ? `<div class="body-line">› snoozed until ${escapeHTML(r.snoozed_until || "")}</div>` : ""}
-      ${renderGlossaryDrifts(r)}
-      <div class="actions">
-        <button class="key" data-action="approve">[y] approve</button>
-        <button class="key danger" data-action="reject">[n] reject</button>
-        <button class="key" data-action="revise">[r] revise</button>
-        <button class="key" data-action="snooze">[s] snooze</button>
-        <button class="key" data-action="comment">[c] comment</button>
-        <button class="key danger" data-action="cancel">[x] cancel</button>
-      </div>
-    </div>`;
+  list.innerHTML = items.map((item) => {
+    if (item.kind === "approval") {
+      const r = item.row;
+      const sevCls = severityClass(r.severity);
+      const requestedBy = (r.requested_by || "?").toUpperCase();
+      const idShort = (r.id || "").slice(0, 4);
+      return `<div class="inbox-entry ${sevCls}" data-id="${escapeHTML(r.id)}">
+        <div class="id-line">[#${escapeHTML(idShort)}] ${escapeHTML(requestedBy)} :: ${escapeHTML(r.action_type)} :: severity=${escapeHTML(r.severity || "high")}</div>
+        <div class="body-line">${escapeHTML(r.summary || "")}</div>
+        ${r.status === "snoozed" ? `<div class="body-line">› snoozed until ${escapeHTML(r.snoozed_until || "")}</div>` : ""}
+        ${renderGlossaryDrifts(r)}
+        <div class="actions">
+          <button class="key" data-action="approve">[y] approve</button>
+          <button class="key danger" data-action="reject">[n] reject</button>
+          <button class="key" data-action="revise">[r] revise</button>
+          <button class="key" data-action="snooze">[s] snooze</button>
+          <button class="key" data-action="comment">[c] comment</button>
+          <button class="key danger" data-action="cancel">[x] cancel</button>
+        </div>
+      </div>`;
+    }
+    if (item.kind === "health") return healthCardHTML(item.row);
+    return blockedCardHTML(item.row);
   }).join("");
 
   // Wire buttons.
   for (const card of list.querySelectorAll(".inbox-entry")) {
     const id = card.getAttribute("data-id");
-    const row = pending.find((r) => r.id === id);
-    if (row) bindRow(card, row);
+    if (id) {
+      const row = pending.find((r) => r.id === id);
+      if (row) bindRow(card, row);
+      continue;
+    }
+    const healthId = card.getAttribute("data-health-id");
+    if (healthId) {
+      for (const btn of card.querySelectorAll("[data-health-action]")) {
+        const action = btn.getAttribute("data-health-action");
+        btn.addEventListener("click", (e) => {
+          if (action === "snooze") {
+            openInlineForm(card, e.currentTarget, {
+              label: "snooze",
+              type: "number",
+              placeholder: "snooze minutes:",
+              value: 30,
+              onSubmit: (raw) => {
+                const m = parseInt(raw, 10);
+                if (!m || m <= 0) throw new Error("minutes must be > 0");
+                return api.resolveHealth(healthId, "snooze", m);
+              },
+            });
+            return;
+          }
+          btn.disabled = true;
+          api.resolveHealth(healthId, action)
+            .then(() => reload())
+            .catch((err) => { btn.disabled = false; showRowError(card, `resolve failed: ${err.message}`); });
+        });
+      }
+      continue;
+    }
+    const blockedRole = card.getAttribute("data-blocked-role");
+    if (blockedRole) {
+      card.querySelector("[data-blocked-view]")?.addEventListener("click", () => {
+        document.dispatchEvent(new CustomEvent("agent-click", { detail: { role: blockedRole } }));
+      });
+    }
   }
 }

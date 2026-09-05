@@ -1,6 +1,6 @@
 // Right drawer-ish episode list + payload viewer.
 
-import { api } from "/ui/static/modules/api.js";
+import { api } from "/ui/static/modules/api.js?v=3";
 
 function escapeHTML(s) {
   return String(s || "").replace(/[&<>"']/g, (c) => ({
@@ -304,81 +304,79 @@ function wireActiveProjectActions(container) {
   }
 }
 
-// #22: episodes are the deep record (completed projects only), but an
-// empty episode list does NOT mean an agent never worked — delivered
-// tasks on a still-open project are real work. Render the task-history
-// fallback instead of a false "no recorded work" when the summary has
-// rows for this agent. Returns true when it rendered something.
-async function renderWorkSummaryFallback(host, key) {
+// Build the "what did this agent do" HTML for one role: tasks owned in
+// the latest episode, with truthful fallbacks (#22) when the episode
+// list is empty or the agent owned nothing. Shared by the episodes
+// payload panel (showAgentTasks) and the live agent drawer.
+// Returns an `.ep-detail` block or a `.empty` notice as HTML.
+export async function agentWorkHTML(key) {
+  const eps = await api.episodes();
+  if (!eps || !eps.length) {
+    const summary = await workSummaryLine(key);
+    if (summary) return summary;
+    return `<div class="empty">${escapeHTML(roleLabel(key))} has no recorded work yet — no completed episodes.</div>`;
+  }
+  // Newest episode first.
+  const latest = eps[0];
+  const row = await api.episode(latest.project_id);
+  let payload = row.payload_json || row.payload || row;
+  if (typeof payload === "string") { try { payload = JSON.parse(payload); } catch (_) {} }
+  const tasks = (payload.tasks || []).filter(
+    (t) => String(t.assigned_agent || "").toLowerCase() === key,
+  );
+  if (!tasks.length) {
+    const summary = await workSummaryLine(key);
+    if (summary) return summary;
+    return `<div class="empty">${escapeHTML(roleLabel(key))} didn't own a task in the latest episode.</div>`;
+  }
+  const cards = tasks.map((t, i) => {
+    const out = taskOutput(t.result);
+    const statusCls = t.status === "completed" ? "ok" : (t.status === "failed" ? "err" : "warn");
+    return `
+      <div class="ep-task open">
+        <div class="ep-task-head">
+          <span class="ep-task-ix">${i + 1}</span>
+          <span class="ep-task-title">${escapeHTML(t.title || "(untitled)")}</span>
+          <span class="ep-task-status ${statusCls}">${escapeHTML(t.status || "?")}</span>
+        </div>
+        <div class="ep-task-body">
+          ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output.</div>`}
+        </div>
+      </div>`;
+  }).join("");
+  return `<div class="ep-detail"><div class="ep-detail-head"><div class="ep-detail-name">${escapeHTML(roleLabel(key))} — work in "${escapeHTML(latest.summary || latest.project_id)}"</div></div><div class="ep-tasks">${cards}</div></div>`;
+}
+
+// One-line task-history fallback (#22): "worked but no episode closed
+// yet" vs "never worked". Returns HTML or null when the summary has no
+// rows for this agent.
+async function workSummaryLine(key) {
   try {
     const summary = await api.agentsWorkSummary();
     const row = summary && summary[key];
-    if (!row || !row.total) return false;
+    if (!row || !row.total) return null;
     const parts = [];
     if (row.delivered) parts.push(`${row.delivered} delivered`);
     if (row.completed) parts.push(`${row.completed} completed`);
     if (row.failed) parts.push(`${row.failed} failed`);
     const counts = parts.length ? parts.join(", ") : `${row.total} task(s)`;
     const last = row.last_active ? ` Last active ${escapeHTML(row.last_active)}.` : "";
-    host.innerHTML = `<div class="empty">No completed episodes yet — but ${escapeHTML(roleLabel(key))} has ${escapeHTML(counts)} task(s) on open projects.${last} Episodes appear when a project closes.</div>`;
-    return true;
+    return `<div class="empty">No completed episodes yet — but ${escapeHTML(roleLabel(key))} has ${escapeHTML(counts)} task(s) on open projects.${last} Episodes appear when a project closes.</div>`;
   } catch (_) {
-    return false;
+    return null;
   }
 }
 
 // Show one agent's tasks from the most recent episode, in the payload
-// panel. Wired to staff-panel clicks so the founder can drill into
-// "what did the CRO actually do?".
+// panel. Kept for non-dashboard callers; the dashboard wires staff
+// clicks to the live agent drawer instead.
 export async function showAgentTasks(role) {
   const host = document.getElementById("episodes-payload");
   if (!host || !role) return;
   const key = String(role).toLowerCase();
   host.innerHTML = `<div class="empty">loading ${escapeHTML(roleLabel(key))}'s work…</div>`;
   try {
-    const eps = await api.episodes();
-    if (!eps || !eps.length) {
-      // Truthful empty state (#22): only claim "no recorded work" when
-      // the task history is ALSO empty for this agent.
-      if (await renderWorkSummaryFallback(host, key)) return;
-      host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} has no recorded work yet — no completed episodes.</div>`;
-      return;
-    }
-    // Newest episode first.
-    const latest = eps[0];
-    const row = await api.episode(latest.project_id);
-    let payload = row.payload_json || row.payload || row;
-    if (typeof payload === "string") { try { payload = JSON.parse(payload); } catch (_) {} }
-    const tasks = (payload.tasks || []).filter(
-      (t) => String(t.assigned_agent || "").toLowerCase() === key,
-    );
-    if (!tasks.length) {
-      if (await renderWorkSummaryFallback(host, key)) return;
-      host.innerHTML = `<div class="empty">${escapeHTML(roleLabel(key))} didn't own a task in the latest episode.</div>`;
-      return;
-    }
-    const cards = tasks.map((t, i) => {
-      const out = taskOutput(t.result);
-      const statusCls = t.status === "completed" ? "ok" : (t.status === "failed" ? "err" : "warn");
-      return `
-        <div class="ep-task open">
-          <div class="ep-task-head">
-            <span class="ep-task-ix">${i + 1}</span>
-            <span class="ep-task-title">${escapeHTML(t.title || "(untitled)")}</span>
-            <span class="ep-task-status ${statusCls}">${escapeHTML(t.status || "?")}</span>
-          </div>
-          <div class="ep-task-body">
-            ${out ? `<div class="ep-task-output">${renderText(out)}</div>` : `<div class="empty">no output.</div>`}
-          </div>
-        </div>`;
-    }).join("");
-    host.innerHTML = `
-      <div class="ep-detail">
-        <div class="ep-detail-head">
-          <div class="ep-detail-name">${escapeHTML(roleLabel(key))} — work in "${escapeHTML(latest.summary || latest.project_id)}"</div>
-        </div>
-        <div class="ep-tasks">${cards}</div>
-      </div>`;
+    host.innerHTML = await agentWorkHTML(key);
   } catch (e) {
     host.innerHTML = `<div class="empty">load failed: ${escapeHTML(e.message)}</div>`;
   }

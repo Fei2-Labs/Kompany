@@ -201,7 +201,7 @@ const api = {
 };
 
 const source = fs.readFileSync(
-  "/Users/clarezoe/Dropbox/My Apps/Kompany/kompany/src/kompany/web_ui/static/modules/ui/channel.js",
+  new URL("../src/kompany/web_ui/static/modules/ui/channel.js", import.meta.url),
   "utf8",
 );
 const sanitized = source

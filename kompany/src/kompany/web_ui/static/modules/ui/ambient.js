@@ -10,7 +10,7 @@
  * cue intact (decision #10 — alerts never depend on flash).
  */
 
-import { store } from "/ui/static/modules/store.js";
+import { store } from "/ui/static/modules/store.js?v=2";
 import { getAuto } from "/ui/static/modules/theme.js";
 
 // Runway fraction at/below which we treat the company as in alert.
