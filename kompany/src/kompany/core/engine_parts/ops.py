@@ -449,3 +449,12 @@ class EngineOpsMixin:
             meta = {**meta, "handoff": True, "exported_at": marker["exported_at"]}
         return meta
 
+    # ------------------------------------------------------------------
+    # kompany doctor (#41) — offline health tree, same payload on all surfaces
+    # ------------------------------------------------------------------
+
+    def doctor(self) -> dict:
+        """Health tree: what is broken and how to fix it. Read-only, no LLM."""
+        from kompany.core.doctor import run_doctor
+
+        return run_doctor(self)

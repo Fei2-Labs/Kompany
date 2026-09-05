@@ -95,6 +95,12 @@ def _resolve_daemon_build_info() -> dict[str, str]:
     return _DAEMON_BUILD_INFO
 
 
+@router.get("/doctor")
+def doctor() -> dict[str, Any]:
+    """Health tree (#41): what is broken and how to fix it. Offline, read-only."""
+    return get_engine().doctor()
+
+
 @router.get("/version")
 def version() -> dict[str, str]:
     """Daemon build info — package version + git commit of the running engine.

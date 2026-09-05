@@ -16,6 +16,15 @@ TOOLS: list[Tool] = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_doctor",
+        description=(
+            "Health tree: database, runtime, LLM provider, open watchdog events, "
+            "blocked work, integrations, backups, API access, build — each node "
+            "ok/warn/fail with a fix hint. Offline and read-only."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="kompany_runtime_status",
         description="Return engine runtime state (running | suspended).",
         inputSchema={"type": "object", "properties": {}},
