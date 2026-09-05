@@ -17,6 +17,7 @@ import { RuntimeStrip } from '../runtime/RuntimeStrip';
 import { Column } from '../board/Column';
 import { Card, type BoardCard } from '../board/Card';
 import { InspectDrawer } from '../board/InspectDrawer';
+import { ProgressSummary } from '../board/ProgressSummary';
 
 /** Worst load-state across the sources a column depends on. */
 function worstState(
@@ -69,11 +70,20 @@ export function Board() {
   return (
     <section className="board">
       <header className="board__header">
-        <h1 className="board__title">Board</h1>
+        <div>
+          <h1 className="board__title">Board</h1>
+          <p className="board__subtitle">A quick view of what Kompany is doing and what needs you.</p>
+        </div>
         <RuntimeStrip />
       </header>
 
       <MetricsStrip status={data.status} spendDelta={data.spendDelta} />
+
+      <ProgressSummary
+        status={data.status.data}
+        activeProjects={data.active.data}
+        needsYouCount={needsYou.length}
+      />
 
       {boardEmpty ? (
         <div className="board__empty">
@@ -132,11 +142,11 @@ export function Board() {
           </Column>
 
           <Column
-            title="Needs You"
+           title="Needs You"
             count={needsYou.length}
             state={worstState(data.inbox.state, data.active.state)}
             error={data.inbox.error ?? data.active.error}
-            emptyText="Nothing needs you right now."
+            emptyText="You are all caught up."
           >
             {needsYou.map((c) => {
               const card: BoardCard = { column: 'needs-you', card: c };

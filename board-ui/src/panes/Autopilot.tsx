@@ -43,7 +43,7 @@ export function Autopilot() {
   return (
     <PaneShell
       title="Autopilot"
-      subtitle="Daemon tick loop — read-only. Pause/resume the engine from the board header."
+      subtitle="This is the engine's activity log. Return to Board for the plain-language progress summary."
       state={status.state}
       error={status.error}
     >
