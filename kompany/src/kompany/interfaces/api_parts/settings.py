@@ -163,6 +163,12 @@ def self_update_proposals(limit: int = 20) -> list[dict]:
     return get_engine().self_update_list(limit=limit)
 
 
+@router.get("/self-update/role")
+def self_update_role() -> dict:
+    """Installation role + what approving a proposal does on this instance."""
+    return get_engine().self_update_role()
+
+
 @router.get("/self-update/proposals/{proposal_id}")
 def self_update_proposal(proposal_id: str) -> dict:
     row = get_engine().self_update_show(proposal_id)

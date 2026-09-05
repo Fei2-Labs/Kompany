@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from kompany.core import approval_effects
 from kompany.core.self_update import workspace as ws
 from kompany.core.self_update.effects import (
@@ -64,8 +66,21 @@ def _seed(engine, tmp_path, monkeypatch) -> ApprovalRequest:
     return request
 
 
+@pytest.fixture(autouse=True)
+def _maintainer_role(monkeypatch):
+    """These tests exercise the push + PR path → trusted maintainer role
+    with ambient credentials (07-24 installation role)."""
+    from kompany.core.installation_role import InstallationRole
+
+    r = InstallationRole("maintainer", "file", "/etc/kompany/installation_role", True, "test")
+    monkeypatch.setattr("kompany.core.self_update.effects.resolve_installation_role", lambda: r)
+    monkeypatch.setenv("KOMPANY_PROMOTION_TOKEN_FILE", "/nonexistent/promotion_token")
+
+
 def _fake_run(push_rc=0, gh_rc=0, gh_url="https://github.com/x/pr/1"):
     def run(cmd, **kw):
+        if "get-url" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "https://github.com/Fei2-Labs/Kompany.git\n", "")
         if cmd[0] == "git" and "push" in cmd:
             return subprocess.CompletedProcess(cmd, push_rc, "", "denied" if push_rc else "")
         if cmd[0] == "gh":
@@ -108,6 +123,8 @@ def test_approve_gh_missing_still_pushes(tmp_path, monkeypatch):
     request = _seed(engine, tmp_path, monkeypatch)
 
     def run(cmd, **kw):
+        if "get-url" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "https://github.com/Fei2-Labs/Kompany.git\n", "")
         if cmd[0] == "gh":
             raise FileNotFoundError("gh")
         return subprocess.CompletedProcess(cmd, 0, "", "")

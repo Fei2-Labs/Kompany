@@ -540,6 +540,7 @@ The CLI and desktop app only act while you have them open. The **daemon** keeps 
 ```bash
 kompany daemon run         # run the server in the foreground (Ctrl-C to stop)
 kompany daemon install     # install as a launchd agent (macOS) or systemd service (Linux) — survives reboots
+sudo kompany daemon install --role maintainer   # also write the root-owned installation role file (see Self-Update)
 kompany daemon status      # live server + supervisor + ticker report
 kompany daemon uninstall   # remove the launchd plist or systemd unit
 ```
@@ -924,7 +925,17 @@ What happens on `propose`:
 4. The test suite runs inside the clone. Red tests don't hide the proposal — the card says `tests: FAILED` and you decide.
 5. A `self_update_proposal` card lands in your inbox with the diff stat, files, test summary, and session cost.
 
-What happens on **approve**: the branch is pushed to origin and a GitHub PR is opened when `gh` is available (otherwise you open it manually — the push result is on the card). **Merging stays on GitHub, in your hands.** After you merge, rebuild and reinstall with the existing scripts. Reject keeps the branch local for autopsy.
+What happens on **approve** depends on the **installation role** — a static, operator-set value the agent cannot change or infer:
+
+| Role | Approve does | Who |
+|---|---|---|
+| `customer` (default) | exports `<data_dir>/self_update/patches/<id>.patch`; nothing leaves the machine | every install without a role file |
+| `contributor` | same as customer — review the patch, submit it upstream yourself | people hacking on their own instance |
+| `maintainer` | pushes the `self-update/<id>` branch to an allowlisted Core/Pro origin and opens (never merges) a PR | the maintainer's own instance |
+
+The role lives in `/etc/kompany/installation_role` (or `KOMPANY_INSTALLATION_ROLE_FILE`). It counts only when the file is root-owned (or owned by someone other than the daemon user) and not group/world-writable; anything else resolves to `customer` with the reason shown. Set it as an operator action: `sudo kompany daemon install --role maintainer`. No tool, REST route or setting writes it. Read it anywhere: `kompany self-update role`, REST `GET /self-update/role`, MCP `kompany_self_update_role`, SDK `k.self_update_role()`, and the `kompany doctor` "Installation role" node.
+
+For a maintainer, two more gates run before anything is pushed: the clone's `origin` must be one of `self_update_allowed_repos` (default: Core and Pro) and the branch must be `self-update/*` — no role can push `main`. The push credential is a short-lived **GitHub App installation token** read from `/etc/kompany/promotion_token` (or `KOMPANY_PROMOTION_TOKEN_FILE`), refreshed by an operator-side job so the App private key never touches the daemon; personal access tokens are refused by prefix. Without a token file the daemon user's ambient git/gh credentials are used only while `self_update_ambient_credentials` is true (the default for a single-developer setup; set it to `false` on a server). Every decision — role, repo, branch, credential kind (never the token), outcome — is in the audit log (`approval_effect.self_update_*`). **Merging stays on GitHub, in your hands.** After you merge, rebuild and reinstall with the existing scripts. Reject keeps the branch local for autopsy.
 
 The same operation is available everywhere: REST `POST /self-update/propose`, MCP `kompany_self_update_propose`, SDK `k.self_update_propose(...)`.
 

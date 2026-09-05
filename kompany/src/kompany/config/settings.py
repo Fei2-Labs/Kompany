@@ -200,6 +200,15 @@ class KompanySettings(BaseSettings):
     self_update_budget_cap_usd: float = 2.0
     self_update_max_turns: int = 40
     self_update_test_cmd: str = "python -m pytest tests/ -q"
+    # Upstream promotion (07-24-installation-role): where a maintainer
+    # instance may push proposal branches, and whether the daemon user's
+    # ambient git/gh credentials may be used when no scoped App token
+    # file exists. The installation role itself is NOT a setting — it is
+    # a root-owned file (core/installation_role.py).
+    self_update_allowed_repos: list[str] = Field(
+        default_factory=lambda: ["Fei2-Labs/Kompany", "Fei2-Labs/kompany-pro"]
+    )
+    self_update_ambient_credentials: bool = True
 
     # Anima persona layer (06-12-anima-persona). ``anima_enabled``
     # registers the emotion + diary tick intents; ``anima_diary_enabled``
@@ -404,6 +413,14 @@ class KompanySettings(BaseSettings):
             if "self_update_test_cmd" in data:
                 overrides["self_update_test_cmd"] = str(
                     data["self_update_test_cmd"]
+                )
+            if isinstance(data.get("self_update_allowed_repos"), list):
+                overrides["self_update_allowed_repos"] = [
+                    str(r) for r in data["self_update_allowed_repos"]
+                ]
+            if "self_update_ambient_credentials" in data:
+                overrides["self_update_ambient_credentials"] = bool(
+                    data["self_update_ambient_credentials"]
                 )
             # Remote backup config block (07-14 step 5).
             if "remote_backup" in data and isinstance(data["remote_backup"], dict):

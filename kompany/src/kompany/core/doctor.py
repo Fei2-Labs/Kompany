@@ -193,6 +193,17 @@ def check_build(engine: Any) -> dict[str, Any]:
                 info.get("hint") if stale else None)
 
 
+def check_installation_role(engine: Any) -> dict[str, Any]:
+    from kompany.core.installation_role import resolve_installation_role
+    r = resolve_installation_role()
+    detail = f"role={r.role}, source={r.source}, {r.reason}"
+    if not r.trusted:
+        return node("installation_role", "Installation role", "warn", detail,
+                    f"Fix the role file {r.path}: root-owned, not group/world-writable, one of customer|contributor|maintainer "
+                    "(e.g. `sudo kompany daemon install --role maintainer`).")
+    return node("installation_role", "Installation role", "info", detail)
+
+
 CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("database", "SQLite database", check_database),
     ("runtime", "Runtime", check_runtime),
@@ -203,6 +214,7 @@ CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("backups", "Backups", check_backups),
     ("access", "API access", check_access),
     ("build", "Build", check_build),
+    ("installation_role", "Installation role", check_installation_role),
 )
 
 
