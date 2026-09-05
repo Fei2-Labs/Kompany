@@ -8,7 +8,7 @@ import { renderOffice, noteAgentActivity } from "/ui/static/modules/ui/office.js
 import { renderInbox } from "/ui/static/modules/ui/inbox.js?v=3";
 import { initTimeline, pushTimeline } from "/ui/static/modules/ui/timeline.js";
 import { initTimelineModal } from "/ui/static/modules/ui/timeline_modal.js";
-import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=2";
+import { renderLedger } from "/ui/static/modules/ui/ledger.js?v=3";
 import { renderEpisodes } from "/ui/static/modules/ui/episodes.js?v=8";
 import { initChannel, channelHandleEvent } from "/ui/static/modules/ui/channel.js?v=5";
 import { initCostChip, getCostChip } from "/ui/static/modules/ui/cost_chip.js";

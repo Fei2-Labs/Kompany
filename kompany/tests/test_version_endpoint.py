@@ -39,7 +39,7 @@ def test_version_endpoint_returns_build_info(client: TestClient) -> None:
     res = client.get("/version")
     assert res.status_code == 200
     body = res.json()
-    assert set(body.keys()) == {"version", "commit", "git_describe"}
+    assert {"version", "commit", "git_describe"} <= set(body)  # additive fields allowed (#26)
     # kompany.__version__ resolves dynamically from installed package
     # metadata (see kompany/__init__.py) — assert parity with it rather
     # than a hardcoded literal, which silently goes stale every release

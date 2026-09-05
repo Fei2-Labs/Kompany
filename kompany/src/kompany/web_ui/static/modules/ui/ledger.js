@@ -102,6 +102,20 @@ export function renderLedger(status) {
   if (run) run.textContent = status.run_id ? String(status.run_id).slice(0, 10) + "..." : "--";
   if (eps) eps.textContent = status.episode_count != null ? String(status.episode_count) : String(status.active_projects || 0);
 
+  // Build staleness (#26): "abc1234" normally; "abc1234 +16" in warn colour
+  // when the running engine predates the repo checkout.
+  const build = document.getElementById("stat-build");
+  const wrap = document.getElementById("stat-build-wrap");
+  const b = status.build || {};
+  if (build) {
+    const commit = b.commit && b.commit !== "unknown" ? b.commit : (b.version || "--");
+    build.textContent = b.stale ? `${commit} +${b.newer_commits}` : commit;
+    build.style.color = b.stale ? "var(--warn, #d9a441)" : "";
+    if (wrap) wrap.title = b.stale
+      ? `running ${commit}, repo HEAD ${b.repo_head} — ${b.newer_commits} newer commit(s). ${b.hint || "Restart to pick them up."}`
+      : `running build ${commit}${b.version ? " · v" + b.version : ""}`;
+  }
+
   // Targets is async — render best-effort. Failures keep the existing
   // dashes in place rather than disturbing the header layout.
   fetchTargets().then((payload) => renderTargets(payload, status));
