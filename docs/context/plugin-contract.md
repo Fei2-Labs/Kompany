@@ -132,6 +132,8 @@ steps:
 
 Engine computes `estimate_cost()` as sum-of-step + applies AutonomyGate per step before invoking. Steps with `python_callable` are opaque to cost preview — workflow author must populate `cost_estimate_usd` manually for those.
 
+**Approval-tier steps (2026-09-05).** A step with `autonomy_tier: approval` pauses the run: the engine files a `workflow_step` card in the existing inbox carrying the checkpoint (workflow id, step id, inputs, prior outputs, remaining steps, prompt preview, step cost). Approving resumes the run at that step — only that step is treated as `auto`, later approval steps pause again; rejecting stops the run (`workflow.cancelled` audit). The effect is idempotent (`effect_applied`). `run_workflow` returns `status: paused` + `approval_id` instead of a completed result.
+
 ## Template extension (over Core `manifest.json`)
 
 Pro Template manifests use the existing Core schema plus three new fields:
