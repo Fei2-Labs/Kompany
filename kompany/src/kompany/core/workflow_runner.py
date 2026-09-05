@@ -45,6 +45,8 @@ class StepResult:
 class WorkflowRunResult:
     workflow_id: str
     steps: list[StepResult] = field(default_factory=list)
+    outputs: dict[str, Any] = field(default_factory=dict)
+    """All step outputs so far (seeded + produced) — the resume checkpoint."""
 
     @property
     def total_cost_usd(self) -> float:
@@ -155,12 +157,25 @@ class WorkflowRunner:
         confidence = 1.0 if missing == 0 else max(0.0, 1.0 - missing / steps_count)
         return CostEstimate(llm_usd=llm_total, confidence=confidence)
 
-    def run(self, ctx: Any = None) -> WorkflowRunResult:
+    def run(
+        self,
+        ctx: Any = None,
+        *,
+        start_at: str | None = None,
+        prior_outputs: Mapping[str, Any] | None = None,
+        force_auto: frozenset[str] | set[str] | None = None,
+    ) -> WorkflowRunResult:
         """Execute steps in declared order.
 
         Requires a ``step_executor`` to have been provided to the
         constructor — this module ships without a default executor by
         design (see module docstring).
+
+        Resume support (approval gates): ``start_at`` skips every step before
+        the named one, ``prior_outputs`` seeds the outputs those skipped steps
+        produced, and ``force_auto`` names steps whose ``autonomy_tier`` is
+        treated as ``auto`` for this run only — the engine passes the step
+        the founder just approved.
         """
         if self._step_executor is None:
             raise WorkflowYAMLInvalid(
@@ -168,13 +183,23 @@ class WorkflowRunner:
                 "Pass one to the constructor or use a higher-level runner "
                 "that wires the production executor."
             )
+        if start_at is not None and start_at not in {s["id"] for s in self._data["steps"]}:
+            raise WorkflowYAMLInvalid(f"start_at step {start_at!r} is not in this workflow")
 
         result = WorkflowRunResult(workflow_id=self.workflow_id)
-        prior_outputs: dict[str, Any] = {}
+        outputs: dict[str, Any] = dict(prior_outputs or {})
+        forced = set(force_auto or ())
+        started = start_at is None
 
         for step in self._data["steps"]:
+            if not started:
+                if step["id"] != start_at:
+                    continue
+                started = True
+            if step["id"] in forced and step.get("autonomy_tier") != "auto":
+                step = {**step, "autonomy_tier": "auto"}
             try:
-                step_res = self._step_executor(step, prior_outputs, ctx)
+                step_res = self._step_executor(step, outputs, ctx)
             except Exception as exc:  # noqa: BLE001 — surface via StepResult.error
                 step_res = StepResult(
                     step_id=step["id"], error=f"{type(exc).__name__}: {exc}"
@@ -182,8 +207,9 @@ class WorkflowRunner:
             result.steps.append(step_res)
             if step_res.error:
                 break
-            prior_outputs[step_res.step_id] = step_res.output
+            outputs[step_res.step_id] = step_res.output
 
+        result.outputs = outputs
         return result
 
     def resolve_python_callable(self, step_id: str) -> Callable[..., Any] | None:
