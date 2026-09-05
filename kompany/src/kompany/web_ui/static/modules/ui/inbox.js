@@ -1,7 +1,7 @@
 // Render the inbox: pending approval cards with action buttons.
 
 import { api } from "/ui/static/modules/api.js?v=3";
-import { buildNeedsYouItems, healthSeverity } from "/ui/static/modules/ui/needs_you.js?v=1";
+import { buildNeedsYouItems, healthSeverity } from "/ui/static/modules/ui/needs_you.js?v=2";
 import { store } from "/ui/static/modules/store.js?v=2";
 
 function escapeHTML(s) {

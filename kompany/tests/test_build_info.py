@@ -67,7 +67,7 @@ def test_status_and_version_carry_build_block(monkeypatch):
 def test_doctor_build_node_warns_when_stale(monkeypatch):
     from kompany.core.doctor import check_build
     monkeypatch.setattr("kompany.interfaces.api_parts.system.build_info",
-                        lambda: {"version": "0.1.5", "commit": "abc1234", "repo_head": "def5678", "newer_commits": 4,
+                        lambda engine=None: {"version": "0.1.5", "commit": "abc1234", "repo_head": "def5678", "newer_commits": 4,
                                  "stale": True, "hint": "restart"})
     n = check_build(object())
     assert n["status"] == "warn" and n["fix"] == "restart" and "newer_commits=4" in n["detail"]

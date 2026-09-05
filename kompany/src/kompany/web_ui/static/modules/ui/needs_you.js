@@ -16,7 +16,7 @@ export function severityRank(sev) {
 // in a sane bucket without a code change.
 export function healthSeverity(kind) {
   const k = String(kind || "").toLowerCase();
-  if (/runway|stalled|stranded|timeout|blocked|exhaust|failed/.test(k)) return "high";
+  if (/runway|stalled|stranded|timeout|blocked|exhaust|failed|drift/.test(k)) return "high";
   return "medium";
 }
 

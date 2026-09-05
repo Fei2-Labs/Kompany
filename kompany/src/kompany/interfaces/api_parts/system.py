@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse 
 from pydantic import BaseModel, ConfigDict, Field  # noqa: F401
 
 from kompany.core.event_hub import get_event_hub  # noqa: F401
+from kompany.core.build_info import build_info  # noqa: F401 — re-exported for doctor/status/tests
 from kompany.interfaces.api_parts.deps import get_engine, reset_engine  # noqa: F401
 
 router = APIRouter()
@@ -43,69 +44,10 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Cached daemon build info — computed once on first /version request.
-# Resolved lazily so importing the module never shells out to git.
-_DAEMON_BUILD_INFO: dict[str, str] | None = None
-
-
-def _resolve_daemon_build_info() -> dict[str, str]:
-    """Daemon version + git commit of the running engine package.
-
-    Walks up from this file's location to find a ``.git`` dir and runs
-    ``git rev-parse --short HEAD`` there. Falls back to ``unknown`` when
-    not in a git checkout (e.g. PyInstaller bundle) so the endpoint
-    never 500s. Cached after the first call.
-    """
-    global _DAEMON_BUILD_INFO
-    if _DAEMON_BUILD_INFO is not None:
-        return _DAEMON_BUILD_INFO
-
-    from kompany import __version__ as pkg_version
-
-    commit = "unknown"
-    describe = "unknown"
-    try:
-        import subprocess
-
-        # This file lives at <git_root>/kompany/src/kompany/interfaces/api_parts/system.py
-        here = Path(__file__).resolve()
-        for candidate in [here, *here.parents]:
-            if (candidate / ".git").exists() or (candidate / ".git").is_dir():
-                git_dir = candidate
-                break
-        else:
-            git_dir = None
-        if git_dir is not None:
-            commit = subprocess.run(
-                ["git", "rev-parse", "--short", "HEAD"],
-                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
-            ).stdout.strip() or "unknown"
-            describe = subprocess.run(
-                ["git", "describe", "--tags", "--always", "--dirty"],
-                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
-            ).stdout.strip() or commit
-    except Exception:  # noqa: BLE001 — version probe must never break /version
-        pass
-
-    _DAEMON_BUILD_INFO = {
-        "version": pkg_version,
-        "commit": commit,
-        "git_describe": describe,
-    }
-    return _DAEMON_BUILD_INFO
-
-
 @router.get("/doctor")
 def doctor() -> dict[str, Any]:
     """Health tree (#41): what is broken and how to fix it. Offline, read-only."""
     return get_engine().doctor()
-
-
-def build_info() -> dict[str, Any]:
-    """Static build identity + live staleness vs the repo on disk (#26)."""
-    from kompany.core.build_info import staleness
-
-    return {**_resolve_daemon_build_info(), **staleness()}
 
 
 @router.get("/version")
@@ -115,9 +57,11 @@ def version() -> dict[str, Any]:
     The Tauri shell fetches this after health-check passes and shows
     both its own (tauri) commit and this daemon commit in the window
     title, so a founder can tell at a glance which build is live on the
-    remote VPS vs the local desktop shell.
+    remote VPS vs the local desktop shell. ``release`` says where the code
+    came from (GitHub release / source checkout / local build) and
+    ``drift`` whether that differs from what this data dir last deployed.
     """
-    return build_info()
+    return build_info(get_engine())
 
 
 # ---------------------------------------------------------------------------

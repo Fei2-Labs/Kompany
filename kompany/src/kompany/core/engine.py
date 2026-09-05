@@ -23,6 +23,7 @@ from kompany.core.credential_broker import (
     HttpCredentialBroker,
     UnavailableCredentialBroker,
 )
+from kompany.core.release_info import check_deployment_drift
 from kompany.core.run_context import current_run_id, run_scope
 from kompany.core.subscription_fee import book_subscription_fee_if_due
 from kompany.core.anima import Anima
@@ -260,6 +261,14 @@ class KompanyEngine(
         )
         self.autonomy = AutonomyGate()
 
+        # Stage C: did this data dir last run a GitHub release, and is the
+        # code now something else? One deduped health event while drifted.
+        try:
+            self.deployment_drift = check_deployment_drift(
+                self.health_events, self.audit, self.settings.data_dir
+            )
+        except Exception:  # noqa: BLE001 — identity is advisory, never blocks boot
+            self.deployment_drift = {"drift": False}
         # Resilience watchdog: silent-run + stranded-task supervisor.
         # Defaults live in code; ``company_config`` overrides take effect
         # at engine construction time.

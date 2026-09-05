@@ -1,22 +1,29 @@
 name: Release
 
-# Manually triggered only. We never auto-release on every push to main —
-# releases are a deliberate, human-initiated action (see plan.md Stage B/C).
+# Manually triggered only. Releases are a deliberate, human-initiated action.
+#
+# Stage C contract (07-24-stage-c-github-only-deploy):
+#   * This workflow never pushes to `main`. The version bump is an ordinary
+#     reviewed PR (edit `kompany/pyproject.toml` `[project] version`); this
+#     workflow releases whatever version `main` already declares and refuses
+#     to run if that tag exists. Branch protection on `main` therefore holds
+#     for CI too — no bot bypass.
+#   * The wheel carries its own identity: `kompany/release.json` (version,
+#     commit, tag, workflow run URL) is written before `python -m build`, so
+#     a running engine can say "I am GitHub release vX at sha Y" and detect
+#     drift when a data dir that ran a release is later served by a source
+#     checkout (core/release_info.py).
+#   * Every artifact gets a SHA-256 in `release-manifest.json`, the manifest
+#     gets a `release_digest`, and GitHub signs build provenance for all of
+#     them (actions/attest-build-provenance). Verify with
+#     `gh attestation verify <file> --repo Fei2-Labs/Kompany`.
 on:
   workflow_dispatch:
-    inputs:
-      bump:
-        description: "Version bump type"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   test:
@@ -35,7 +42,6 @@ jobs:
         working-directory: kompany
         run: |
           pytest tests/ --ignore=tests/test_distillation.py -q
-
       - name: Run release-gating compat tests (wheel build/install, migration, concurrency)
         working-directory: kompany
         run: |
@@ -44,9 +50,6 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.bump.outputs.version }}
-      tag: ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,73 +62,82 @@ jobs:
       - name: Install build tooling
         run: python -m pip install --upgrade pip build hatchling
 
-      - name: Compute next version
-        id: bump
-        run: |
-          set -euo pipefail
-          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
-          if [ -z "$LAST_TAG" ]; then
-            CURRENT="0.1.0"
-          else
-            CURRENT="${LAST_TAG#v}"
-          fi
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          case "${{ github.event.inputs.bump }}" in
-            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH+1)) ;;
-          esac
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Bumping ${CURRENT} -> ${NEW_VERSION} (${{ github.event.inputs.bump }})"
-
-      - name: Update pyproject.toml version
+      - name: Resolve version from pyproject.toml and refuse duplicates
+        id: ver
         working-directory: kompany
         run: |
-          sed -i "s/^version = \".*\"/version = \"${{ steps.bump.outputs.version }}\"/" pyproject.toml
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::releases are cut from main only (got ${GITHUB_REF})"; exit 1
+          fi
+          VERSION=$(python -c 'import tomllib,sys; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+          TAG="v${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::${TAG} already exists — bump [project] version in kompany/pyproject.toml via a PR first"; exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${TAG} from $(git rev-parse HEAD)"
+
+      - name: Stamp release identity into the package
+        working-directory: kompany
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          stamp = {
+              "source": "github-actions",
+              "version": "${{ steps.ver.outputs.version }}",
+              "tag": "${{ steps.ver.outputs.tag }}",
+              "commit": subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip(),
+              "built_at": subprocess.check_output(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"]).decode().strip(),
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+          }
+          with open("src/kompany/release.json", "w") as f:
+              json.dump(stamp, f, indent=2)
+          print(json.dumps(stamp, indent=2))
+          PY
 
       - name: Build wheel + sdist
         working-directory: kompany
         run: python -m build --wheel --sdist
 
       - name: Package ops/browser tarball (if present)
-        id: ops
         working-directory: kompany
         run: |
           if [ -d ops/browser ]; then
-            tar -czf "dist/kompany-ops-browser-${{ steps.bump.outputs.version }}.tar.gz" -C ops browser
-            echo "built=true" >> "$GITHUB_OUTPUT"
+            tar -czf "dist/kompany-ops-browser-${{ steps.ver.outputs.version }}.tar.gz" -C ops browser
           else
-            echo "built=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::ops/browser not present yet — skipping ops tarball (see stage-b-migrate-browser-ops todo)"
+            echo "::notice::ops/browser not present — skipping ops tarball"
           fi
 
-      - name: Generate release manifest with checksums
+      - name: Generate release manifest with checksums + digest
         working-directory: kompany
         run: |
           python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import subprocess
+          import hashlib, json, os, subprocess
 
-          version = "${{ steps.bump.outputs.version }}"
+          version = "${{ steps.ver.outputs.version }}"
           commit = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-
           artifacts = {}
           for name in sorted(os.listdir("dist")):
               path = os.path.join("dist", name)
               with open(path, "rb") as f:
-                  digest = hashlib.sha256(f.read()).hexdigest()
-              artifacts[name] = {"sha256": digest, "bytes": os.path.getsize(path)}
-
+                  artifacts[name] = {"sha256": hashlib.sha256(f.read()).hexdigest(), "bytes": os.path.getsize(path)}
+          # One digest over every artifact hash — what an updater pins and what
+          # a person compares against the GitHub Release page.
+          digest_input = "\n".join(f"{v['sha256']}  {k}" for k, v in artifacts.items()).encode()
           manifest = {
+              "schema": 2,
+              "package": "kompany",
               "version": version,
+              "tag": "v" + version,
+              "release_id": f"{version}+{commit[:12]}",
               "commit": commit,
-              "built_at": subprocess.check_output(
-                  ["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"]
-              ).decode().strip(),
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "run_url": f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+              "built_at": subprocess.check_output(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"]).decode().strip(),
+              "release_digest": hashlib.sha256(digest_input).hexdigest(),
               "artifacts": artifacts,
           }
           with open("dist/release-manifest.json", "w") as f:
@@ -133,22 +145,26 @@ jobs:
           print(json.dumps(manifest, indent=2))
           PY
 
-      - name: Commit version bump
-        working-directory: kompany
+      - name: Attest build provenance (wheel, sdist, ops tarball, manifest)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            kompany/dist/*.whl
+            kompany/dist/*.tar.gz
+            kompany/dist/release-manifest.json
+
+      - name: Tag the released commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
-          git commit -m "Release ${{ steps.bump.outputs.tag }}"
-          git tag "${{ steps.bump.outputs.tag }}"
-          git push origin HEAD:main
-          git push origin "${{ steps.bump.outputs.tag }}"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "Kompany ${{ steps.ver.outputs.tag }}"
+          git push origin "${{ steps.ver.outputs.tag }}"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.bump.outputs.tag }}
-          name: "Kompany ${{ steps.bump.outputs.tag }}"
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: "Kompany ${{ steps.ver.outputs.tag }}"
           generate_release_notes: true
           files: |
             kompany/dist/*.whl

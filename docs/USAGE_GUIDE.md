@@ -602,6 +602,21 @@ One billing consequence to know: because the heartbeat doesn't run while suspend
 
 On Linux the same `kompany daemon install` writes `/etc/systemd/system/kompany-daemon.service` with `Restart=always` and `WantedBy=multi-user.target`, then runs `systemctl daemon-reload` + `enable --now` (best-effort — failures are reported but never fatal). The unit pins `KOMPANY_DATA_DIR` and prepends `~/.local/bin` to `PATH` so CLI-harness modes (claude, codex, opencode) resolve under the daemon. Logs go to journald: `journalctl -u kompany-daemon -f`. Requires root (or sudo) to write to `/etc/systemd/system`.
 
+The unit is hardened by default: `ProtectSystem=strict` makes the whole filesystem read-only except `ReadWritePaths=` (the data dir and the daemon user's home, where CLI harnesses keep their own state), plus `NoNewPrivileges`, `PrivateTmp`, empty capability sets, kernel/cgroup/clock protection and `UMask=0077`. Install the release wheel root-owned under `/opt/kompany/releases/<version>/venv` and the daemon cannot modify its own code — the failure mode of a production box quietly turning into a dev checkout is closed at the OS level. Check the score with `systemd-analyze security kompany-daemon`. Namespaces stay enabled because agent tools may spawn sandboxed browsers.
+
+### Releases, deployment identity and drift
+
+Production runs **only** wheels built by GitHub Actions from `main`; nobody pushes code to a server and nobody edits it there. The pieces that make this a property instead of a habit:
+
+- **Release flow.** Bump `[project] version` in `kompany/pyproject.toml` through a normal PR, then run the `Release` workflow (manual dispatch). It refuses a tag that already exists, never pushes to `main`, tags the released commit, and publishes the wheel, sdist, ops tarball and `release-manifest.json` (sha256 per artifact + one `release_digest`). GitHub signs build provenance for every file: `gh attestation verify kompany-<v>-py3-none-any.whl --repo Fei2-Labs/Kompany`. `main` is branch-protected (PR-only, required `test (3.11)`, `test (3.12)`, `secret-scan`, no force pushes, admins included).
+- **Identity in the wheel.** The workflow writes `kompany/release.json` (version, commit, tag, workflow run URL) into the package before building. `GET /version`, `kompany status` and `kompany doctor` expose it as `release.source` = `github-release`; a checkout reports `source-checkout`, a hand-built wheel or desktop bundle `local-build`.
+- **Drift alert.** The first time a GitHub release runs against a data dir it records itself in `<data_dir>/deploy_identity.json`. If that data dir is later served by anything else, the engine files one `deployment_drift` health event at boot (deduped; it resolves itself when a release runs again), `kompany doctor` shows the Build node as **fail** with the fix, and `/version.drift` carries the expected vs actual identity. Dev machines that never ran a release never drift. If a machine deliberately becomes a dev box, delete the identity file.
+
+```bash
+kompany doctor                       # Build: source=github-release … or "deployment drift"
+curl -s localhost:8000/version | jq '.release, .drift'
+```
+
 ---
 
 ## Move the Company to Another Machine
