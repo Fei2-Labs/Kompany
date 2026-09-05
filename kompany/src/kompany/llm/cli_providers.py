@@ -28,6 +28,8 @@ import json
 import os
 import subprocess
 
+from kompany.llm.cli_env import cli_child_env
+
 DEFAULT_TIMEOUT_SECONDS = 300.0
 
 # Hygiene: opencode loads the founder's ~/.claude/CLAUDE.md and
@@ -88,6 +90,7 @@ def _run_subprocess(
     try:
         proc = subprocess.run(
             cmd,
+            start_new_session=True,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -224,7 +227,7 @@ def _run_opencode(
     cmd = ["opencode", "run", _combined_prompt(system, prompt), "--format", "json"]
     if cli_model:
         cmd += ["--model", cli_model]
-    env = {**os.environ, **_OPENCODE_ENV}
+    env = {**cli_child_env("opencode"), **_OPENCODE_ENV}
     proc = _run_subprocess(
         cmd,
         cli="opencode",

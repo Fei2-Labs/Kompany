@@ -146,6 +146,11 @@ class ImapPoller:
                         "from": mail.get("from"),
                         "subject": mail.get("subject"),
                         "snippet": str(mail.get("snippet", ""))[:SNIPPET_CHARS],
+                        # #45: inbound text is untrusted data. Anything that
+                        # later hands it to an agent must frame it as such
+                        # (never as an instruction) — see channels/context.py.
+                        "provenance": "inbound_email",
+                        "trusted": False,
                     },
                     requested_by="email_in",
                     severity="low",

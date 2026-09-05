@@ -62,9 +62,22 @@ def _cors_origins() -> set[str]:
     return {o.strip().rstrip("/") for o in raw.split(",") if o.strip()}
 
 
+_ANY_BIND = {"0.0.0.0", "::", "[::]", ""}
+
+
 def _allowed_hosts() -> set[str]:
+    """Explicit ``KOMPANY_ALLOWED_HOSTS``; else, when the server was bound to a
+    concrete non-loopback address (``KOMPANY_BIND_HOST`` set by run_server),
+    that address alone. A wildcard bind (0.0.0.0 / ::) cannot be defaulted —
+    the operator must list the hostnames clients use."""
     raw = os.environ.get("KOMPANY_ALLOWED_HOSTS", "")
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    explicit = {h.strip().lower() for h in raw.split(",") if h.strip()}
+    if explicit:
+        return explicit
+    bind = os.environ.get("KOMPANY_BIND_HOST", "").strip().lower()
+    if bind and bind not in _ANY_BIND and not is_loopback_host(bind):
+        return {bind}
+    return set()
 
 
 def _host_only(netloc: str) -> str:

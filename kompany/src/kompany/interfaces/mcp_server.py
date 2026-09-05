@@ -95,9 +95,38 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
+def _parent_alive(expected_ppid: int) -> bool:
+    """False once our launcher died: PID 1 (or a new parent) adopted us."""
+    import os
+
+    return os.getppid() == expected_ppid
+
+
+def start_orphan_watchdog(interval: float = 5.0) -> None:
+    """#30: kompany-mcp instances leaked for days after their Claude Code
+    session ended (the harness did not always close our stdin). Poll the
+    parent pid; when it changes, exit hard — nothing to flush, no engine
+    state of our own."""
+    import os
+    import threading
+    import time
+
+    ppid = os.getppid()
+
+    def _loop() -> None:
+        while True:
+            time.sleep(interval)
+            if not _parent_alive(ppid):
+                os._exit(0)
+
+    threading.Thread(target=_loop, name="kompany-mcp-orphan-watchdog", daemon=True).start()
+
+
 def main():
     """Run the Kompany MCP server over stdio."""
     import asyncio
+
+    start_orphan_watchdog()
 
     async def _run():
         async with stdio_server() as (read_stream, write_stream):

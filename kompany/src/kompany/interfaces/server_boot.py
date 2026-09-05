@@ -73,6 +73,9 @@ def run_server(
 
     # Never expose an unauthenticated API beyond loopback by accident.
     assert_bind_allowed(host, KompanySettings.load(None))
+    # Let the access guard default its Host allowlist to the bound address
+    # (#45); explicit KOMPANY_ALLOWED_HOSTS still wins.
+    os.environ.setdefault("KOMPANY_BIND_HOST", host)
 
     from kompany.interfaces.mcp_proxy import (
         remove_discovery_file,

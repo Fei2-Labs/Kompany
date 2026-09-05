@@ -555,6 +555,10 @@ kompany doctor --json   # same tree for scripts
 
 Offline and read-only: SQLite `quick_check`, runtime state, LLM provider configured, open watchdog events, blocked tasks and pending approvals, integration connections, backup freshness, API access mode, build info. Every red or yellow node carries a one-line fix. Same payload on `GET /doctor`, MCP `kompany_doctor`, `k.doctor()`, and the **Doctor** card on the Settings page.
 
+### CLI providers (`claude-code:*`, `opencode:*`): spawn hygiene
+
+Child CLIs get a minimal environment — their own auth variables only, no engine keys or vault key, and none of the nested-harness markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) that made a child `claude` behave as a nested session. The spawn timeout is 120 s by default; when it trips, the error carries the child's last output. Raise it with `KOMPANY_CLI_TIMEOUT_SECONDS` only if your calls are legitimately slow. `kompany-mcp` now exits on its own when the Claude Code session that launched it is gone, so bridge processes no longer pile up across sessions.
+
 ### One engine, shared by app and daemon
 
 Exactly one Kompany server runs per data directory — the discovery file `<data_dir>/server.json` is the lock:
@@ -635,7 +639,7 @@ kompany serve --host 0.0.0.0 --port 8000
 
 Then open `http://<your-machine's-LAN-IP>:8000/ui/` on the phone (find the IP with `ipconfig getifaddr en0` on macOS).
 
-**Authentication is required off-loopback.** Set `WEB_DASHBOARD_TOKEN` (env) or `web_dashboard_token` in `config.yaml` first — the server **refuses to bind** a non-loopback address without it (override only on purpose with `KOMPANY_ALLOW_OPEN_BIND=1`, e.g. behind an authenticating reverse proxy). With a token configured, **every** route (approvals, directives, credentials, tools, SSE) requires it: open `http://<ip>:8000/dashboard/login` once on the phone to get a session cookie, or send `Authorization: Bearer <token>` from scripts. Cross-site browser requests are refused regardless (origin check), and `KOMPANY_ALLOWED_HOSTS=<host,...>` adds a Host allowlist against DNS rebinding. Still prefer a trusted network or the overlay-network path below; never port-forward the API to the internet without TLS in front.
+**Authentication is required off-loopback.** Set `WEB_DASHBOARD_TOKEN` (env) or `web_dashboard_token` in `config.yaml` first — the server **refuses to bind** a non-loopback address without it (override only on purpose with `KOMPANY_ALLOW_OPEN_BIND=1`, e.g. behind an authenticating reverse proxy). With a token configured, **every** route (approvals, directives, credentials, tools, SSE) requires it: open `http://<ip>:8000/dashboard/login` once on the phone to get a session cookie, or send `Authorization: Bearer <token>` from scripts. Cross-site browser requests are refused regardless (origin check). Host allowlist against DNS rebinding: when you bind a concrete address (`--host 192.168.1.20`) only that Host is accepted automatically; for a wildcard bind (`0.0.0.0`) or a reverse proxy set `KOMPANY_ALLOWED_HOSTS=<host,...>` to the names clients use. Still prefer a trusted network or the overlay-network path below; never port-forward the API to the internet without TLS in front.
 
 ### Remote (away from home): use a private overlay network
 

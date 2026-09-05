@@ -14,9 +14,24 @@ the internal design spec).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
-DEFAULT_TIMEOUT_SECONDS = 300.0
+from kompany.llm.cli_env import cli_child_env
+
+
+def default_timeout_seconds() -> float:
+    """Spawn timeout. 120 s by default (#30: a healthy call takes seconds; a
+    300 s blind stall hid the real problem). Override with
+    ``KOMPANY_CLI_TIMEOUT_SECONDS``."""
+    raw = os.environ.get("KOMPANY_CLI_TIMEOUT_SECONDS", "").strip()
+    try:
+        return float(raw) if raw else 120.0
+    except ValueError:
+        return 120.0
+
+
+DEFAULT_TIMEOUT_SECONDS = default_timeout_seconds()
 
 
 def run_claude_code(
@@ -64,6 +79,10 @@ def run_claude_code(
             text=True,
             timeout=timeout,
             stdin=subprocess.DEVNULL,
+            # #45/#30: no engine secrets, no nested-harness markers, and an
+            # own session so a wedged child cannot hold our process group.
+            env=cli_child_env("claude"),
+            start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
@@ -71,9 +90,16 @@ def run_claude_code(
             "switch to an API-key provider"
         ) from exc
     except subprocess.TimeoutExpired as exc:
+        tail = ""
+        for stream in (exc.stderr, exc.stdout):
+            if stream:
+                tail = (stream.decode("utf-8", "replace") if isinstance(stream, bytes) else str(stream)).strip()[-400:]
+                if tail:
+                    break
         raise RuntimeError(
-            f"claude CLI timed out after {timeout:.0f}s "
-            f"(model={cli_model})"
+            f"claude CLI timed out after {timeout:.0f}s (model={cli_model})"
+            + (f"; last output: {tail}" if tail else "; no output at all — check for stale "
+               "kompany-mcp/claude processes and raise KOMPANY_CLI_TIMEOUT_SECONDS only if calls are legitimately slow")
         ) from exc
     stderr_tail = (proc.stderr or "").strip()[-500:]
     if proc.returncode != 0:
