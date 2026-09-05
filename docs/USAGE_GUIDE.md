@@ -546,6 +546,16 @@ kompany daemon uninstall   # remove the launchd plist or systemd unit
 
 These four commands are deliberately CLI-only — they manage a process on *this* machine. Tick visibility lives on the existing surfaces instead: `kompany status` (and `GET /status`, `kompany_status`, `k.status()`) carries a `ticker` block (`running`, `last_tick_at`, `tick_count`, `interval_seconds`), and `kompany observability` shows the most recent ticks.
 
+### `kompany merge` — unite two forks of the same company
+
+```bash
+kompany merge ~/server-export.kmp --passphrase ... --dry-run   # report only
+kompany merge ~/server-export.kmp --passphrase ...             # apply (backup taken first)
+kompany merge /path/to/other/kompany.db                         # a raw db works too
+```
+
+For the case `import` cannot handle: the company ran on two machines and both kept working. `merge` unions the other side into this one — projects, tasks, approvals, documents, artifacts and memories are added when missing; where both sides have a row and it carries `updated_at`, the newer wins; ledger and audit rows are appended by content and the balance chain is recomputed; nothing local is deleted. It refuses two different companies, skips the credential vault (different keys) and per-machine caches, and prints every collision.
+
 ### `kompany doctor` — what is broken and how to fix it
 
 ```bash

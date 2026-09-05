@@ -102,6 +102,50 @@ def import_company(
     ))
 
 
+@app.command("merge")
+def merge_company_cmd(
+    source: str = typer.Argument(..., help="Path to the other side: a .kmp bundle or a kompany.db"),
+    passphrase: str = typer.Option(None, "--passphrase", help="Passphrase when source is a .kmp bundle"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report what would change; write nothing"),
+    force: bool = typer.Option(False, "--force", help="Allow merging when one side has no company_name"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    config: str = typer.Option(None, "--config", "-c"),
+):
+    """Merge a diverged copy of the SAME company into this one (union, never replace).
+
+    A verified backup is taken first. Different companies are refused.
+    """
+    from kompany.state.merge_company import MergeRefused, merge_company
+
+    engine = _get_engine(config)
+    try:
+        report = merge_company(
+            engine.db, Path(source), passphrase=passphrase, dry_run=dry_run, force=force,
+            backups=engine.backups,
+        )
+    except (MergeRefused, FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if not dry_run:
+        engine.audit.record(
+            "company.merged", f"Merged fork from {source}",
+            detail={k: v for k, v in report.as_dict().items() if k != "notes"},
+        )
+    payload = report.as_dict()
+    if as_json:
+        _emit_json(payload)
+        return
+    lines = [f"Company: {report.company}", f"Source: {report.source}",
+             f"Mode: {'DRY RUN' if dry_run else 'applied'}" + (f" · backup {report.backup_id}" if report.backup_id else ""),
+             f"Inserted: {payload['total_inserted']} rows — " + (", ".join(f"{t} +{n}" for t, n in report.inserted.items()) or "none"),
+             f"Updated (newer wins): {payload['total_updated']} — " + (", ".join(f"{t} {n}" for t, n in report.updated.items()) or "none"),
+             f"Collisions kept local: " + (", ".join(f"{t} {n}" for t, n in report.collisions.items()) or "none"),
+             f"Skipped tables: {', '.join(report.skipped_tables) or 'none'}",
+             f"Ledger balance chain recomputed over {report.ledger_recomputed_rows} rows"]
+    lines += [f"Note: {n}" for n in report.notes]
+    console.print(Panel("\n".join(lines), title="Merge"))
+
+
 # ---------------------------------------------------------------------------
 # Remote backup commands (07-14 cloud-deploy-backup-restore step 5)
 # ---------------------------------------------------------------------------
