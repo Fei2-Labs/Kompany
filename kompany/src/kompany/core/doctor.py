@@ -204,6 +204,20 @@ def check_installation_role(engine: Any) -> dict[str, Any]:
     return node("installation_role", "Installation role", "info", detail)
 
 
+def check_extensions(engine: Any) -> dict[str, Any]:
+    rows = engine.extensions.list() if getattr(engine, "extensions", None) is not None else []
+    if not rows:
+        return node("extensions", "Extensions", "info", "no customer extensions installed")
+    blocked = [r for r in rows if r["status"] == "blocked"]
+    pending = [r for r in rows if r["status"] == "installed"]
+    detail = f"{len(rows)} installed, {sum(1 for r in rows if r['status'] == 'active')} active, {len(pending)} awaiting approval, {len(blocked)} blocked"
+    if blocked:
+        return node("extensions", "Extensions", "warn", detail,
+                    "Blocked by Core version: " + "; ".join(f"{r['id']}: {r['block_reason']}" for r in blocked)
+                    + ". Update the extension or roll Core back — nothing was deleted.")
+    return node("extensions", "Extensions", "info", detail)
+
+
 CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("database", "SQLite database", check_database),
     ("runtime", "Runtime", check_runtime),
@@ -215,6 +229,7 @@ CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("access", "API access", check_access),
     ("build", "Build", check_build),
     ("installation_role", "Installation role", check_installation_role),
+    ("extensions", "Extensions", check_extensions),
 )
 
 

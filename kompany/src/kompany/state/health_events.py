@@ -51,6 +51,10 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # data dir that previously ran a GitHub-built release. Recorded once at
     # boot by ``core/release_info.py``; resolves itself when a release runs.
     "deployment_drift",
+    # 07-24 four-layer: a customer extension's core_api range excludes the
+    # running Core version. The extension is blocked (never deleted) and
+    # the event resolves itself when a compatible Core runs.
+    "extension_incompatible",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

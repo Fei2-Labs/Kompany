@@ -941,6 +941,40 @@ The same operation is available everywhere: REST `POST /self-update/propose`, MC
 
 ---
 
+## Extensions: Your Own Code, Isolated
+
+An extension is a small package you write for your own instance. A vendor update never overwrites it, and it never runs inside the engine process.
+
+```text
+hello/
+  extension.json   # manifest
+  main.py          # def run(job, host): ...
+```
+
+```json
+{
+  "id": "acme.hello", "name": "Hello", "version": "1.0.0",
+  "core_api": ">=0.1,<0.2",
+  "capabilities": {"tools": ["web.search"], "paths": ["notes/"], "network": ["api.example.com"], "budget_usd": 1.0}
+}
+```
+
+```bash
+kompany extensions install ./hello      # copies into <data_dir>/extensions/, files an approval card
+kompany extensions list                 # installed / active / disabled / blocked
+kompany extensions run acme.hello --job '{"x": 1}'
+```
+
+- **Approve first.** Executable code lands as an `extension_activate` card in your inbox. Nothing runs until you approve; reject leaves it disabled.
+- **Only what the manifest declares.** The extension reaches the engine through `host.tool(...)`, `host.read/write(...)` (inside its own `data/` dir), `host.fetch(...)` (declared hosts only), `host.credential(...)` (broker lease, no plaintext). Anything undeclared is denied, recorded on the run and in the audit log. Paid tool actions still go through your inbox and are capped by `budget_usd`.
+- **Isolated.** Each run is a separate `python -I -S` process: no site-packages, no ambient environment, private working directory, time and CPU limits.
+- **Blocked, never deleted.** If a Core update leaves the manifest's `core_api` range, the extension is blocked with a health event and a `kompany doctor` warning. Update the extension (or roll Core back) and it unblocks itself.
+- **Travels with the company.** `kompany export` bundles `extensions/` alongside the database.
+
+Same operations on REST (`/extensions`), MCP (`kompany_extension*`) and the SDK (`k.extension_install(...)`).
+
+---
+
 ## Anima: The Company's Persona
 
 Anima (provisional name, tracked in the glossary) is the persona layer above the C-suite: an explicit emotional state plus a private first-person diary, driven by the daemon tick loop.

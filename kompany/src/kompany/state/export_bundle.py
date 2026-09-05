@@ -73,6 +73,29 @@ def _bundle_files(data_dir: Path) -> list[Path]:
     return files
 
 
+EXTENSIONS_DIR = "extensions"
+
+
+def _extension_members(data_dir: Path) -> list[tuple[str, Path]]:
+    """Customer-evolution layer (07-24): every file under ``extensions/``
+    travels with the company, independent of vendor release state."""
+    root = data_dir / EXTENSIONS_DIR
+    if not root.is_dir():
+        return []
+    return [(f"{EXTENSIONS_DIR}/{p.relative_to(root).as_posix()}", p)
+            for p in sorted(root.rglob("*")) if p.is_file() and "__pycache__" not in p.parts]
+
+
+def _safe_extension_member(name: str) -> Path | None:
+    """``extensions/<rel>`` with no traversal → relative Path; else None."""
+    if not name.startswith(EXTENSIONS_DIR + "/"):
+        return None
+    rel = Path(name)
+    if rel.is_absolute() or any(part in ("..", "") for part in rel.parts):
+        return None
+    return rel
+
+
 def _snapshot_db(data_dir: Path, target: Path) -> None:
     """Snapshot the live database (WAL-safe) to ``target``."""
     db_path = data_dir / DB_FILENAME
@@ -113,6 +136,7 @@ def create_bundle(
         _snapshot_db(data_dir, snapshot)
         members = [(DB_FILENAME, snapshot)]
         members += [(p.name, p) for p in _bundle_files(data_dir)]
+        members += _extension_members(data_dir)
 
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
@@ -198,13 +222,18 @@ def import_bundle(
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as tar:
         for member in tar.getmembers():
             name = member.name
-            if not member.isfile() or "/" in name or "\\" in name or name.startswith("."):
+            ext_rel = _safe_extension_member(name) if member.isfile() else None
+            if ext_rel is None and (not member.isfile() or "/" in name or "\\" in name or name.startswith(".")):
                 if name not in SECRET_FILENAMES:
                     continue
             extracted = tar.extractfile(member)
             if extracted is None:
                 continue
-            target = data_dir / Path(name).name
+            if ext_rel is not None:
+                target = data_dir / ext_rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                target = data_dir / Path(name).name
             secret = target.suffix == ".key" or target.name in SECRET_FILENAMES
             fd = os.open(
                 str(target),
@@ -215,7 +244,7 @@ def import_bundle(
                 os.write(fd, extracted.read())
             finally:
                 os.close(fd)
-            written.append(target.name)
+            written.append(str(ext_rel) if ext_rel is not None else target.name)
 
     marker = data_dir / EXPORTED_MARKER
     if marker.exists():

@@ -21,6 +21,7 @@ from kompany.interfaces.mcp_tools import (
     ops_status as _ops_status,
     projects_execution as _projects_execution,
     templates_glossary as _templates_glossary,
+    extensions as _extensions,
 )
 
 server = Server("kompany")
@@ -48,6 +49,7 @@ TOOLS: list[Tool] = (
     + _governance_credentials.TOOLS
     + _templates_glossary.TOOLS
     + _model_source_founder.TOOLS
+    + _extensions.TOOLS
 )
 
 

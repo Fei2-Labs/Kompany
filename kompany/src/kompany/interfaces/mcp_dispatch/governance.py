@@ -239,6 +239,26 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
     if name == "kompany_self_update_list":
         return engine.self_update_list(limit=int(arguments.get("limit") or 20))
 
+    if name == "kompany_extensions_list":
+        return engine.extensions_list()
+    if name == "kompany_extension_show":
+        row = engine.extension_show(arguments["extension_id"])
+        return row if row is not None else {"error": "extension not found"}
+    if name == "kompany_extension_install":
+        try:
+            return engine.extension_install(arguments["path"])
+        except ValueError as exc:
+            return {"error": str(exc)}
+    if name == "kompany_extension_run":
+        try:
+            return engine.extension_run(arguments["extension_id"], dict(arguments.get("job") or {}),
+                                        timeout_seconds=int(arguments.get("timeout_seconds") or 120))
+        except ValueError as exc:
+            return {"error": str(exc)}
+    if name == "kompany_extension_set_enabled":
+        row = engine.extension_set_enabled(arguments["extension_id"], bool(arguments["enabled"]))
+        return row if row is not None else {"error": "extension not found"}
+
     if name == "kompany_self_update_role":
         return engine.self_update_role()
 

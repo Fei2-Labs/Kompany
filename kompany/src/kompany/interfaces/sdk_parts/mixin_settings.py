@@ -259,6 +259,25 @@ class KompanySettingsOps:
         """One proposal row by id; ``None`` when unknown."""
         return self._engine.self_update_show(proposal_id)
 
+    # -- customer extensions (07-24 four-layer) --------------------------
+
+    def extensions_list(self) -> list[dict[str, Any]]:
+        return self._engine.extensions_list()
+
+    def extension_show(self, extension_id: str) -> dict[str, Any] | None:
+        return self._engine.extension_show(extension_id)
+
+    def extension_install(self, path: str) -> dict[str, Any]:
+        """Copy a package into the customer layer and file its activation card."""
+        return self._engine.extension_install(path)
+
+    def extension_run(self, extension_id: str, job: dict[str, Any] | None = None,
+                      timeout_seconds: int = 120) -> dict[str, Any]:
+        return self._engine.extension_run(extension_id, job, timeout_seconds=timeout_seconds)
+
+    def extension_set_enabled(self, extension_id: str, enabled: bool) -> dict[str, Any] | None:
+        return self._engine.extension_set_enabled(extension_id, enabled)
+
     def self_update_role(self) -> dict[str, Any]:
         """Installation role (customer/contributor/maintainer) and whether
         approving a proposal pushes + opens a PR or exports a patch."""
