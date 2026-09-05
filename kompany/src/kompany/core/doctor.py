@@ -176,11 +176,18 @@ def check_build(engine: Any) -> dict[str, Any]:
     info: dict[str, Any] = {}
     try:
         from kompany.interfaces.api_parts.system import build_info
-        info = build_info() or {}
+        info = build_info(engine) or {}
     except Exception:  # noqa: BLE001
         info = {}
     stale = bool(info.get("stale"))
+    release = info.get("release") or {}
+    drift = info.get("drift") or {}
     parts = [f"{k}={v}" for k, v in info.items() if v and k in ("version", "commit", "repo_head", "newer_commits")]
+    if release.get("source"):
+        parts.append(f"source={release['source']}")
+    if drift.get("drift"):
+        return node("build", "Build", "fail",
+                    "deployment drift: " + ", ".join(parts), drift.get("hint"))
     return node("build", "Build", "warn" if stale else "info",
                 ", ".join(parts) or "build info unavailable",
                 info.get("hint") if stale else None)

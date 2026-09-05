@@ -130,4 +130,78 @@ def staleness(git_root: Path | None | Any = _UNSET, start_sha: str | None | Any 
     }
 
 
-__all__ = ["find_git_root", "read_head_sha", "staleness"]
+# Cached daemon build info — computed once on first /version request.
+# Resolved lazily so importing the module never shells out to git.
+_DAEMON_BUILD_INFO: dict[str, str] | None = None
+
+
+def _resolve_daemon_build_info() -> dict[str, str]:
+    """Daemon version + git commit of the running engine package.
+
+    Walks up from this file's location to find a ``.git`` dir and runs
+    ``git rev-parse --short HEAD`` there. Falls back to ``unknown`` when
+    not in a git checkout (e.g. PyInstaller bundle) so the endpoint
+    never 500s. Cached after the first call.
+    """
+    global _DAEMON_BUILD_INFO
+    if _DAEMON_BUILD_INFO is not None:
+        return _DAEMON_BUILD_INFO
+
+    from kompany import __version__ as pkg_version
+
+    commit = "unknown"
+    describe = "unknown"
+    try:
+        # This file lives at <git_root>/kompany/src/kompany/interfaces/api_parts/system.py
+        here = Path(__file__).resolve()
+        for candidate in [here, *here.parents]:
+            if (candidate / ".git").exists() or (candidate / ".git").is_dir():
+                git_dir = candidate
+                break
+        else:
+            git_dir = None
+        if git_dir is not None:
+            commit = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
+            ).stdout.strip() or "unknown"
+            describe = subprocess.run(
+                ["git", "describe", "--tags", "--always", "--dirty"],
+                cwd=str(git_dir), capture_output=True, text=True, timeout=3,
+            ).stdout.strip() or commit
+    except Exception:  # noqa: BLE001 — version probe must never break /version
+        pass
+
+    _DAEMON_BUILD_INFO = {
+        "version": pkg_version,
+        "commit": commit,
+        "git_describe": describe,
+    }
+    return _DAEMON_BUILD_INFO
+
+
+def build_info(engine: Any | None = None) -> dict[str, Any]:
+    """Build identity, staleness vs the repo on disk (#26), release identity
+    and deployment drift (Stage C). ``drift`` is the engine's boot-time
+    verdict; without an engine it is recomputed read-only from the data dir
+    the engine would use."""
+    from kompany.core.release_info import release_identity, sync_deployment_identity
+
+    release = release_identity()
+    drift = getattr(engine, "deployment_drift", None) if engine is not None else None
+    if drift is None:
+        try:
+            from kompany.config.settings import KompanySettings
+
+            drift = sync_deployment_identity(KompanySettings.load().data_dir, release)
+        except Exception:  # noqa: BLE001 — advisory
+            drift = {"drift": False}
+    return {
+        **_resolve_daemon_build_info(),
+        **staleness(),
+        "release": release,
+        "drift": {k: v for k, v in drift.items() if k in ("drift", "expected", "hint")},
+    }
+
+
+__all__ = ["build_info", "find_git_root", "read_head_sha", "staleness"]

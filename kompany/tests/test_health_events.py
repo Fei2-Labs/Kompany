@@ -204,6 +204,9 @@ def test_constants_match_prd():
         # silent success) / a lane lease went stale.
         "lane_timeout",
         "lane_stalled",
+        # Stage C (07-24-stage-c): engine booted from a non-release source
+        # on a data dir that previously ran a GitHub release.
+        "deployment_drift",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

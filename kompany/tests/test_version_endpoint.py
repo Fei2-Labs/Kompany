@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kompany.interfaces import api as api_module
-from kompany.interfaces.api_parts import system as system_module
+from kompany.core import build_info as system_module  # cache now lives in core/build_info
 
 
 @pytest.fixture(autouse=True)

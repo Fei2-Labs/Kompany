@@ -47,6 +47,10 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # records one of these instead of reporting an idle "ok" tick.
     "lane_timeout",
     "lane_stalled",
+    # Stage C: the engine started from a source checkout / local build on a
+    # data dir that previously ran a GitHub-built release. Recorded once at
+    # boot by ``core/release_info.py``; resolves itself when a release runs.
+    "deployment_drift",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

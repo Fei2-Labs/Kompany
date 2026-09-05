@@ -314,10 +314,23 @@ def _systemd_unit_content(
     program_arguments: list[str],
     path_env: str,
     user: str | None = None,
+    home: Path | None = None,
 ) -> str:
-    """Render the systemd unit file body."""
+    """Render the systemd unit file body.
+
+    Hardened by default (Stage C): the whole filesystem is read-only except
+    the data dir and the daemon user's home (CLI harnesses such as claude /
+    codex keep their state under ``~``), no new privileges, no capabilities,
+    private ``/tmp``, kernel/cgroup/clock surfaces protected, 0077 umask.
+    A release installed root-owned under ``/opt`` is therefore not writable
+    by the daemon — the process cannot edit its own code. Namespaces stay
+    allowed because agent tools may spawn sandboxed browsers.
+    """
     exec_start = " ".join(program_arguments)
     user_line = f"User={user}\n" if user else ""
+    rw_paths = [str(data_dir)]
+    if home is not None and str(home) not in rw_paths:
+        rw_paths.append(str(home))
     return (
         "[Unit]\n"
         "Description=Kompany 24/7 daemon server\n"
@@ -333,9 +346,42 @@ def _systemd_unit_content(
         f"Environment=KOMPANY_DATA_DIR={data_dir}\n"
         f"Environment=PATH={path_env}\n"
         "\n"
+        "# Hardening (Stage C). The daemon may write only its data dir and the\n"
+        "# user's home; the installed release stays read-only.\n"
+        "NoNewPrivileges=yes\n"
+        "PrivateTmp=yes\n"
+        "ProtectSystem=strict\n"
+        f"ReadWritePaths={' '.join(rw_paths)}\n"
+        "ProtectKernelTunables=yes\n"
+        "ProtectKernelModules=yes\n"
+        "ProtectKernelLogs=yes\n"
+        "ProtectControlGroups=yes\n"
+        "ProtectClock=yes\n"
+        "ProtectHostname=yes\n"
+        "RestrictSUIDSGID=yes\n"
+        "RestrictRealtime=yes\n"
+        "LockPersonality=yes\n"
+        "SystemCallArchitectures=native\n"
+        "CapabilityBoundingSet=\n"
+        "AmbientCapabilities=\n"
+        "UMask=0077\n"
+        "\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
+
+
+def _home_for(user: str | None) -> Path | None:
+    """Home directory of ``user`` (the daemon user), for ReadWritePaths."""
+    if not user:
+        return None
+    try:
+        import pwd
+
+        return Path(pwd.getpwnam(user).pw_dir)
+    except Exception:  # noqa: BLE001 — unknown user / non-POSIX
+        expanded = os.path.expanduser(f"~{user}")
+        return Path(expanded) if not expanded.startswith("~") else None
 
 
 def install_systemd(data_dir: Path | None = None) -> dict[str, Any]:
@@ -368,7 +414,10 @@ def install_systemd(data_dir: Path | None = None) -> dict[str, Any]:
     # dir, venv, and CLI harness tools (claude/codex/opencode). Under
     # sudo, USER/root is wrong — prefer SUDO_USER (the invoking user).
     user = os.environ.get("SUDO_USER") or os.environ.get("USER") or pwd_get_username()
-    unit_body = _systemd_unit_content(data_dir, program_arguments, path_env, user=user)
+    home = _home_for(user)
+    unit_body = _systemd_unit_content(
+        data_dir, program_arguments, path_env, user=user, home=home
+    )
     try:
         SYSTEMD_UNIT_PATH.write_text(unit_body, encoding="utf-8")
     except OSError as exc:

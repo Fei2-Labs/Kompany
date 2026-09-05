@@ -49,6 +49,9 @@ packages = ["src/kompany"]
 # resolves correctly from a wheel or a sdist.
 include = [
     "src/kompany/**/*.py",
+    # Written by .github/workflows/release.yml before `python -m build`;
+    # absent in a source checkout (core/release_info.py reads it).
+    "src/kompany/release.json",
     "src/kompany/templates/**/*.json",
     "src/kompany/templates/**/*.md",
     "src/kompany/agents/souls/*.yaml",
@@ -65,6 +68,9 @@ include = [
 [tool.hatch.build.targets.sdist]
 include = [
     "src/kompany/**/*.py",
+    # Written by .github/workflows/release.yml before `python -m build`;
+    # absent in a source checkout (core/release_info.py reads it).
+    "src/kompany/release.json",
     "src/kompany/templates/**/*.json",
     "src/kompany/templates/**/*.md",
     "src/kompany/agents/souls/*.yaml",

@@ -475,6 +475,29 @@ def test_systemd_unit_content_shape():
     assert "PATH=/home/user/.local/bin:/usr/bin:/bin" in body
 
 
+def test_systemd_unit_is_hardened_by_default():
+    body = daemon_ops._systemd_unit_content(
+        Path("/home/kompany/.kompany"),
+        ["/opt/kompany/current/venv/bin/python", "-m", "kompany.interfaces.daemon_main"],
+        "/usr/bin:/bin",
+        user="kompany",
+        home=Path("/home/kompany"),
+    )
+    for line in (
+        "NoNewPrivileges=yes", "PrivateTmp=yes", "ProtectSystem=strict",
+        "ReadWritePaths=/home/kompany/.kompany /home/kompany",
+        "CapabilityBoundingSet=", "AmbientCapabilities=", "UMask=0077",
+        "ProtectKernelTunables=yes", "RestrictSUIDSGID=yes", "SystemCallArchitectures=native",
+    ):
+        assert line in body, line
+    # release dir (/opt) is NOT writable: only data dir + home are listed
+    assert "/opt" not in body.split("ReadWritePaths=")[1].splitlines()[0]
+    # without a home only the data dir is writable
+    solo = daemon_ops._systemd_unit_content(Path("/srv/k"), ["x"], "/bin", user=None, home=None)
+    assert "ReadWritePaths=/srv/k\n" in solo
+    assert daemon_ops._home_for(None) is None
+
+
 def test_systemd_unit_content_no_user():
     body = daemon_ops._systemd_unit_content(
         Path("/root/.kompany"),
