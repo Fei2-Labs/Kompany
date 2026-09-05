@@ -259,6 +259,11 @@ class KompanySettingsOps:
         """One proposal row by id; ``None`` when unknown."""
         return self._engine.self_update_show(proposal_id)
 
+    def self_update_role(self) -> dict[str, Any]:
+        """Installation role (customer/contributor/maintainer) and whether
+        approving a proposal pushes + opens a PR or exports a patch."""
+        return self._engine.self_update_role()
+
     def list_credentials(self) -> list[dict[str, Any]]:
         return self._engine.list_credentials()
 

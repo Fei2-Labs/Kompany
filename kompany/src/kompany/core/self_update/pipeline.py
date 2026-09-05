@@ -20,6 +20,7 @@ from kompany.core.event_hub import get_event_hub
 from kompany.core.harness import HarnessCaps, HarnessEvent, HarnessResult
 from kompany.core.harness.safety import assert_workspace_safe
 from kompany.core.harness_execution.selection import harness_model, select_runner
+from kompany.core.installation_role import resolve_installation_role
 from kompany.core.self_update.tiers import T3_PROMPT_NOTE, classify_paths
 from kompany.core.self_update.workspace import (
     commit_all,
@@ -116,9 +117,13 @@ def propose_self_update(engine: Any, instruction: str) -> dict:
 
     test_summary = _run_tests(clone, settings)
 
+    # Installation role decides what approve DOES (07-24): maintainer →
+    # push + PR; anyone else → local patch. Say so on the card.
+    role = resolve_installation_role()
     summary = (
         f"Self-update proposal ({tier}): {instruction[:120]} — "
         f"{len(files)} file(s), tests {'PASSED' if test_summary.startswith('PASSED') else 'FAILED'}"
+        + ("" if role.can_promote else f" — role {role.role}: approve exports a patch")
     )
     request = ApprovalRequest(
         action_type="self_update_proposal",
@@ -132,6 +137,8 @@ def propose_self_update(engine: Any, instruction: str) -> dict:
             "test_summary": test_summary,
             "instruction": instruction,
             "cost_usd": float(cost or 0.0),
+            "installation_role": role.role,
+            "promotion": "push_and_pr" if role.can_promote else "patch_only",
         },
         requested_by="self_update_pipeline",
         severity="high" if tier == "t2" else "medium",

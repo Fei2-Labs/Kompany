@@ -42,6 +42,14 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kompany_self_update_role",
+        description=(
+            "Installation role (customer/contributor/maintainer) and whether approving a "
+            "self-update proposal pushes a branch + opens a PR or only exports a patch. Read-only."
+        ),
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
         name="kompany_self_update_show",
         description="One self-update proposal by id.",
         inputSchema={

@@ -239,6 +239,9 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
     if name == "kompany_self_update_list":
         return engine.self_update_list(limit=int(arguments.get("limit") or 20))
 
+    if name == "kompany_self_update_role":
+        return engine.self_update_role()
+
     if name == "kompany_self_update_show":
         row = engine.self_update_show(arguments["proposal_id"])
         return row if row is not None else {"error": "proposal not found"}

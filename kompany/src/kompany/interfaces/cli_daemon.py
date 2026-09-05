@@ -62,11 +62,28 @@ def daemon_install(
         None, "--data-dir", help="Override the Kompany data directory."
     ),
     as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    role: str = typer.Option(
+        None,
+        "--role",
+        help=(
+            "Installation role written to the root-owned role file "
+            "(customer | contributor | maintainer). Operator action; run under sudo."
+        ),
+    ),
 ):
     """Install the daemon supervisor (launchd on macOS, systemd on Linux)."""
     from kompany.core import daemon_ops
 
-    result = daemon_ops.install_daemon(data_dir=_data_dir(data_dir))
+    result = daemon_ops.install_daemon(data_dir=_data_dir(data_dir), role=role)
+    role_result = result.get("installation_role")
+    if role_result and not as_json:
+        if role_result.get("written"):
+            console.print(
+                f"Installation role: {role_result['role']} → {role_result['path']} "
+                f"({'trusted' if role_result.get('trusted') else role_result.get('reason')})"
+            )
+        else:
+            console.print(f"[red]Installation role not written: {role_result['error']}[/red]")
     if as_json:
         _emit_json(result)
         return

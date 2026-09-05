@@ -123,4 +123,27 @@ def self_update_show(
     console.print(_proposal_panel(row, "kompany self-update show"))
 
 
+@self_update_app.command("role")
+def self_update_role(
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Machine-readable output"),
+):
+    """Installation role and what approving a proposal does on this instance."""
+    info = _get_engine(config).self_update_role()
+    if as_json:
+        _emit_json(info)
+        return
+    lines = [
+        f"Role: {info['role']} ({'trusted' if info['trusted'] else 'UNTRUSTED'})",
+        f"Source: {info['source']} — {info['reason']}",
+        f"Role file: {info['path']}",
+        "Approve a proposal → "
+        + ("push branch + open PR" if info["promotion"] == "push_and_pr" else "export a local patch only"),
+        f"Allowed upstream repos: {', '.join(info['allowed_repos'])}",
+        "Change the role: `sudo kompany daemon install --role <customer|contributor|maintainer>` "
+        "(operator action; no tool can change it).",
+    ]
+    console.print(Panel("\n".join(lines), title="kompany self-update role"))
+
+
 __all__ = ["self_update_app"]

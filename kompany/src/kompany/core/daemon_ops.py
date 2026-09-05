@@ -552,17 +552,25 @@ def run_daemon(
 # ---------------------------------------------------------------------------
 
 
-def install_daemon(data_dir: Path | None = None) -> dict[str, Any]:
+def install_daemon(data_dir: Path | None = None, role: str | None = None) -> dict[str, Any]:
     """Install the daemon supervisor for the current platform.
 
     macOS → launchd LaunchAgent; Linux → systemd system service. Other
     platforms get a clear error pointing to ``kompany daemon run`` under
-    a manual process supervisor.
+    a manual process supervisor. ``role`` (07-24 installation role) writes
+    the root-owned role file as part of the same operator action; the
+    daemon itself never writes it.
     """
     if sys.platform == "darwin":
-        return install_launchd(data_dir)
-    if sys.platform == "linux":
-        return install_systemd(data_dir)
+        result = install_launchd(data_dir)
+    elif sys.platform == "linux":
+        result = install_systemd(data_dir)
+    else:
+        result = None
+    if result is not None:
+        if role is not None:
+            result["installation_role"] = _provision_role(role)
+        return result
     return {
         "installed": False,
         "error": (
@@ -571,6 +579,18 @@ def install_daemon(data_dir: Path | None = None) -> dict[str, Any]:
             "process supervisor (e.g. supervisord, runit)."
         ),
     }
+
+
+def _provision_role(role: str) -> dict[str, Any]:
+    from kompany.core.installation_role import resolve_installation_role, write_role_file
+
+    try:
+        path = write_role_file(role)
+    except (OSError, ValueError) as exc:
+        return {"written": False, "role": role, "path": None, "error": str(exc)}
+    resolved = resolve_installation_role(path)
+    return {"written": True, "role": resolved.role, "path": str(path),
+            "trusted": resolved.trusted, "reason": resolved.reason, "error": None}
 
 
 def uninstall_daemon() -> dict[str, Any]:

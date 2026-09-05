@@ -109,6 +109,25 @@ class ApprovalsMixin:
     def self_update_show(self, proposal_id: str) -> dict | None:
         return self.self_update_proposals.get(proposal_id)
 
+    def self_update_role(self) -> dict:
+        """Installation role (07-24): what approve of a proposal will do here.
+
+        Read-only. The role comes from a root-owned file the daemon cannot
+        write (``core/installation_role.py``); there is deliberately no
+        setter on any interface.
+        """
+        from kompany.core.installation_role import resolve_installation_role
+        from kompany.core.self_update.promotion import DEFAULT_ALLOWED_REPOS
+
+        role = resolve_installation_role()
+        return {
+            **role.as_dict(),
+            "promotion": "push_and_pr" if role.can_promote else "patch_only",
+            "allowed_repos": list(
+                getattr(self.settings, "self_update_allowed_repos", None) or DEFAULT_ALLOWED_REPOS
+            ),
+        }
+
     def approve_request(
         self,
         request_id: str,
