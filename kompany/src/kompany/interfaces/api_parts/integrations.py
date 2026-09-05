@@ -282,7 +282,6 @@ def test_email(req: TestEmailRequest | None = Body(default=None)) -> Integration
     separates "did the send succeed" from "does my From mailbox receive".
     """
     from kompany.integrations.email_smtp import SendEmailTool, SendEmailInput
-    from kompany.plugins.contract import ToolContext
 
     engine = get_engine()
     sender = (
@@ -293,10 +292,10 @@ def test_email(req: TestEmailRequest | None = Body(default=None)) -> Integration
     if not sender:
         return IntegrationActionResponse(ok=False, detail="email not connected")
     to = (req.to.strip() if req and req.to else "") or sender
-    ctx = ToolContext(
-        run_id="", ledger=engine.ledger, audit=engine.audit,
-        credentials=engine.credentials, settings=engine.settings,
-    )
+    # Full 1.1.0 service bundle (#43) — one builder for every plugin Tool call.
+    from kompany.core.tool_actions import build_tool_context
+
+    ctx = build_tool_context(engine)
     out = SendEmailTool().execute(
         SendEmailInput(to=to, subject="Kompany test email",
                        body="Your Kompany team can now send email. ✅"),

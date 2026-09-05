@@ -79,3 +79,67 @@ def test_restore_backup_overwrites_live_db(tmp_path):
     rows_after = db.execute("SELECT description FROM ledger ORDER BY id").fetchall()
     db.close()
     assert {r["description"] for r in rows_after} == {"A"}
+
+
+# ---------------------------------------------------------------------------
+# Integrity gate (#44): restore refuses tampered or corrupt snapshots.
+# ---------------------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from kompany.state.backup import BackupIntegrityError, verify_backup  # noqa: E402
+
+
+def test_backup_records_sha256_and_restore_reports_verified(tmp_path):
+    _seed_db(tmp_path)
+    mgr = BackupManager(tmp_path)
+    meta = mgr.create_backup(label="hashed")
+    assert len(meta["sha256"]) == 64
+    out = mgr.restore_backup(meta["id"])
+    assert out["verified"] == {"sha256": True, "integrity_check": True}
+
+
+def test_restore_refuses_modified_snapshot(tmp_path):
+    _seed_db(tmp_path)
+    mgr = BackupManager(tmp_path)
+    meta = mgr.create_backup(label="tamper")
+    live_before = (tmp_path / "kompany.db").read_bytes()
+    with open(meta["path"], "r+b") as fh:
+        fh.seek(200)
+        fh.write(b"\xff\xff\xff\xff")
+    with pytest.raises(BackupIntegrityError, match="digest mismatch"):
+        mgr.restore_backup(meta["id"])
+    assert (tmp_path / "kompany.db").read_bytes() == live_before  # live db untouched
+
+
+def test_restore_refuses_corrupt_legacy_snapshot_without_digest(tmp_path):
+    _seed_db(tmp_path)
+    mgr = BackupManager(tmp_path)
+    meta = mgr.create_backup(label="legacy")
+    # Simulate a pre-#44 sidecar (no digest) whose file is garbage.
+    Path(meta["path"]).write_bytes(b"not a sqlite file at all" * 100)
+    sidecar = tmp_path / "backups" / f"{meta['id']}.json"
+    import json as _json
+    m = _json.loads(sidecar.read_text()); m.pop("sha256"); sidecar.write_text(_json.dumps(m))
+    with pytest.raises(BackupIntegrityError, match="not a valid SQLite"):
+        mgr.restore_backup(meta["id"])
+
+
+def test_legacy_snapshot_without_digest_restores_when_sound(tmp_path):
+    _seed_db(tmp_path)
+    mgr = BackupManager(tmp_path)
+    meta = mgr.create_backup(label="legacy-ok")
+    sidecar = tmp_path / "backups" / f"{meta['id']}.json"
+    import json as _json
+    m = _json.loads(sidecar.read_text()); m.pop("sha256"); sidecar.write_text(_json.dumps(m))
+    out = mgr.restore_backup(meta["id"])
+    assert out["verified"] == {"sha256": None, "integrity_check": True}
+
+
+def test_verify_backup_direct(tmp_path):
+    db = tmp_path / "x.db"
+    import sqlite3 as _sq
+    _sq.connect(str(db)).close()
+    assert verify_backup(db, None)["integrity_check"] is True
+    with pytest.raises(BackupIntegrityError):
+        verify_backup(db, "0" * 64)
