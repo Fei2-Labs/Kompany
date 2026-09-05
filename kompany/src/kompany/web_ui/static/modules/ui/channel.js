@@ -25,7 +25,7 @@
 //     the "active reply target". A founder message routes to it by default; a
 //     new message after that session closes opens a fresh session (Decision 2).
 
-import { api } from "/ui/static/modules/api.js";
+import { api } from "/ui/static/modules/api.js?v=3";
 
 const EXPAND_KEY = "kompany.channel.expanded";
 

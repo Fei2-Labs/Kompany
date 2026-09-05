@@ -133,6 +133,10 @@ def get_project(project_id: str) -> dict[str, Any]:
             {
                 "id": t.id,
                 "title": t.title,
+                # Additive (09-04 dashboard): the NEEDS YOU feed surfaces
+                # BLOCKED tasks and must show the connect / approve ask
+                # (result.founder_action); task rows omitted result.
+                "result": t.result,
                 "agent": t.assigned_agent,
                 "status": t.status.value,
             }

@@ -2298,3 +2298,116 @@ body.onboarding-body { padding-bottom: 40px; }
     font-size: 16px;
   }
 }
+
+/* ----------------------------------------------------------------
+ * Live agent drawer (right rail) — what an agent is doing right now.
+ * Non-modal overlay; body.drawer-open squishes the dashboard grid so
+ * panels stay visible behind it (WorkBuddy sidebar pattern, CSS only).
+ * ---------------------------------------------------------------- */
+.agent-drawer {
+  position: fixed;
+  top: 90px;
+  right: 24px;
+  bottom: 110px;
+  width: 400px;
+  max-width: 92vw;
+  z-index: 150;
+  display: none;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--fg);
+  box-shadow: 0 8px 28px rgba(var(--shadow-rgb), 0.6);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  overflow: hidden;
+}
+.agent-drawer.open { display: flex; }
+body.drawer-open { padding-right: 448px; }
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(var(--fg-rgb), 0.25);
+}
+.drawer-role {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--fg);
+  text-shadow: var(--text-glow);
+}
+.drawer-status {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(var(--fg-rgb), 0.6);
+  border: 1px solid rgba(var(--fg-rgb), 0.3);
+  padding: 1px 6px;
+}
+.drawer-status.busy, .drawer-status.running { color: var(--busy); border-color: var(--busy); }
+.drawer-status.awaiting, .drawer-status.awaiting_user, .drawer-status.blocked { color: var(--alert); border-color: var(--alert); }
+.drawer-close {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(var(--fg-rgb), 0.35);
+  color: rgba(var(--fg-rgb), 0.75);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.drawer-close:hover { color: var(--fg); border-color: var(--fg); }
+
+.drawer-task {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: rgba(var(--fg-rgb), 0.8);
+  padding: 6px 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.drawer-sec-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: rgba(var(--fg-rgb), 0.55);
+  padding: 8px 0 4px;
+}
+
+.drawer-stream {
+  flex: 1 1 60%;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.drawer-line { display: flex; gap: 8px; align-items: baseline; }
+.drawer-line .t { color: rgba(var(--fg-rgb), 0.4); flex: 0 0 auto; }
+.drawer-line .g { flex: 0 0 auto; color: rgba(var(--fg-rgb), 0.7); }
+.drawer-line .x { color: rgba(var(--fg-rgb), 0.85); word-break: break-word; }
+.drawer-line.spend .x { color: var(--gold); }
+.drawer-line.status .x { color: var(--info); }
+
+.drawer-tasks {
+  flex: 1 1 40%;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.drawer-tasks .ep-task-head { cursor: default; }
+.drawer-tasks .ep-task-output { font-size: 11px; }
+
+@media (max-width: 900px) {
+  body.drawer-open { padding-right: 0; }
+  .agent-drawer { top: 70px; right: 12px; bottom: 96px; }
+}
+
+/* NEEDS YOU kind markers (09-04): approvals keep their severity colours;
+   watchdog and BLOCKED rows get a distinct left rule so the mixed list
+   scans by kind, not only by severity. */
+.inbox-entry.health-entry { border-left: 2px solid var(--warn, #d9a441); }
+.inbox-entry.blocked-entry { border-left: 2px solid var(--err, #e5484d); }
+.inbox-entry .body-line.dim { opacity: .72; }

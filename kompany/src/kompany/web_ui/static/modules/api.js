@@ -27,6 +27,8 @@ export const api = {
   agentsStatus: () => getJSON("/agents/status"),
   agentsWorkSummary: () => getJSON("/agents/work-summary"),
   projectsWithDrafts: () => getJSON("/projects?include_draft=1"),
+  projects: () => getJSON("/projects"),
+  project: (id) => getJSON(`/projects/${encodeURIComponent(id)}`),
   activateProject: (id) => postJSON(`/projects/${encodeURIComponent(id)}/activate`, {}),
   status: () => getJSON("/status"),
   episode: (id) => getJSON(`/episodes/${encodeURIComponent(id)}`),
@@ -45,4 +47,13 @@ export const api = {
   snooze: (id, minutes, comment) => postJSON(`/approvals/${encodeURIComponent(id)}/snooze`, { minutes, comment: comment || "" }),
   cancel: (id, reason, comment) => postJSON(`/approvals/${encodeURIComponent(id)}/cancel`, { reason: reason || "", comment: comment || "" }),
   comment: (id, body) => postJSON(`/approvals/${encodeURIComponent(id)}/comment`, { body, by_type: "user" }),
+  // Watchdog health events (NEEDS YOU feed).
+  healthEvents: (status = "open", limit = 50) =>
+    getJSON(`/health/events?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(limit)}`),
+  resolveHealth: (id, action, snoozeMinutes) =>
+    postJSON(`/health/events/${encodeURIComponent(id)}/resolve`, {
+      action,
+      snooze_minutes: snoozeMinutes ?? null,
+      resolved_by: "founder",
+    }),
 };
