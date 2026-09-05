@@ -207,6 +207,8 @@ def test_constants_match_prd():
         # Stage C (07-24-stage-c): engine booted from a non-release source
         # on a data dir that previously ran a GitHub release.
         "deployment_drift",
+        # 07-24 four-layer: customer extension blocked by Core version.
+        "extension_incompatible",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",

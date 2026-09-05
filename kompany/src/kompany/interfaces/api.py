@@ -109,6 +109,7 @@ from kompany.interfaces.api_parts import (  # noqa: E402
     alerts as _alerts,
     channel as _channel,
     dashboard as _dashboard,
+    extensions as _extensions,
     integrations as _integrations,
     lifecycle as _lifecycle,
     models as _models,
@@ -135,6 +136,7 @@ _API_PART_MODULES = (
     _projects,
     _alerts,
     _system,
+    _extensions,
 )
 
 for _part in _API_PART_MODULES:

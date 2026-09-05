@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from .migrations_documents import run_migrations_documents
+from .migrations_extensions import run_migrations_extensions
 
 
 def run_migrations_part2(conn: sqlite3.Connection) -> None:
@@ -236,3 +237,4 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
     # Generic versioned documents + artifacts (state/documents.py,
     # state/artifacts.py). Domain-neutral; plugins pick namespaces.
     run_migrations_documents(conn)
+    run_migrations_extensions(conn)

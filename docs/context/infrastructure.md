@@ -72,6 +72,13 @@ Initially runs as a local long-running process; containerized cloud deployment d
 
 Production receives only GitHub-built releases (Stage C, 2026-09-05): `main` is branch-protected; the manual `Release` workflow never pushes to `main`, stamps `kompany/release.json` into the wheel, publishes a sha256 manifest with a `release_digest` and signed build provenance. `core/release_info.py` reads the stamp (`release.source` on `/version`, `status`, `doctor`) and records the first release run per data dir; a later boot from a source checkout or local build on that data dir files one `deployment_drift` health event and fails the doctor Build node. The generated systemd unit is hardened (`ProtectSystem=strict` + `ReadWritePaths` = data dir and home, no new privileges, empty capabilities, `UMask=0077`), so a root-owned release under `/opt` is not writable by the daemon.
 
+## ownership layers
+Four layers, four writers: Immutable Core (GitHub release, read-only to the daemon), Vendor Pro (entry-point plugins pinned by the release manifest), Customer evolution (`<data_dir>/extensions/` + tables `extensions` / `extension_runs`, written only by the founder), Proposal workspaces (`self_update/repo`, never imported).
+
+**Meaning:** A vendor release replaces layers 1–2 and never touches layer 3; a customer's extension is blocked (not deleted) when its `core_api` range excludes the new Core, and unblocks itself when compatible again. Extensions run out of process (`core/extensions/worker.py`) with manifest-declared capabilities only; activation needs founder approval. See [plugin-contract.md](plugin-contract.md#customer-extensions--the-four-layer-model-2026-09-05).
+
+**Implication:** "Update Core" and "the customer's own work" are independent operations; neither can undo the other.
+
 ## multi-tenancy
 Multi-user support is deferred but architecturally unblocked.
 

@@ -83,6 +83,29 @@ All new fields default to `None` / no-op, so every 1.0.0 plugin keeps working un
 
 Reference consumer: the branding department plugin in kompany-pro (`kompany_pro/branding`), documented in [branding-department.md](branding-department.md).
 
+## Customer extensions — the four-layer model (2026-09-05)
+
+Vendor plugins (above) are layer 2. Layer 3 is code the **customer** installs into their own instance, which a vendor release must never overwrite and which never runs inside the Core process:
+
+| Layer | Writer | Where | Vendor update touches it? |
+|---|---|---|---|
+| 1 Immutable Core | GitHub release only (Stage C) | `/opt/kompany/releases/<v>` (read-only to the daemon) | replaces it |
+| 2 Vendor Pro | Pro release, entry points | Python environment | replaces it |
+| 3 Customer evolution | the founder | `<data_dir>/extensions/<id>/{pkg/<version>,data}` + tables `extensions`, `extension_runs` | **never** |
+| 4 Proposal workspaces | self-update pipeline | `<data_dir>/self_update/repo` | never imported by the daemon |
+
+**Manifest** (`extension.json`, `core/extensions/manifest.py`): `id`, `name`, `version`, `owner` (`customer`/`vendor`), `origin`, `entrypoint` (a `.py` exposing `run(job, host)`), `core_api` (Core version range, same role as Pro's `kompany>=0.1,<0.2` pin), `capabilities` (`tools`, `paths`, `network`, `credentials`, `budget_usd` — all opt-in, empty = denied), `data_migration_version`, `rollback_to`, `sha256`.
+
+**Lifecycle** (`engine.extension_install / extensions_list / extension_show / extension_run / extension_set_enabled / extension_remove`, same dict on CLI `kompany extensions …`, REST `/extensions…`, MCP `kompany_extension*`, SDK): install copies the package into the customer layer, verifies the hash, checks `core_api`, and files an `extension_activate` approval card — executable code never runs before the founder approves (memories / skills / declarative workflows keep evolving automatically). Remove is a status; packages and data stay on disk for rollback.
+
+**Isolation** (`core/extensions/worker.py`): each run is a child `python -I -S` process (no site-packages, no ambient env, scrubbed environment, private cwd, CPU/time limits). The extension talks to the engine only through `host.tool / read / write / fetch / credential / log`; every call is checked against the manifest by the parent. Undeclared → `PermissionError` in the extension, a `denied` entry on the run, an `extension.capability_denied` audit row. Tools go through the normal engine gate (`execute_tool` for read-only, `propose_action` for anything else, capped by `budget_usd`); credentials are broker leases (metadata only, no plaintext). OS-level sandboxing of the child's own file/network syscalls is a follow-up; today the boundary is process + stdlib-only + host allowlists.
+
+**Compatibility** (plan step 4): at boot and before every run, `core_api` is checked against the running Core version. Incompatible → status `blocked`, one `extension_incompatible` health event, doctor "Extensions" warns — nothing is deleted, and the block lifts by itself when a compatible Core runs. A source checkout (`0.0.0+unknown`) never blocks.
+
+**Backup**: `kompany export` bundles the whole `extensions/` tree next to the database, so a restore brings the customer layer back without any vendor download; `kompany backup` covers the tables.
+
+Deferred until a first real extension exists: overlap-resolution UX (keep local / switch to vendor / compare).
+
 ## AgentSoul YAML schema (sketch)
 
 ```yaml
@@ -168,6 +191,6 @@ Deferred (additive bumps when needed):
 
 - ABCs: `kompany/src/kompany/plugins/contract.py`
 - Loader: `kompany/src/kompany/plugins/loader.py`
-- Tests: `kompany/tests/test_plugins_contract.py`, `kompany/tests/test_engine_workflows.py`, `kompany/tests/test_documents_store.py`, `kompany/tests/test_artifacts_store.py`
+- Tests: `kompany/tests/test_plugins_contract.py`, `kompany/tests/test_engine_workflows.py`, `kompany/tests/test_documents_store.py`, `kompany/tests/test_artifacts_store.py`, `kompany/tests/test_extensions.py`
 - Decision: [ADR-0002](../adr/0002-plugin-contract-design.md)
 - Boundary: the README "Open Core — Core / Pro / Cloud" section

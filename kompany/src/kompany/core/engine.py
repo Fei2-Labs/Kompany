@@ -36,6 +36,7 @@ from kompany.remote import RemoteCommandRequest, RemoteCommandResult, parse_remo
 from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.artifacts import ArtifactStore
+from kompany.state.extensions import ExtensionStore
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
 from kompany.state.conversation import ConversationStore
@@ -142,12 +143,14 @@ from kompany.core.engine_parts import (
     GovernanceMixin,
     DirectiveHandlersMixin,
     WorkflowsMixin,
+    ExtensionsMixin,
 )
 
 log = logging.getLogger(__name__)
 
 
 class KompanyEngine(
+    ExtensionsMixin,
     AgenticChatMixin,
     SkillCrystallizationMixin,
     CompanyLifecycleMixin,
@@ -193,6 +196,8 @@ class KompanyEngine(
         # scope by namespace; Core never interprets the content.
         self.documents = ProjectDocumentStore(self.db)
         self.artifacts = ArtifactStore(self.db)
+        # Customer extension layer (07-24 four-layer): own tables, own dir.
+        self.extensions = ExtensionStore(self.db)
         self.channel = ConversationStore(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)
@@ -269,6 +274,12 @@ class KompanyEngine(
             )
         except Exception:  # noqa: BLE001 — identity is advisory, never blocks boot
             self.deployment_drift = {"drift": False}
+        # Customer extensions: Core compatibility sweep (effects bind below,
+        # once the approval-effect registry exists).
+        try:
+            self.extensions_compat = self.extensions_compat_check()
+        except Exception:  # noqa: BLE001 — advisory, never blocks boot
+            self.extensions_compat = {"blocked": [], "unblocked": []}
         # Resilience watchdog: silent-run + stranded-task supervisor.
         # Defaults live in code; ``company_config`` overrides take effect
         # at engine construction time.
@@ -417,6 +428,7 @@ class KompanyEngine(
         # 1.1.0). Workflow plugins register their approval gates here from
         # ``Workflow.bind``; consulted before the built-in effect chain.
         self._approval_effects: dict[str, tuple[Callable | None, Callable | None]] = {}
+        self._bind_extension_effects()  # extension_activate approve/reject (07-24)
         # The target_feasibility action_type uses a dedicated revision
         # handler so a founder counter-proposal carries the parsed numbers
         # forward into the successor approval (not just a hint string).
