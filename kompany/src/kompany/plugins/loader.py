@@ -13,6 +13,7 @@ Cloud emerges.)
 from __future__ import annotations
 
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,8 +52,9 @@ _GROUP_TO_KIND = {
 }
 
 
-def discover() -> dict[str, list]:
-    """Scan installed packages for Kompany plugin entry points.
+def discover(data_dir: "Path | str | None" = None, *, include_workspace: bool = True) -> dict[str, list]:
+    """Scan installed packages for Kompany plugin entry points, then the
+    workspace artifact layer (``<data_dir>/artifacts/``, 08-29).
 
     Returns a dict keyed by plugin kind (``"workflow"``, ``"soul"``,
     ``"integration"``, ``"template"``, ``"tool"``, ``"outward_executor"``);
@@ -88,11 +90,43 @@ def discover() -> dict[str, list]:
             except Exception as exc:  # noqa: BLE001 — surfaced via errors list
                 errors.append((group, ep.name, repr(exc)))
 
+    if include_workspace:
+        _merge_workspace(found, errors, data_dir)
+
     if errors:
         found["_errors"] = errors  # type: ignore[assignment]
     return found
 
 
-def registered(kind: str) -> list:
+def _merge_workspace(found: dict[str, list], errors: list, data_dir: "Path | str | None") -> None:
+    """Workspace souls/workflows merge last; ids already taken are refused."""
+    try:
+        from kompany.core.artifact_evolution.contributions import load_workspace_contributions
+        from kompany.core.artifact_evolution.workspace import workspace_root
+
+        root = workspace_root(data_dir)
+        if not root.is_dir():
+            return
+        taken_roles = {getattr(s, "role", "") for s in found.get("soul", [])}
+        taken_workflows = {getattr(w, "workflow_id", "") for w in found.get("workflow", [])}
+        try:  # builtin YAML workflows live in the registry, not in entry points
+            from kompany.core.workflows_registry import _builtin_yaml_paths, _load_builtin
+
+            for path in _builtin_yaml_paths():
+                wf = _load_builtin(path)
+                if wf is not None:
+                    taken_workflows.add(wf.workflow_id)
+        except Exception:  # noqa: BLE001
+            pass
+        souls, workflows, ws_errors = load_workspace_contributions(root, taken_roles, taken_workflows)
+        found["soul"].extend(souls)
+        found["workflow"].extend(workflows)
+        errors.extend(ws_errors)
+    except Exception as exc:  # noqa: BLE001 — workspace problems never block plugin discovery
+        errors.append(("workspace", str(data_dir or ""), repr(exc)))
+
+
+def registered(kind: str, data_dir: "Path | str | None" = None) -> list:
     """Convenience: return plugins of a single kind, freshly discovered."""
-    return discover().get(kind, [])
+    found = discover() if data_dir is None else discover(data_dir)
+    return found.get(kind, [])

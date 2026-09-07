@@ -83,6 +83,12 @@ All new fields default to `None` / no-op, so every 1.0.0 plugin keeps working un
 
 Reference consumer: the branding department plugin in kompany-pro (`kompany_pro/branding`), documented in [branding-department.md](branding-department.md).
 
+## Workspace artifacts — the evolution lane (2026-09-07)
+
+A third source of souls and workflows next to builtin and Pro: `<data_dir>/artifacts/{souls,workflows,plugins}/`, a git repo the engine creates on demand (`core/artifact_evolution/workspace.py`). The plugin loader merges it **last** (`discover(data_dir)` → builtin → Pro → workspace) and refuses any role or `workflow_id` already taken, so an evolved artifact can extend the company but never shadow a Core or Pro one; the reserved-role guard applies unchanged. Workspace workflows resolve in `workflows_registry` and run through `engine.run_workflow` like any other; `plugins/` scaffolds are listed, never imported — executable code stays in the isolated extension layer. Every change to the workspace is a commit; `git revert` is the undo. Restart is the reload boundary.
+
+The **doctor is the self-test gate** for this lane: `kompany doctor` now also checks that every soul and workflow (builtin, Pro, workspace) loads, that plugin discovery had no errors, that the ledger's running balance matches its entries, and that the artifact workspace has no uncommitted changes. Each run is persisted to `<data_dir>/doctor/last.json` (+ `history.jsonl`), runs automatically on daemon boot and after an extension install, and mirrors any failing node as one `doctor_failed` health event that resolves itself on the next clean run. Proposal → apply → doctor → auto-revert (R2) and plugin incubation (R4) build on exactly this: they will be the only writers of the workspace besides the founder.
+
 ## Customer extensions — the four-layer model (2026-09-05)
 
 Vendor plugins (above) are layer 2. Layer 3 is code the **customer** installs into their own instance, which a vendor release must never overwrite and which never runs inside the Core process:

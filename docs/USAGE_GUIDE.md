@@ -632,6 +632,12 @@ kompany doctor --json   # same tree for scripts
 
 Offline and read-only: SQLite `quick_check`, runtime state, LLM provider configured, open watchdog events, blocked tasks and pending approvals, integration connections, backup freshness, API access mode, build info. Every red or yellow node carries a one-line fix. Same payload on `GET /doctor`, MCP `kompany_doctor`, `k.doctor()`, and the **Doctor** card on the Settings page.
 
+It is also the engine's **self-test gate**: every soul and workflow (builtin, Pro, your workspace) must load, plugin discovery must be clean, the ledger's running balance must equal its entries, and the artifact workspace must have no uncommitted changes. Each run is written to `<data_dir>/doctor/last.json` (and appended to `history.jsonl`), the daemon runs it on every boot and after each extension install, and a failing node becomes one `doctor_failed` health event in NEEDS YOU that clears itself on the next clean run. The LLM-key check is reported but never raises the event on its own.
+
+### Artifact workspace: souls and workflows you (or the team) evolve
+
+`<data_dir>/artifacts/` is a small git repo with `souls/`, `workflows/` and `plugins/`. Drop a soul YAML or a workflow YAML there, commit, restart, and it is discovered after the builtin and Pro ones — never replacing them: a reserved role (`ceo`, `cfo`, …) or an existing `workflow_id` is refused and shows up in `kompany doctor`. Every change is a commit; undo is `git revert`. This is the surface the self-evolution loop writes to (proposal → apply → doctor → auto-revert), so what agents evolve is always reviewable and reversible.
+
 ### CLI providers (`claude-code:*`, `opencode:*`): spawn hygiene
 
 Child CLIs get a minimal environment — their own auth variables only, no engine keys or vault key, and none of the nested-harness markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) that made a child `claude` behave as a nested session. The spawn timeout is 120 s by default; when it trips, the error carries the child's last output. Raise it with `KOMPANY_CLI_TIMEOUT_SECONDS` only if your calls are legitimately slow. `kompany-mcp` now exits on its own when the Claude Code session that launched it is gone, so bridge processes no longer pile up across sessions.

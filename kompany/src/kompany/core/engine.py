@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -605,6 +606,16 @@ class KompanyEngine(
         self.ticker.start()
         if self.telegram_worker is not None:
             self.telegram_worker.start()
+        # Self-test gate (08-29 R1): doctor on every boot, off the event
+        # loop, never blocking. Result lands in <data_dir>/doctor/ and, on
+        # failure, as one `doctor_failed` health event.
+        threading.Thread(target=self._boot_doctor, name="kompany-doctor", daemon=True).start()
+
+    def _boot_doctor(self) -> None:
+        try:
+            self.doctor()
+        except Exception:  # noqa: BLE001 — a broken self-test must never take the daemon down
+            log.exception("boot doctor failed")
 
     async def stop(self) -> None:
         """Stop engine background workers."""
