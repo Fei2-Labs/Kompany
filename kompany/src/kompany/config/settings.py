@@ -210,6 +210,14 @@ class KompanySettings(BaseSettings):
     )
     self_update_ambient_credentials: bool = True
 
+    # Artifact-evolution lane (08-29 self-evolution R2): full-auto apply of
+    # soul / workflow YAML into <data_dir>/artifacts with doctor-gated
+    # auto-revert. One structured LLM call per proposal on the given tier;
+    # the daily cap halts new proposals (anti-Mobius lesson).
+    artifact_evolution_enabled: bool = True
+    artifact_evolution_daily_cap_usd: float = 2.0
+    artifact_evolution_model_tier: str = "economy"
+
     # Anima persona layer (06-12-anima-persona). ``anima_enabled``
     # registers the emotion + diary tick intents; ``anima_diary_enabled``
     # gates ONLY the daily economy-tier diary call (emotion stays pure
@@ -422,6 +430,12 @@ class KompanySettings(BaseSettings):
                 overrides["self_update_ambient_credentials"] = bool(
                     data["self_update_ambient_credentials"]
                 )
+            if "artifact_evolution_enabled" in data:
+                overrides["artifact_evolution_enabled"] = bool(data["artifact_evolution_enabled"])
+            if "artifact_evolution_daily_cap_usd" in data:
+                overrides["artifact_evolution_daily_cap_usd"] = float(data["artifact_evolution_daily_cap_usd"])
+            if "artifact_evolution_model_tier" in data:
+                overrides["artifact_evolution_model_tier"] = str(data["artifact_evolution_model_tier"])
             # Remote backup config block (07-14 step 5).
             if "remote_backup" in data and isinstance(data["remote_backup"], dict):
                 overrides["remote_backup"] = data["remote_backup"]

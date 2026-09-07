@@ -271,6 +271,22 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
             return {"error": str(exc)}
         return row if row is not None else {"error": "skill not found"}
 
+    if name == "kompany_evolution_propose":
+        try:
+            return engine.evolution_propose(arguments["kind"], arguments["target"], arguments["instruction"])
+        except ValueError as exc:
+            return {"error": str(exc)}
+    if name == "kompany_evolution_list":
+        return engine.evolution_list(limit=int(arguments.get("limit") or 20), status=arguments.get("status"))
+    if name == "kompany_evolution_show":
+        row = engine.evolution_show(arguments["proposal_id"])
+        return row if row is not None else {"error": "proposal not found"}
+    if name == "kompany_evolution_revert":
+        row = engine.evolution_revert(arguments["proposal_id"], str(arguments.get("reason") or "founder revert"))
+        return row if row is not None else {"error": "proposal not found"}
+    if name == "kompany_evolution_status":
+        return engine.evolution_status()
+
     if name == "kompany_self_update_role":
         return engine.self_update_role()
 

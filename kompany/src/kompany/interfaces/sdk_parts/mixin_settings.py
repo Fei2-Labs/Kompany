@@ -291,6 +291,24 @@ class KompanySettingsOps:
     def skill_set_scope(self, agent_role: str, name: str, scope: str) -> dict[str, Any] | None:
         return self._engine.skill_set_scope(agent_role, name, scope)
 
+    # -- artifact evolution (08-29 R2) -------------------------------------
+
+    def evolution_propose(self, kind: str, target: str, instruction: str) -> dict[str, Any]:
+        """Propose → validate → commit → doctor → auto-revert; returns the proposal row."""
+        return self._engine.evolution_propose(kind, target, instruction)
+
+    def evolution_list(self, limit: int = 20, status: str | None = None) -> list[dict[str, Any]]:
+        return self._engine.evolution_list(limit=limit, status=status)
+
+    def evolution_show(self, proposal_id: str) -> dict[str, Any] | None:
+        return self._engine.evolution_show(proposal_id)
+
+    def evolution_revert(self, proposal_id: str, reason: str = "founder revert") -> dict[str, Any] | None:
+        return self._engine.evolution_revert(proposal_id, reason)
+
+    def evolution_status(self) -> dict[str, Any]:
+        return self._engine.evolution_status()
+
     def self_update_role(self) -> dict[str, Any]:
         """Installation role (customer/contributor/maintainer) and whether
         approving a proposal pushes + opens a PR or exports a patch."""
