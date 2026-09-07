@@ -14,6 +14,7 @@ the Pro reference-workflows slice (A2).
 
 from __future__ import annotations
 
+import string
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -30,6 +31,11 @@ class WorkflowYAMLInvalid(ValueError):
 _TOP_REQUIRED = ("workflow_id", "display_name", "steps")
 _STEP_REQUIRED = ("id", "agent_role")
 _VALID_AUTONOMY = {t.value for t in AutonomyTier}
+# Optional top-level ``inputs:`` block — declares the placeholders a
+# workflow's prompt templates expect from the founder (or from company
+# state via ``source``). Additive to the 1.1.x contract; a missing block
+# means "no declared inputs" so older plugin YAMLs keep loading.
+_INPUT_ALLOWED_KEYS = {"name", "description", "required", "source", "default", "example"}
 
 
 @dataclass
@@ -102,6 +108,8 @@ class WorkflowRunner:
         if not isinstance(steps, list) or len(steps) == 0:
             raise WorkflowYAMLInvalid("Workflow 'steps' must be a non-empty list")
 
+        WorkflowRunner._validate_inputs(data.get("inputs"))
+
         seen_ids: set[str] = set()
         for i, step in enumerate(steps):
             if not isinstance(step, dict):
@@ -122,9 +130,85 @@ class WorkflowRunner:
                     f"Valid: {sorted(_VALID_AUTONOMY)}"
                 )
 
+    @staticmethod
+    def _validate_inputs(inputs: Any) -> None:
+        if inputs is None:
+            return
+        if not isinstance(inputs, list):
+            raise WorkflowYAMLInvalid("Workflow 'inputs' must be a list")
+        seen: set[str] = set()
+        for i, spec in enumerate(inputs):
+            if not isinstance(spec, dict):
+                raise WorkflowYAMLInvalid(f"Input {i} must be a mapping")
+            name = spec.get("name")
+            if not name or not isinstance(name, str):
+                raise WorkflowYAMLInvalid(f"Input {i} missing required field 'name'")
+            if name in seen:
+                raise WorkflowYAMLInvalid(f"Duplicate input name: {name!r}")
+            seen.add(name)
+            unknown = set(spec) - _INPUT_ALLOWED_KEYS
+            if unknown:
+                raise WorkflowYAMLInvalid(
+                    f"Input {name!r} has unknown field(s) {sorted(unknown)}. "
+                    f"Allowed: {sorted(_INPUT_ALLOWED_KEYS)}"
+                )
+            if "required" in spec and not isinstance(spec["required"], bool):
+                raise WorkflowYAMLInvalid(f"Input {name!r}: 'required' must be a boolean")
+            if "source" in spec and not isinstance(spec["source"], str):
+                raise WorkflowYAMLInvalid(f"Input {name!r}: 'source' must be a string")
+
     @property
     def workflow_id(self) -> str:
         return self._data["workflow_id"]
+
+    @property
+    def description(self) -> str:
+        return str(self._data.get("description") or "").strip()
+
+    @property
+    def inputs(self) -> list[dict[str, Any]]:
+        """Declared inputs, normalised: ``required`` defaults to ``True``;
+        ``description`` / ``source`` / ``default`` / ``example`` default to
+        ``None``. Empty list when the YAML has no ``inputs:`` block."""
+        out: list[dict[str, Any]] = []
+        for spec in self._data.get("inputs") or []:
+            out.append(
+                {
+                    "name": spec["name"],
+                    "description": spec.get("description"),
+                    "required": bool(spec.get("required", True)),
+                    "source": spec.get("source"),
+                    "default": spec.get("default"),
+                    "example": spec.get("example"),
+                }
+            )
+        return out
+
+    def missing_inputs(self, scope: Mapping[str, Any]) -> list[str]:
+        """Names of ``required`` inputs absent from ``scope`` (after the
+        caller applied auto-fill and defaults). ``None`` counts as absent."""
+        return [
+            spec["name"]
+            for spec in self.inputs
+            if spec["required"] and scope.get(spec["name"]) is None
+        ]
+
+    def template_placeholders(self) -> set[str]:
+        """Every ``{name}`` referenced by any step's ``prompt_template``.
+
+        Used to assert that a workflow's prompts only reference declared
+        inputs or prior step ids — the guarantee behind "no LLM spend on a
+        prompt containing a literal ``{idea}``".
+        """
+        names: set[str] = set()
+        fmt = string.Formatter()
+        for step in self._data["steps"]:
+            template = step.get("prompt_template") or ""
+            for _, field_name, _, _ in fmt.parse(template):
+                if field_name:
+                    # ``{a.b}`` / ``{a[0]}`` → root name only.
+                    names.add(field_name.split(".")[0].split("[")[0])
+        return names
 
     @property
     def display_name(self) -> str:

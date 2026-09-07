@@ -155,6 +155,36 @@ steps:
 
 Engine computes `estimate_cost()` as sum-of-step + applies AutonomyGate per step before invoking. Steps with `python_callable` are opaque to cost preview — workflow author must populate `cost_estimate_usd` manually for those.
 
+**Declared inputs (2026-09-06, additive — contract stays 1.1.x).** An optional top-level `inputs:` list names the `{placeholder}` values the prompt templates expect. Prompt placeholders must be a subset of declared inputs plus prior step ids (Core's built-in YAMLs are tested for this). A YAML without the block still loads; its explicit inputs pass through unvalidated.
+
+```yaml
+inputs:
+  - name: idea                       # required; unique
+    description: One-sentence description of the business idea
+    required: true                   # default true
+    example: "Weekly meal-prep kits for night-shift nurses"
+  - name: budget_remaining_usd
+    description: Cash left in the company ledger
+    required: false
+    source: company.budget_remaining_usd   # engine auto-fill (table below)
+    default: 0                       # used when source is unavailable
+```
+
+Resolution per input, before `run_scope` / audit / any LLM call: explicit value > `source` auto-fill > `default`. A `required` input still unresolved raises `WorkflowInputsMissing` (CLI exit 1 with an example `--json-inputs`; REST 422; MCP `{"error": "workflow_inputs_missing", ...}`). `run_workflow(dry_run=True)` returns the resolved inputs plus every rendered prompt with zero spend.
+
+| `source` | Resolves to |
+|---|---|
+| `company.budget_remaining_usd` | `Ledger.get_balance()` |
+| `company.spend_last_7d_usd` | `Ledger.spent_in_window(days=7)` — expenses, positive magnitude |
+| `company.revenue_last_7d_usd` | `Ledger.revenue_in_window(days=7)` — `income` rows excluding founder deposits; `0.0` when none |
+| `company.new_customers_last_7d` | `0` (not tracked yet; prompts must say so, never fabricate) |
+| `company.revenue_target_usd` | `engine.get_targets().revenue_target` (`agreed` else founder) |
+| `company.customer_target` | `engine.get_targets().customer_target` (may be `None` → default) |
+| `company.deadline` | `engine.get_targets().deadline` (may be `None` → default) |
+| `company.name` / `company.goal` | company config |
+
+Unknown `source` strings resolve to `None` (fall back to `default` / missing) so a plugin can declare a source that a newer Core will learn to fill.
+
 **Approval-tier steps (2026-09-05).** A step with `autonomy_tier: approval` pauses the run: the engine files a `workflow_step` card in the existing inbox carrying the checkpoint (workflow id, step id, inputs, prior outputs, remaining steps, prompt preview, step cost). Approving resumes the run at that step — only that step is treated as `auto`, later approval steps pause again; rejecting stops the run (`workflow.cancelled` audit). The effect is idempotent (`effect_applied`). `run_workflow` returns `status: paused` + `approval_id` instead of a completed result.
 
 ## Template extension (over Core `manifest.json`)

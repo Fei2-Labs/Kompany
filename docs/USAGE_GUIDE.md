@@ -12,25 +12,26 @@ This guide covers everything you need to operate Kompany, from initializing your
 6. [Checking Status](#checking-status)
 7. [Working with Projects](#working-with-projects)
 8. [Running Strategic Debates](#running-strategic-debates)
-9. [Viewing the Ledger](#viewing-the-ledger)
-10. [Executing Projects](#executing-projects)
-11. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
-12. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
-13. [Operate from Your Phone](#operate-from-your-phone)
-13. [Multiple Brands: Workspaces](#multiple-brands-workspaces)
-13. [Tools & Actions](#tools--actions)
-13. [Founder Profile & Rules](#founder-profile--rules)
-13. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
-14. [Channels: Talk to Your Company Anywhere](#channels-talk-to-your-company-anywhere)
-13. [Anima: The Company's Persona](#anima-the-companys-persona)
-13. [Using the REST API](#using-the-rest-api)
-14. [Using the MCP Server](#using-the-mcp-server)
-15. [Using the Python SDK](#using-the-python-sdk)
-16. [Using with Claude Code](#using-with-claude-code)
-17. [Cost Management](#cost-management)
-18. [Agent Memory](#agent-memory)
-19. [Best Practices](#best-practices)
-20. [Troubleshooting](#troubleshooting)
+9. [Running Workflows](#running-workflows)
+10. [Viewing the Ledger](#viewing-the-ledger)
+11. [Executing Projects](#executing-projects)
+12. [Execution: Model Source & Harness Sessions](#execution-model-source--harness-sessions)
+13. [Running 24/7: The Kompany Daemon](#running-247-the-kompany-daemon)
+14. [Operate from Your Phone](#operate-from-your-phone)
+15. [Multiple Brands: Workspaces](#multiple-brands-workspaces)
+16. [Tools & Actions](#tools--actions)
+17. [Founder Profile & Rules](#founder-profile--rules)
+18. [Self-Update: Governed Code Changes](#self-update-governed-code-changes)
+19. [Channels: Talk to Your Company Anywhere](#channels-talk-to-your-company-anywhere)
+20. [Anima: The Company's Persona](#anima-the-companys-persona)
+21. [Using the REST API](#using-the-rest-api)
+22. [Using the MCP Server](#using-the-mcp-server)
+23. [Using the Python SDK](#using-the-python-sdk)
+24. [Using with Claude Code](#using-with-claude-code)
+25. [Cost Management](#cost-management)
+26. [Agent Memory](#agent-memory)
+27. [Best Practices](#best-practices)
+28. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -369,6 +370,71 @@ The CEO reviews everything and makes the final call: decision, rationale, tradeo
 | Pre-seed | CEO, CTO, CPO, CoS, CV (Brand visuals & visual direction) | 2 | ~$0.75 |
 | Seed | CEO, CTO, CPO, CMO, CRO, CoS, CV (Brand visuals & visual direction) | 3 | ~$1.50 |
 | Series A | All 11 agents | 3 | ~$2.00 |
+
+---
+
+## Running Workflows
+
+A workflow is a YAML-declared sequence of agent steps (`kompany/src/kompany/workflows/*.yaml`): each step names the C-suite role that runs it, its prompt, an LLM cost estimate and an autonomy tier. The engine sums the estimates BEFORE running so you see the price first, executes the steps in order feeding each output into the next prompt, and books every LLM call in the ledger as it goes. Core ships three reference workflows; plugins can add more.
+
+Ten-minute path, from a freshly initialized company:
+
+```bash
+# 1. What is available, and what does each cost?
+kompany workflows list
+
+# 2. Inputs, steps, tiers, estimate and a copy-pasteable run command
+kompany workflows show idea-validation
+
+# 3. Preview: resolved inputs + every rendered prompt, $0.00 spent
+kompany workflows run idea-validation \
+  --json-inputs '{"idea": "Weekly meal-prep kits for night-shift nurses in Stockholm"}' --dry-run
+
+# 4. Run it for real (three LLM calls, about $1.20 estimated)
+kompany workflows run idea-validation \
+  --json-inputs '{"idea": "Weekly meal-prep kits for night-shift nurses in Stockholm"}'
+```
+
+Every workflow declares its inputs. `show` lists them with `required`, an auto-fill `source` and an `example`. A run whose required inputs are missing fails before any LLM call and prints the example `--json-inputs` payload — you never pay for a prompt containing a literal `{idea}`.
+
+### The three reference workflows
+
+**`idea-validation`** — CV probes demand, CPO drafts a one-pager, CEO calls GO / NO-GO / TEST. One required input: `idea`.
+
+```bash
+kompany workflows run idea-validation --json-inputs '{"idea": "Weekly meal-prep kits for night-shift nurses in Stockholm"}'
+```
+
+**`weekly-exec-review`** — CFO reads burn, CRO reads revenue, CoS surfaces the tension, CEO sets next week's priorities. All seven metrics auto-fill from company state, so it runs with no inputs at all:
+
+```bash
+kompany workflows run weekly-exec-review --dry-run   # see the numbers the agents will get
+kompany workflows run weekly-exec-review
+```
+
+| Input | Auto-filled from |
+|---|---|
+| `budget_remaining_usd` | ledger balance |
+| `spend_last_7d_usd` | ledger expenses in the last 7 days |
+| `revenue_last_7d_usd` | ledger income in the last 7 days (founder deposits excluded) |
+| `new_customers_last_7d` | not tracked yet — `0`, and the CRO prompt says so |
+| `revenue_target_usd`, `customer_target`, `deadline` | company targets from onboarding (`agreed` if present, else founder) |
+
+Pass any of them in `--json-inputs` to override the engine's value. A fresh company with no targets still runs: the CFO and CRO are told which values are `0` / `not set` and instructed to say so rather than invent numbers.
+
+**`landing-page-launch`** — CPO defines the ICP, CMO writes copy, CTO plans the deploy, CFO sizes 90 days of cost, CEO authorizes ship. One required input: `product`.
+
+```bash
+kompany workflows run landing-page-launch --json-inputs '{"product": "Invoice reconciliation for Shopify stores, done by AI overnight"}'
+```
+
+The last step (`ship_authorization`) is `autonomy_tier: approval`. The run stops there with `status: paused` and files a `workflow_step` card in your inbox carrying the launch packet, the CEO's prompt preview and the step's cost estimate. Approve the card (`kompany inbox` to see it, then `kompany approval approve <id>`; the web inbox; or `POST /approvals/{id}/approve`) and the run resumes at that step; reject it and the run stops with a `workflow.cancelled` audit row. The four steps before the gate are never re-run.
+
+### Where the cost lands
+
+Each step is a normal agent call, so its cost appears in `kompany ledger` as an `AI: ...` expense tagged `workflow.<workflow_id>.<step_id>`. The run result reports `estimated_cost_usd` (preview) next to `total_cost_usd` (what was actually booked). Dry runs book nothing and write no audit row.
+
+The same operations exist on every surface: REST `GET /workflows` + `POST /workflows/{id}/run` (`dry_run: true`), MCP `kompany_workflows_list` + `kompany_workflow_run` (`dry_run`), SDK `k.workflows_list()` + `k.run_workflow(id, inputs, dry_run=True)`.
 
 ---
 
@@ -740,6 +806,8 @@ The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8
 | `GET` | `/projects/{project_id}` | Get a specific project |
 | `GET` | `/ledger?limit=10` | Get recent ledger entries |
 | `POST` | `/projects/{project_id}/execute` | Execute a project's tasks |
+| `GET` | `/workflows` | Workflow catalog: inputs, steps, tiers, cost estimate |
+| `POST` | `/workflows/{workflow_id}/run` | Run a workflow (`inputs`, `project_id`, `dry_run`); 422 with the missing inputs before any spend |
 
 A `/channel/send` (or `/directive`) response carries a `status` that may be `completed`, `clarify` (the CEO asks back — re-POST with the returned `session_id`), `gated` (spend gate — call `/go` or `/abandon`), `answered`, `abandoned`, `suspended`, or `failed`, plus `session_id` and `run_id`.
 
@@ -799,6 +867,8 @@ python -m kompany.interfaces.mcp_server
 | `kompany_ledger` | `limit` | Get recent ledger entries |
 | `kompany_debate` | `question`\* | Run a multi-agent debate |
 | `kompany_execute` | `project_id`\* | Execute a project's tasks |
+| `kompany_workflows_list` | *(none)* | Workflow catalog with declared inputs, steps and cost estimate |
+| `kompany_workflow_run` | `workflow_id`\*, `inputs`, `project_id`, `dry_run` | Run a workflow; `dry_run` previews prompts with zero spend; missing inputs return an error before any spend |
 
 ### Claude Code Configuration
 
@@ -865,6 +935,14 @@ for entry in k.ledger(limit=5):
 
 # Execute a revenue project
 result = k.execute_project("abc12345")
+
+# Workflows: preview first (no spend), then run
+for wf in k.workflows_list():
+    print(wf["workflow_id"], [i["name"] for i in wf["inputs"]], wf["estimated_cost_usd"])
+preview = k.run_workflow("idea-validation", {"idea": "Meal-prep kits for night-shift nurses"}, dry_run=True)
+print(preview["steps"][0]["prompt"])
+result = k.run_workflow("idea-validation", {"idea": "Meal-prep kits for night-shift nurses"})
+print(result["status"], result["total_cost_usd"])
 ```
 
 ### SDK Methods
@@ -885,6 +963,8 @@ result = k.execute_project("abc12345")
 | `balance()` | `float` | Current balance |
 | `ledger(limit=10)` | `list[dict]` | Recent ledger entries |
 | `execute_project(project_id)` | `dict` | Execute a project autonomously |
+| `workflows_list()` | `list[dict]` | Workflow catalog with declared inputs, steps and cost estimate |
+| `run_workflow(workflow_id, inputs=None, project_id=None, dry_run=False)` | `dict` | Run a workflow; `dry_run=True` previews rendered prompts with zero spend; raises `WorkflowInputsMissing` before any spend |
 
 ---
 

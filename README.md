@@ -293,6 +293,16 @@ kompany debate "Should we build SSO or focus on self-serve onboarding?"
 
 Runs a multi-agent debate with structured rounds, CoS synthesis, and a CEO decision.
 
+### 6. Run Your First Workflow
+
+```bash
+kompany workflows show idea-validation                                                  # inputs, steps, cost
+kompany workflows run idea-validation --json-inputs '{"idea": "Meal-prep kits for night-shift nurses"}' --dry-run   # preview, $0
+kompany workflows run idea-validation --json-inputs '{"idea": "Meal-prep kits for night-shift nurses"}'             # run it
+```
+
+Three reference workflows ship in Core; each declares its inputs and shows its cost before spending. See [Running Workflows](docs/USAGE_GUIDE.md#running-workflows).
+
 ---
 
 ## Usage Guide

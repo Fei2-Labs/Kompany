@@ -5,6 +5,12 @@ description: |
   CEO authorizes ship. Last step is approval-gated by design — landing
   pages go live in the founder's name, so the founder must press send.
 
+inputs:
+  - name: product
+    description: The product or idea the landing page sells, in one sentence
+    required: true
+    example: "Invoice reconciliation for Shopify stores, done by AI overnight"
+
 steps:
   - id: define_icp
     agent_role: cpo

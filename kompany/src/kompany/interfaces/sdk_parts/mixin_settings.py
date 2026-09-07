@@ -167,10 +167,16 @@ class KompanySettingsOps:
         workflow_id: str,
         inputs: dict[str, Any] | None = None,
         project_id: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Run a workflow now; returns per-step outputs + cost. Gated steps
-        file inbox cards. Raises ``WorkflowNotFound`` for an unknown id."""
-        return self._engine.run_workflow(workflow_id, inputs or {}, project_id=project_id)
+        file inbox cards. ``dry_run=True`` previews resolved inputs and
+        rendered prompts without spending. Raises ``WorkflowNotFound`` for
+        an unknown id and ``WorkflowInputsMissing`` (before any spend) when
+        a required input is absent."""
+        return self._engine.run_workflow(
+            workflow_id, inputs or {}, project_id=project_id, dry_run=dry_run
+        )
 
     def integrations_list(self) -> list[dict[str, Any]]:
         """Registered integrations with required credentials + connection

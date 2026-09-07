@@ -24,6 +24,7 @@ from kompany.core.run_context import run_scope
 from kompany.core.step_executor import ExecutorContext, default_step_executor
 from kompany.core.tool_actions import build_tool_context
 from kompany.core import workflows_registry
+from kompany.core.workflow_inputs import dry_run_envelope, resolve_inputs
 from kompany.state.models import ApprovalRequest
 
 # Approval action_type for a YAML step declared ``autonomy_tier: approval``.
@@ -53,7 +54,8 @@ class WorkflowsMixin:
                 {
                     "workflow_id": runner.workflow_id,
                     "display_name": runner.display_name,
-                    "description": str(runner._data.get("description") or "").strip(),
+                    "description": runner.description,
+                    "inputs": runner.inputs,
                     "source": (
                         "plugin"
                         if workflows_registry.plugin_for(workflow_id) is not None
@@ -86,13 +88,22 @@ class WorkflowsMixin:
         prior_outputs: Mapping[str, Any] | None = None,
         force_auto: frozenset[str] | set[str] | None = None,
         resumed_from: str | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         """Run a workflow end to end and return a JSON-able result.
 
-        Raises ``WorkflowNotFound`` for an unknown id. Cost PREVIEW is
-        published before the first step (``workflow.cost_preview``); the
-        LEDGER rows land per step via the agents' own LLM calls; the
-        outcome is audited as ``workflow.completed`` / ``workflow.failed``.
+        Raises ``WorkflowNotFound`` for an unknown id and
+        ``WorkflowInputsMissing`` (before any audit row or LLM call) when a
+        declared ``required`` input is neither passed nor auto-fillable.
+        Inputs resolve explicit > ``source`` > ``default``.
+
+        ``dry_run=True`` returns the same envelope with ``status: dry_run``,
+        the resolved inputs and every step's rendered prompt — no
+        ``run_scope``, no audit, no LLM, no inbox card (PREVIEW without
+        spend). Otherwise cost PREVIEW is published before the first step
+        (``workflow.cost_preview``); the LEDGER rows land per step via the
+        agents' own LLM calls; the outcome is audited as
+        ``workflow.completed`` / ``workflow.failed``.
         """
         plugin = workflows_registry.plugin_for(workflow_id)
         runner = workflows_registry.get(
@@ -100,8 +111,10 @@ class WorkflowsMixin:
             python_callables=getattr(plugin, "python_callables", None) or None,
             step_executor=default_step_executor,
         )
+        initial_inputs = resolve_inputs(self, runner, inputs)
+        if dry_run:
+            return dry_run_envelope(runner, initial_inputs, project_id=project_id)
         estimate = runner.estimate_cost()
-        initial_inputs = dict(inputs or {})
         with run_scope() as run_id:
             tool_ctx = build_tool_context(self, project_id=project_id, run_id=run_id)
             self.audit.record(
