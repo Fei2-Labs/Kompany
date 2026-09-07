@@ -37,6 +37,7 @@ from kompany.remote import RemoteCommandRequest, RemoteCommandResult, parse_remo
 from kompany.state.agent_status import AgentStatusStore
 from kompany.state.approvals import ApprovalRequests
 from kompany.state.artifacts import ArtifactStore
+from kompany.state.artifact_proposals import ArtifactProposalStore
 from kompany.state.extensions import ExtensionStore
 from kompany.state.audit import AuditLog
 from kompany.state.checkpoints import CheckpointStore
@@ -145,12 +146,14 @@ from kompany.core.engine_parts import (
     DirectiveHandlersMixin,
     WorkflowsMixin,
     ExtensionsMixin,
+    ArtifactEvolutionMixin,
 )
 
 log = logging.getLogger(__name__)
 
 
 class KompanyEngine(
+    ArtifactEvolutionMixin,
     ExtensionsMixin,
     AgenticChatMixin,
     SkillCrystallizationMixin,
@@ -199,6 +202,7 @@ class KompanyEngine(
         self.artifacts = ArtifactStore(self.db)
         # Customer extension layer (07-24 four-layer): own tables, own dir.
         self.extensions = ExtensionStore(self.db)
+        self.artifact_proposals = ArtifactProposalStore(self.db)
         self.channel = ConversationStore(self.db)
         self.agent_status = AgentStatusStore(self.db)
         self.checkpoints = CheckpointStore(self.db)

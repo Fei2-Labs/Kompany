@@ -646,6 +646,21 @@ kompany skills scope cmo launch-post company # cmo's skill → every role may re
 
 Workflows opt into skills per step: add `skills: true` (or `skills: {scopes: [company], limit: 2}`) to a step and the matching skills are prepended to that step's prompt, labelled `(shared by <role>)` when they came from another role. Steps without the key are unchanged. Same on REST `GET /skills`, `POST /skills/{role}/{name}/scope`, MCP `kompany_skills_list` / `kompany_skill_set_scope`, SDK.
 
+### Self-evolution: `kompany evolve`
+
+The team can evolve its own souls and workflows — never the engine — inside the artifact workspace, fully automatically, with the doctor as the safety net:
+
+```bash
+kompany evolve propose soul growth-hacker "A scrappy growth role that drafts outreach and tracks replies"
+kompany evolve propose workflow cold-outreach "One cmo step drafting outreach for {segment}"
+kompany evolve list                # applied / reverted / rejected / failed, with flags and cost
+kompany evolve show <id>           # commit, diff, doctor verdict, privilege flags
+kompany evolve revert <id>         # your post-hoc undo (git revert)
+kompany evolve status              # budget today, workspace, recent commits
+```
+
+What happens on `propose`: one economy-tier LLM call returns the complete new YAML; the engine refuses anything that would shadow a Core/Pro role or workflow, change a role/id, or add code; the file lands as **one git commit**; `kompany doctor` runs; a red node reverts the commit on the spot. You are not asked beforehand — you audit afterwards: every outcome is in the audit log and a notification, and any widening of what a role may do (`allowed_tools`, apex model, non-auto steps, cost jumps, new tools) is flagged loudly. Spend is capped per day (`artifact_evolution_daily_cap_usd`, default $2); set `artifact_evolution_enabled: false` to switch the lane off. Same on REST `/evolution/*`, MCP `kompany_evolution_*`, SDK `k.evolution_*`.
+
 ### Artifact workspace: souls and workflows you (or the team) evolve
 
 `<data_dir>/artifacts/` is a small git repo with `souls/`, `workflows/` and `plugins/`. Drop a soul YAML or a workflow YAML there, commit, restart, and it is discovered after the builtin and Pro ones — never replacing them: a reserved role (`ceo`, `cfo`, …) or an existing `workflow_id` is refused and shows up in `kompany doctor`. Every change is a commit; undo is `git revert`. This is the surface the self-evolution loop writes to (proposal → apply → doctor → auto-revert), so what agents evolve is always reviewable and reversible.

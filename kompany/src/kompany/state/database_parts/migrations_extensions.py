@@ -45,3 +45,29 @@ def run_migrations_extensions(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_extension_runs_ext ON extension_runs(extension_id, started_at)"
     )
+
+    # Artifact-evolution proposals (08-29 R2): one row per propose attempt
+    # on the workspace artifact lane. Separate from self_update_proposals
+    # (the code lane) on purpose — different gates, different undo.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS artifact_proposals (
+               id TEXT PRIMARY KEY,
+               kind TEXT NOT NULL,
+               target TEXT NOT NULL,
+               instruction TEXT NOT NULL,
+               status TEXT NOT NULL DEFAULT 'running',
+               commit_sha TEXT,
+               revert_sha TEXT,
+               diff_stat TEXT,
+               doctor_status TEXT,
+               flags TEXT NOT NULL DEFAULT '[]',
+               summary TEXT,
+               rationale TEXT,
+               error TEXT,
+               cost_usd REAL NOT NULL DEFAULT 0.0,
+               run_id TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_proposals_created ON artifact_proposals(created_at)")
