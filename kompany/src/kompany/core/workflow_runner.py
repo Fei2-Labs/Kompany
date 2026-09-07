@@ -129,6 +129,26 @@ class WorkflowRunner:
                     f"Step {sid!r} has invalid autonomy_tier '{autonomy}'. "
                     f"Valid: {sorted(_VALID_AUTONOMY)}"
                 )
+            WorkflowRunner._validate_skills(sid, step.get("skills"))
+
+    @staticmethod
+    def _validate_skills(sid: str, raw: Any) -> None:
+        """``skills:`` is absent, a bool, or a mapping with scopes/limit/query."""
+        if raw is None or isinstance(raw, bool):
+            return
+        if not isinstance(raw, dict):
+            raise WorkflowYAMLInvalid(f"Step {sid!r}: 'skills' must be true/false or a mapping")
+        unknown = set(raw) - {"scopes", "limit", "query"}
+        if unknown:
+            raise WorkflowYAMLInvalid(f"Step {sid!r}: unknown 'skills' keys {sorted(unknown)}")
+        scopes = raw.get("scopes")
+        if scopes is not None:
+            from kompany.state.skills import SCOPES
+
+            if not isinstance(scopes, list) or not scopes or any(sc not in SCOPES for sc in scopes):
+                raise WorkflowYAMLInvalid(f"Step {sid!r}: 'skills.scopes' must be a non-empty subset of {list(SCOPES)}")
+        if "limit" in raw and (not isinstance(raw["limit"], int) or raw["limit"] < 1):
+            raise WorkflowYAMLInvalid(f"Step {sid!r}: 'skills.limit' must be a positive integer")
 
     @staticmethod
     def _validate_inputs(inputs: Any) -> None:

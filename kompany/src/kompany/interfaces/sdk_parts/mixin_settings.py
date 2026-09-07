@@ -284,6 +284,13 @@ class KompanySettingsOps:
     def extension_set_enabled(self, extension_id: str, enabled: bool) -> dict[str, Any] | None:
         return self._engine.extension_set_enabled(extension_id, enabled)
 
+    def skills_list(self, agent_role: str | None = None, scopes: list[str] | None = None) -> list[dict[str, Any]]:
+        """Learned skills with scope (agent / company / builtin)."""
+        return self._engine.skills_list(agent_role, scopes)
+
+    def skill_set_scope(self, agent_role: str, name: str, scope: str) -> dict[str, Any] | None:
+        return self._engine.skill_set_scope(agent_role, name, scope)
+
     def self_update_role(self) -> dict[str, Any]:
         """Installation role (customer/contributor/maintainer) and whether
         approving a proposal pushes + opens a PR or exports a patch."""

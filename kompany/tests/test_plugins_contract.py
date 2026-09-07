@@ -30,7 +30,7 @@ from kompany.plugins import (
 
 
 def test_contract_version_pinned():
-    assert __contract_version__ == "1.1.0"
+    assert __contract_version__ == "1.2.0"
 
 
 def test_entry_point_groups_are_the_plugin_kinds():

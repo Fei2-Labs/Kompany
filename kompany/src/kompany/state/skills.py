@@ -35,7 +35,7 @@ from typing import Any
 from kompany.core.run_context import current_run_id
 from kompany.state.database import Database
 
-__all__ = ["SkillStore", "tokenize", "INDEX_MAX_LINES"]
+__all__ = ["SCOPES", "SkillStore", "tokenize", "INDEX_MAX_LINES"]
 
 # Hard cap on the L1 trigger-word index, matching GenericAgent's <=30-line
 # discipline: the index must stay cheap to scan every task start.
@@ -44,6 +44,13 @@ INDEX_MAX_LINES = 30
 # the "relevant past skills" block stays token-bounded.
 DEFAULT_RETRIEVE_LIMIT = 3
 SOP_INJECT_CHARS = 800
+# Skill scopes (08-29 R3). ``agent`` = private to the role that learned it
+# (the default and the historical behaviour); ``company`` = shared with
+# every role of this company; ``builtin`` = shipped with Core/Pro (read-mostly).
+# A shared skill is still stored under the role that crystallized it —
+# ``scope`` widens who can *retrieve* it.
+SCOPES: tuple[str, ...] = ("builtin", "company", "agent")
+_SHARED_SCOPES = ("builtin", "company")
 
 
 def tokenize(text: str | None) -> list[str]:
@@ -96,6 +103,7 @@ class SkillStore:
         code: str | None = None,
         run_id: str | None = None,
         session_id: str | None = None,
+        scope: str = "agent",
     ) -> dict[str, Any]:
         """Insert a new skill or refine an existing one keyed by ``name``.
 
@@ -110,6 +118,8 @@ class SkillStore:
         """
         if not name:
             raise ValueError("skill name must be non-empty")
+        if scope not in SCOPES:
+            raise ValueError(f"invalid skill scope {scope!r}; expected one of {SCOPES}")
         triggers = _normalize_triggers(trigger_words) or tokenize(name)
         triggers_text = json.dumps(triggers)
         rid = run_id if run_id is not None else current_run_id()
@@ -124,11 +134,11 @@ class SkillStore:
             self.db.execute(
                 """UPDATE agent_skills
                    SET trigger_words = ?, when_to_use = ?, sop = ?, code = ?,
-                       run_id = ?, session_id = ?,
+                       run_id = ?, session_id = ?, scope = ?,
                        created_count = created_count + 1,
                        updated_at = datetime('now')
                    WHERE id = ?""",
-                (triggers_text, when_to_use, sop, code, rid, session_id,
+                (triggers_text, when_to_use, sop, code, rid, session_id, scope,
                  int(existing["id"])),
             )
             self.db.commit()
@@ -137,13 +147,25 @@ class SkillStore:
         cursor = self.db.execute(
             """INSERT INTO agent_skills
                (agent_role, name, trigger_words, when_to_use, sop, code,
-                run_id, session_id, created_count, used_count, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, datetime('now'))""",
+                run_id, session_id, scope, created_count, used_count, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, datetime('now'))""",
             (agent_role, name, triggers_text, when_to_use, sop, code,
-             rid, session_id),
+             rid, session_id, scope),
         )
         self.db.commit()
         return {"id": int(cursor.lastrowid), "action": "inserted"}
+
+    def set_scope(self, agent_role: str, name: str, scope: str) -> dict[str, Any] | None:
+        """Widen or narrow who can retrieve a skill. Returns the fresh row."""
+        if scope not in SCOPES:
+            raise ValueError(f"invalid skill scope {scope!r}; expected one of {SCOPES}")
+        cur = self.db.execute(
+            "UPDATE agent_skills SET scope = ?, updated_at = datetime('now') "
+            "WHERE agent_role = ? AND name = ?",
+            (scope, agent_role, name),
+        )
+        self.db.commit()
+        return self.get(agent_role, name) if cur.rowcount else None
 
     # ------------------------------------------------------------------
     # read
@@ -157,12 +179,38 @@ class SkillStore:
         ).fetchone()
         return self._hydrate(row)
 
-    def list(self, agent_role: str) -> list[dict[str, Any]]:
-        """All skills for an agent, newest first."""
+    def list(self, agent_role: str, scopes: Any = None) -> list[dict[str, Any]]:
+        """Skills visible to ``agent_role``, newest first.
+
+        ``scopes`` (default: all) filters by scope. The role's own rows are
+        visible in every scope they carry; ``company`` / ``builtin`` rows
+        learned by OTHER roles are visible too — that is what a scope
+        wider than ``agent`` means.
+        """
+        wanted = tuple(scopes) if scopes else SCOPES
+        for sc in wanted:
+            if sc not in SCOPES:
+                raise ValueError(f"invalid skill scope {sc!r}; expected one of {SCOPES}")
+        shared = [sc for sc in wanted if sc in _SHARED_SCOPES]
+        sql = "SELECT * FROM agent_skills WHERE ((agent_role = ? AND scope IN (%s))" % (
+            ",".join("?" * len(wanted)) or "''")
+        params: list[Any] = [agent_role, *wanted]
+        if shared:
+            sql += " OR scope IN (%s)" % ",".join("?" * len(shared))
+            params.extend(shared)
+        sql += ") ORDER BY created_at DESC"
+        rows = self.db.execute(sql, tuple(params)).fetchall()
+        return [self._hydrate(r) for r in rows if r is not None]
+
+    def list_all(self, scopes: Any = None) -> list[dict[str, Any]]:
+        """Every skill in the company (founder view), optionally by scope."""
+        wanted = tuple(scopes) if scopes else SCOPES
+        for sc in wanted:
+            if sc not in SCOPES:
+                raise ValueError(f"invalid skill scope {sc!r}; expected one of {SCOPES}")
         rows = self.db.execute(
-            "SELECT * FROM agent_skills WHERE agent_role = ? "
-            "ORDER BY created_at DESC",
-            (agent_role,),
+            "SELECT * FROM agent_skills WHERE scope IN (%s) ORDER BY agent_role, created_at DESC"
+            % ",".join("?" * len(wanted)), tuple(wanted),
         ).fetchall()
         return [self._hydrate(r) for r in rows if r is not None]
 
@@ -173,7 +221,7 @@ class SkillStore:
         ).fetchone()
         return int(row["c"])
 
-    def index_lines(self, agent_role: str) -> list[str]:
+    def index_lines(self, agent_role: str, scopes: Any = None) -> list[str]:
         """Build the L1 trigger-word INDEX (<= ~30 lines, no embeddings).
 
         One line per trigger word -> the skill names it routes to. The map is
@@ -182,7 +230,7 @@ class SkillStore:
         """
         keyword_to_skills: dict[str, list[str]] = {}
         keyword_weight: dict[str, int] = {}
-        for skill in self.list(agent_role):
+        for skill in self.list(agent_role, scopes):
             weight = int(skill.get("used_count") or 0)
             for kw in skill.get("trigger_words") or []:
                 keyword_to_skills.setdefault(kw, [])
@@ -204,6 +252,7 @@ class SkillStore:
         query: str | None,
         limit: int = DEFAULT_RETRIEVE_LIMIT,
         track_use: bool = False,
+        scopes: Any = None,
     ) -> list[dict[str, Any]]:
         """Top skills matching ``query`` by trigger-word overlap.
 
@@ -217,7 +266,7 @@ class SkillStore:
         if not tokens:
             return []
         scored: list[tuple[int, dict[str, Any]]] = []
-        for skill in self.list(agent_role):
+        for skill in self.list(agent_role, scopes):
             triggers = set(skill.get("trigger_words") or [])
             overlap = len(tokens & triggers)
             if overlap:
@@ -248,6 +297,7 @@ class SkillStore:
     def retrieve_text(
         self, agent_role: str, query: str | None,
         limit: int = DEFAULT_RETRIEVE_LIMIT,
+        scopes: Any = None,
     ) -> str:
         """Render matching skills as a token-bounded prompt block.
 
@@ -255,7 +305,7 @@ class SkillStore:
         skill shows its name, when-to-use, and a length-capped SOP body so a
         long playbook never blows the context budget.
         """
-        skills = self.retrieve(agent_role, query, limit=limit, track_use=True)
+        skills = self.retrieve(agent_role, query, limit=limit, track_use=True, scopes=scopes)
         if not skills:
             return ""
         lines = ["Relevant past skills (reuse these — you solved this before):"]
@@ -263,7 +313,8 @@ class SkillStore:
             body = (s.get("sop") or "").strip()
             if len(body) > SOP_INJECT_CHARS:
                 body = body[:SOP_INJECT_CHARS] + " …[truncated]"
-            lines.append(f"\n## SKILL: {s['name']}")
+            origin = "" if s.get("agent_role") == agent_role else f" (shared by {s.get('agent_role')})"
+            lines.append(f"\n## SKILL: {s['name']}{origin}")
             if s.get("when_to_use"):
                 lines.append(f"When to use: {s['when_to_use']}")
             lines.append(body)

@@ -238,3 +238,10 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
     # state/artifacts.py). Domain-neutral; plugins pick namespaces.
     run_migrations_documents(conn)
     run_migrations_extensions(conn)
+
+    # Skill scopes (08-29 self-evolution R3): builtin / company / agent.
+    # Existing rows were always private to their role → 'agent'.
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(agent_skills)").fetchall()}
+    if "scope" not in cols:
+        conn.execute("ALTER TABLE agent_skills ADD COLUMN scope TEXT NOT NULL DEFAULT 'agent'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_skills_scope ON agent_skills(scope)")

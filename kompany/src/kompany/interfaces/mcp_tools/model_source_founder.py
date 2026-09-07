@@ -42,6 +42,21 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kompany_skills_list",
+        description="Learned skills (crystallized SOPs) with their scope: agent (private to a role), company (shared), builtin.",
+        inputSchema={"type": "object", "properties": {
+            "agent_role": {"type": "string", "description": "Only skills visible to this role; omit for all"},
+            "scopes": {"type": "array", "items": {"type": "string", "enum": ["builtin", "company", "agent"]}}}},
+    ),
+    Tool(
+        name="kompany_skill_set_scope",
+        description="Change who may reuse a skill: agent (only its role) or company (every role).",
+        inputSchema={"type": "object", "properties": {
+            "agent_role": {"type": "string"}, "name": {"type": "string"},
+            "scope": {"type": "string", "enum": ["builtin", "company", "agent"]}},
+            "required": ["agent_role", "name", "scope"]},
+    ),
+    Tool(
         name="kompany_self_update_role",
         description=(
             "Installation role (customer/contributor/maintainer) and whether approving a "
