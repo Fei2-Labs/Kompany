@@ -653,13 +653,14 @@ The team can evolve its own souls and workflows — never the engine — inside 
 ```bash
 kompany evolve propose soul growth-hacker "A scrappy growth role that drafts outreach and tracks replies"
 kompany evolve propose workflow cold-outreach "One cmo step drafting outreach for {segment}"
+kompany evolve propose plugin acme.counter "Count items in a job and keep the last one"   # scaffolds an extension
 kompany evolve list                # applied / reverted / rejected / failed, with flags and cost
 kompany evolve show <id>           # commit, diff, doctor verdict, privilege flags
 kompany evolve revert <id>         # your post-hoc undo (git revert)
 kompany evolve status              # budget today, workspace, recent commits
 ```
 
-What happens on `propose`: one economy-tier LLM call returns the complete new YAML; the engine refuses anything that would shadow a Core/Pro role or workflow, change a role/id, or add code; the file lands as **one git commit**; `kompany doctor` runs; a red node reverts the commit on the spot. You are not asked beforehand — you audit afterwards: every outcome is in the audit log and a notification, and any widening of what a role may do (`allowed_tools`, apex model, non-auto steps, cost jumps, new tools) is flagged loudly. Spend is capped per day (`artifact_evolution_daily_cap_usd`, default $2); set `artifact_evolution_enabled: false` to switch the lane off. Same on REST `/evolution/*`, MCP `kompany_evolution_*`, SDK `k.evolution_*`.
+What happens on `propose`: one economy-tier LLM call returns the complete new YAML; the engine refuses anything that would shadow a Core/Pro role or workflow, change a role/id, or add code; the file lands as **one git commit**; `kompany doctor` runs; a red node reverts the commit on the spot. A `plugin` proposal is different: it scaffolds an **extension package** (manifest + stdlib-only `main.py`, optional soul), commits it, installs it into the extension layer and files an `extension_activate` card — incubated code waits for your approval and then runs only in the isolated worker with its declared capabilities. For souls and workflows you are not asked beforehand — you audit afterwards: every outcome is in the audit log and a notification, and any widening of what a role may do (`allowed_tools`, apex model, non-auto steps, cost jumps, new tools) is flagged loudly. Spend is capped per day (`artifact_evolution_daily_cap_usd`, default $2); set `artifact_evolution_enabled: false` to switch the lane off. Same on REST `/evolution/*`, MCP `kompany_evolution_*`, SDK `k.evolution_*`.
 
 ### Artifact workspace: souls and workflows you (or the team) evolve
 

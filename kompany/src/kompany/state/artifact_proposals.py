@@ -16,7 +16,7 @@ from uuid import uuid4
 from kompany.state.database import Database
 
 STATUSES: frozenset[str] = frozenset({"running", "applied", "reverted", "rejected", "failed", "pending"})
-KINDS: tuple[str, ...] = ("soul", "workflow")
+KINDS: tuple[str, ...] = ("soul", "workflow", "plugin")
 _UPDATABLE: frozenset[str] = frozenset({
     "status", "commit_sha", "revert_sha", "diff_stat", "doctor_status", "flags", "cost_usd", "summary",
     "rationale", "error", "target",
