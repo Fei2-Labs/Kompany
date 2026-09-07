@@ -87,6 +87,11 @@ class ExtensionsMixin:
         )
         self.approvals.create(request)
         row = self.extensions.set_status(manifest.id, row["status"], approval_id=request.id) or row
+        # Self-test after a plugin install (08-29 R1 trigger point).
+        try:
+            row["doctor_status"] = self.doctor()["summary"]["status"]
+        except Exception:  # noqa: BLE001
+            row["doctor_status"] = "unknown"
         self.audit.record(
             "extension.installed", f"Extension {manifest.id} v{manifest.version} installed ({row['status']})",
             detail={"extension_id": manifest.id, "version": manifest.version, "artifact_hash": digest,

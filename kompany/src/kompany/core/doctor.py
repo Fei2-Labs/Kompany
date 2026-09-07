@@ -218,6 +218,18 @@ def check_extensions(engine: Any) -> dict[str, Any]:
     return node("extensions", "Extensions", "info", detail)
 
 
+def _evo_checks() -> tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...]:
+    from kompany.core import doctor_checks as dc
+
+    return (
+        ("souls", "Souls", dc.check_souls),
+        ("workflows", "Workflows", dc.check_workflows),
+        ("plugins", "Plugins", dc.check_plugins),
+        ("ledger", "Ledger", dc.check_ledger),
+        ("artifacts", "Artifact workspace", dc.check_artifact_workspace),
+    )
+
+
 CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("database", "SQLite database", check_database),
     ("runtime", "Runtime", check_runtime),
@@ -233,9 +245,20 @@ CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
 )
 
 
-def run_doctor(engine: Any) -> dict[str, Any]:
-    """Run every check; return the health tree with a summary."""
-    children = [_guard(id_, label, lambda fn=fn: fn(engine)) for id_, label, fn in CHECKS]
+KIND_DOCTOR_FAILED = "doctor_failed"
+DOCTOR_DIR = "doctor"
+_HISTORY_CAP = 200
+
+
+def run_doctor(engine: Any, *, persist: bool = True) -> dict[str, Any]:
+    """Run every check; return the health tree with a summary.
+
+    Self-test gate (08-29 R1): the report is also persisted to
+    ``<data_dir>/doctor/last.json`` (+ ``history.jsonl``) and mirrored as one
+    open ``doctor_failed`` health event while any node fails — resolved
+    automatically on the next clean run. ``persist=False`` for pure reads.
+    """
+    children = [_guard(id_, label, lambda fn=fn: fn(engine)) for id_, label, fn in CHECKS + _evo_checks()]
     root = node("kompany", "Kompany", "ok", "", None, children)
     flat = _flatten(root)[1:]  # counts exclude the root roll-up itself
     root["summary"] = {
@@ -246,7 +269,46 @@ def run_doctor(engine: Any) -> dict[str, Any]:
         "fixes": [f"{n['label']}: {n['fix']}" for n in flat if n.get("fix") and n["status"] in ("warn", "fail")],
         "checked_at": datetime.now(UTC).isoformat(),
     }
+    if persist:
+        persist_report(engine, root)
     return root
+
+
+def persist_report(engine: Any, root: dict[str, Any]) -> None:
+    """Write last.json + history.jsonl; keep exactly one open doctor_failed event while failing."""
+    import json
+
+    try:
+        data_dir = getattr(engine.settings, "data_dir", None)
+        if data_dir:
+            d = data_dir / DOCTOR_DIR
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "last.json").write_text(json.dumps(root, indent=2, default=str), encoding="utf-8")
+            hist = d / "history.jsonl"
+            s = root["summary"]
+            line = json.dumps({"checked_at": s["checked_at"], "status": s["status"], "ok": s["ok"], "warn": s["warn"],
+                               "fail": s["fail"], "fixes": s["fixes"]})
+            lines = hist.read_text(encoding="utf-8").splitlines() if hist.exists() else []
+            lines.append(line)
+            hist.write_text("\n".join(lines[-_HISTORY_CAP:]) + "\n", encoding="utf-8")
+    except Exception:  # noqa: BLE001 — persistence is advisory
+        pass
+    try:
+        he = getattr(engine, "health_events", None)
+        if he is None:
+            return
+        open_ = he.list(status="open", kind=KIND_DOCTOR_FAILED, limit=10)
+        failing = [n for n in _flatten(root)[1:] if n["status"] == "fail" and n["id"] != "llm"]
+        if failing and not open_:
+            he.record(kind=KIND_DOCTOR_FAILED, detail={
+                "nodes": [{"id": n["id"], "label": n["label"], "detail": n["detail"], "fix": n.get("fix")} for n in failing[:10]],
+                "checked_at": root["summary"]["checked_at"],
+                "hint": "Run `kompany doctor` for the tree; the event resolves itself on the next clean run."})
+        elif not failing and open_:
+            for ev in open_:
+                he.resolve(ev["id"], "continue", resolved_by="system")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _flatten(n: dict[str, Any]) -> list[dict[str, Any]]:
@@ -276,4 +338,4 @@ def render_tree(root: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["CHECKS", "node", "render_tree", "run_doctor"]
+__all__ = ["CHECKS", "KIND_DOCTOR_FAILED", "node", "persist_report", "render_tree", "run_doctor"]

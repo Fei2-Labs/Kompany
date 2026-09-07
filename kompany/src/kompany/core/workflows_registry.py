@@ -44,6 +44,11 @@ def _builtin_yaml_paths() -> list[Any]:
 def _pro_workflows() -> list[Any]:
     """Pull Pro Workflow plugin instances via the entry-point loader.
 
+    The loader also appends workspace workflows (``<data_dir>/artifacts/
+    workflows/*.yaml``, 08-29 artifact lane) as ``WorkspaceWorkflow``
+    objects carrying ``yaml_path`` — so they resolve here unchanged, after
+    builtin and Pro, never replacing either.
+
     Returns ``[]`` if the loader can't be imported (very early bootstrap)
     or no Pro plugins are installed.
     """

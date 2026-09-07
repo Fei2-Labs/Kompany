@@ -55,6 +55,10 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # running Core version. The extension is blocked (never deleted) and
     # the event resolves itself when a compatible Core runs.
     "extension_incompatible",
+    # 08-29 self-evolution R1: the doctor self-test found a failing node
+    # (other than the LLM-key check). One open event while failing;
+    # resolved automatically by the next clean doctor run.
+    "doctor_failed",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({

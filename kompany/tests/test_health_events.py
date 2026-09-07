@@ -209,6 +209,8 @@ def test_constants_match_prd():
         "deployment_drift",
         # 07-24 four-layer: customer extension blocked by Core version.
         "extension_incompatible",
+        # 08-29 self-evolution R1: doctor self-test gate failed.
+        "doctor_failed",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",
