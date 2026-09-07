@@ -63,7 +63,8 @@ class ArtifactProposalStore:
         params: list[Any] = []
         if status:
             sql += " WHERE status = ?"; params.append(status)
-        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"; params.append(int(limit))
+        # rowid, not the random id, breaks same-second ties → insertion order
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"; params.append(int(limit))
         return [self._row(r) for r in self.db.execute(sql, tuple(params)).fetchall()]
 
     def spent_today_usd(self) -> float:
