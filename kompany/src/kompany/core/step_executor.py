@@ -75,6 +75,11 @@ def _format(template: str, scope: Mapping[str, Any]) -> str:
     return template.format_map(_Tolerant(scope))
 
 
+# Public name for callers outside this module (dry-run PREVIEW renders the
+# same prompts the executor would send, via the same tolerant formatter).
+render_prompt = _format
+
+
 def default_step_executor(
     step: Mapping[str, Any],
     prior_outputs: Mapping[str, Any],

@@ -4,6 +4,12 @@ description: |
   Three-step probe to decide whether a fresh idea is worth a week of work.
   CV surfaces demand signals, CPO drafts a one-pager, CEO calls go / no-go.
 
+inputs:
+  - name: idea
+    description: One-sentence description of the business idea to validate
+    required: true
+    example: "Weekly meal-prep kits for night-shift nurses in Stockholm"
+
 steps:
   - id: probe_demand
     agent_role: cv

@@ -123,3 +123,37 @@ class Ledger:
         total_expense = float(row["total"] or 0.0) if row else 0.0
         # Expenses are negative; flip to a positive burn magnitude.
         return abs(total_expense) / float(window_hours)
+
+    def spent_in_window(self, days: int = 7) -> float:
+        """Total expenses (positive magnitude, USD) booked in the last
+        ``days`` days — every negative ``amount`` row regardless of
+        category. ``0.0`` when nothing was spent."""
+        if days <= 0:
+            raise ValueError("days must be > 0")
+        row = self.db.execute(
+            """SELECT COALESCE(SUM(amount), 0.0) AS total
+               FROM ledger
+               WHERE amount < 0
+                 AND timestamp >= datetime('now', ?)""",
+            (f"-{int(days)} days",),
+        ).fetchone()
+        return abs(float(row["total"] or 0.0)) if row else 0.0
+
+    def revenue_in_window(self, days: int = 7) -> float:
+        """Revenue (USD) booked in the last ``days`` days: positive rows in
+        the ``income`` category, excluding founder capital deposits (booked
+        with ``approved_by='master'`` by ``initialize_company`` / templates).
+        Refunds and allocations live in other categories and never count.
+        ``0.0`` when none — the engine does not book sales revenue yet."""
+        if days <= 0:
+            raise ValueError("days must be > 0")
+        row = self.db.execute(
+            """SELECT COALESCE(SUM(amount), 0.0) AS total
+               FROM ledger
+               WHERE amount > 0
+                 AND category = ?
+                 AND COALESCE(approved_by, '') != 'master'
+                 AND timestamp >= datetime('now', ?)""",
+            (LedgerCategory.INCOME.value, f"-{int(days)} days"),
+        ).fetchone()
+        return float(row["total"] or 0.0) if row else 0.0

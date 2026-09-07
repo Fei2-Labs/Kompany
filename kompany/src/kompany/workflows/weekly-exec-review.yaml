@@ -3,6 +3,52 @@ display_name: Weekly executive review
 description: |
   Four-step Monday-morning review. CFO reads burn, CRO reads revenue,
   CoS synthesizes pressure, CEO sets the week's priority adjustments.
+  Every metric auto-fills from the company ledger and targets; pass a
+  value explicitly only to override what the engine already knows.
+
+inputs:
+  - name: budget_remaining_usd
+    description: Cash left in the company ledger (USD)
+    required: false
+    source: company.budget_remaining_usd
+    default: 0
+    example: 4200
+  - name: spend_last_7d_usd
+    description: Total expenses booked in the last 7 days (USD)
+    required: false
+    source: company.spend_last_7d_usd
+    default: 0
+    example: 310
+  - name: deadline
+    description: ISO 8601 date the company targets are evaluated against
+    required: false
+    source: company.deadline
+    default: not set
+    example: "2026-12-31T00:00:00+00:00"
+  - name: revenue_last_7d_usd
+    description: Revenue booked in the ledger in the last 7 days (USD)
+    required: false
+    source: company.revenue_last_7d_usd
+    default: 0
+    example: 950
+  - name: new_customers_last_7d
+    description: New paying customers in the last 7 days (not tracked by the ledger yet; 0 unless passed)
+    required: false
+    source: company.new_customers_last_7d
+    default: 0
+    example: 3
+  - name: revenue_target_usd
+    description: Company revenue target from onboarding (USD)
+    required: false
+    source: company.revenue_target_usd
+    default: 0
+    example: 10000
+  - name: customer_target
+    description: Company paying-customer target from onboarding
+    required: false
+    source: company.customer_target
+    default: not set
+    example: 50
 
 steps:
   - id: burn_review
@@ -10,10 +56,14 @@ steps:
     cost_estimate_usd: 0.30
     autonomy_tier: auto
     prompt_template: |
-      Current week metrics:
+      Current week metrics (auto-filled from the company ledger and targets):
       Budget remaining: {budget_remaining_usd} USD
       Spend last 7 days: {spend_last_7d_usd} USD
       Deadline: {deadline}
+
+      A value of 0 or "not set" means the company has no data for it yet.
+      Say so plainly and reason from what IS known. Never invent numbers,
+      spend categories or a deadline that are not in the metrics above.
 
       Identify:
       1. Burn trend vs runway (alarming / watch / fine)
@@ -25,11 +75,15 @@ steps:
     cost_estimate_usd: 0.30
     autonomy_tier: auto
     prompt_template: |
-      Current week metrics:
+      Current week metrics (auto-filled from the company ledger and targets):
       Revenue last 7 days: {revenue_last_7d_usd} USD
-      Customers last 7 days: {new_customers_last_7d}
+      New customers last 7 days: {new_customers_last_7d} (customer acquisition is not tracked yet; treat 0 as "unknown", not "zero sales")
       Revenue target: {revenue_target_usd} USD
       Customer target: {customer_target}
+
+      A value of 0 or "not set" means the company has no data for it yet.
+      Say so plainly and reason from what IS known. Never invent revenue,
+      customers or targets that are not in the metrics above.
 
       Identify:
       1. On-track / behind / way-behind vs both targets

@@ -128,7 +128,8 @@ TOOLS: list[Tool] = [
         name="kompany_workflows_list",
         description=(
             "List workflows (built-in + plugin): id, display name, source, "
-            "steps with agent role / autonomy tier, LLM cost preview."
+            "declared inputs (name / required / source / example), steps with "
+            "agent role / autonomy tier, LLM cost preview."
         ),
         inputSchema={"type": "object", "properties": {}},
     ),
@@ -137,7 +138,10 @@ TOOLS: list[Tool] = [
         description=(
             "Run a workflow by id with optional initial inputs. Steps that "
             "need the founder file inbox approval cards; nothing auto-spends "
-            "beyond the agents' own ledger-booked LLM calls."
+            "beyond the agents' own ledger-booked LLM calls. Missing required "
+            "inputs return an error before any spend (see kompany_workflows_list "
+            "for each workflow's inputs). dry_run=true previews resolved inputs "
+            "+ rendered prompts with zero spend."
         ),
         inputSchema={
             "type": "object",
@@ -145,6 +149,10 @@ TOOLS: list[Tool] = [
                 "workflow_id": {"type": "string", "description": "Workflow id"},
                 "inputs": {"type": "object", "description": "Initial inputs"},
                 "project_id": {"type": "string"},
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Preview only: render prompts, no LLM call, no cost",
+                },
             },
             "required": ["workflow_id"],
         },

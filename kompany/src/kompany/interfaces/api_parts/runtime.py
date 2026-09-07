@@ -74,6 +74,7 @@ class WorkflowRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     inputs: dict[str, Any] = Field(default_factory=dict)
     project_id: str | None = None
+    dry_run: bool = False
 
 
 @router.get("/workflows")
@@ -86,14 +87,21 @@ def list_workflows_catalog() -> list[dict[str, Any]]:
 @router.post("/workflows/{workflow_id}/run")
 def run_workflow_endpoint(workflow_id: str, req: WorkflowRunRequest) -> dict[str, Any]:
     """Run a workflow now. Gated steps file inbox approval cards; the run
-    itself never spends beyond the agents' own LLM calls (ledger-booked)."""
+    itself never spends beyond the agents' own LLM calls (ledger-booked).
+    ``dry_run: true`` previews resolved inputs + rendered prompts, spends
+    nothing. Missing required inputs → 422 before any spend."""
+    from kompany.core.workflow_inputs import WorkflowInputsMissing
     from kompany.core.workflows_registry import WorkflowNotFound
 
     engine = get_engine()
     try:
-        return engine.run_workflow(workflow_id, req.inputs, project_id=req.project_id)
+        return engine.run_workflow(
+            workflow_id, req.inputs, project_id=req.project_id, dry_run=req.dry_run
+        )
     except WorkflowNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkflowInputsMissing as exc:
+        raise HTTPException(status_code=422, detail=exc.to_dict()) from exc
 
 
 @router.get("/tools")

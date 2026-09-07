@@ -2,6 +2,15 @@
 
 All notable changes to Kompany are documented here.
 
+## [Unreleased]
+
+### Added
+- **Workflow inputs contract** — workflow YAML gains an optional top-level `inputs:` list (`name`, `description`, `required`, `source`, `default`, `example`). `WorkflowRunner` validates it; `workflows_list` rows carry `inputs`; a run whose required inputs are missing raises `WorkflowInputsMissing` before any audit row or LLM call.
+- **Auto-fill from company state** — `source: company.*` resolves inputs from the ledger (`budget_remaining_usd`, `spend_last_7d_usd`, `revenue_last_7d_usd`), company targets (`revenue_target_usd`, `customer_target`, `deadline`) and company config (`name`, `goal`). `weekly-exec-review` now runs with no inputs on a fresh company. New `Ledger.spent_in_window(days)` / `Ledger.revenue_in_window(days)`.
+- **Dry run** — `run_workflow(..., dry_run=True)` returns the resolved inputs and every rendered prompt with zero spend, no audit and no inbox card. Exposed as CLI `kompany workflows run --dry-run`, REST `WorkflowRunRequest.dry_run`, MCP `kompany_workflow_run.dry_run`, SDK `run_workflow(dry_run=True)`.
+- **`kompany workflows show <id>`** — display name, description, inputs table, steps table, total estimate and a copy-pasteable example run command (`--json` emits the catalog row).
+- Docs: "Running Workflows" section in the usage guide (ten-minute path for the three reference workflows), REST / MCP / SDK tables, README quickstart step 6, `inputs:` block + `source:` table in the plugin contract.
+
 ## [2.0.0] - 2026-02-27
 
 ### Added
