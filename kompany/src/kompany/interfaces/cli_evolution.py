@@ -41,7 +41,7 @@ def _panel(row: dict, title: str) -> Panel:
 
 
 @evolve_app.command("propose")
-def evolve_propose(kind: str = typer.Argument(..., help="soul | workflow"),
+def evolve_propose(kind: str = typer.Argument(..., help="soul | workflow | plugin"),
                    target: str = typer.Argument(..., help="role or workflow_id (file stem)"),
                    instruction: str = typer.Argument(...),
                    config: str = typer.Option(None, "--config", "-c"), as_json: bool = typer.Option(False, "--json")):

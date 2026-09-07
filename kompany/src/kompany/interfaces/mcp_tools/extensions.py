@@ -48,10 +48,10 @@ TOOLS: list[Tool] = [
         description=(
             "Self-evolution: one LLM call proposes a complete soul or workflow YAML for <data_dir>/artifacts, "
             "the engine validates it, commits it, runs the doctor self-test and auto-reverts on failure. "
-            "kind = soul | workflow; target = file stem (role / workflow_id)."
+            "kind = soul | workflow | plugin; target = file stem (role / workflow_id / extension id). A plugin is scaffolded as an extension package and needs the extension_activate approval before it runs."
         ),
         inputSchema={"type": "object", "properties": {
-            "kind": {"type": "string", "enum": ["soul", "workflow"]}, "target": {"type": "string"},
+            "kind": {"type": "string", "enum": ["soul", "workflow", "plugin"]}, "target": {"type": "string"},
             "instruction": {"type": "string"}}, "required": ["kind", "target", "instruction"]},
     ),
     Tool(

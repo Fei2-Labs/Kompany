@@ -97,7 +97,7 @@ class ExtensionStore:
 
     def runs(self, extension_id: str, limit: int = 20) -> list[dict[str, Any]]:
         rows = self.db.execute(
-            "SELECT * FROM extension_runs WHERE extension_id = ? ORDER BY started_at DESC, id DESC LIMIT ?",
+            "SELECT * FROM extension_runs WHERE extension_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?",
             (extension_id, int(limit)),
         ).fetchall()
         return [{"id": r["id"], "extension_id": r["extension_id"], "status": r["status"], "exit_code": r["exit_code"],

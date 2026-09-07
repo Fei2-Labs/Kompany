@@ -16,7 +16,7 @@ from uuid import uuid4
 from kompany.state.database import Database
 
 STATUSES: frozenset[str] = frozenset({"running", "applied", "reverted", "rejected", "failed", "pending"})
-KINDS: tuple[str, ...] = ("soul", "workflow")
+KINDS: tuple[str, ...] = ("soul", "workflow", "plugin")
 _UPDATABLE: frozenset[str] = frozenset({
     "status", "commit_sha", "revert_sha", "diff_stat", "doctor_status", "flags", "cost_usd", "summary",
     "rationale", "error", "target",
@@ -63,7 +63,8 @@ class ArtifactProposalStore:
         params: list[Any] = []
         if status:
             sql += " WHERE status = ?"; params.append(status)
-        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"; params.append(int(limit))
+        # rowid, not the random id, breaks same-second ties → insertion order
+        sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"; params.append(int(limit))
         return [self._row(r) for r in self.db.execute(sql, tuple(params)).fetchall()]
 
     def spent_today_usd(self) -> float:

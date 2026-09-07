@@ -14,6 +14,7 @@ like any other call (cost-as-expense).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -64,6 +65,11 @@ def propose_artifact_evolution(engine: Any, kind: str, target: str, instruction:
         engine.audit.record(f"{ACTION_TYPE}.budget_halt", f"Artifact evolution halted: ${spent:.2f} ≥ daily cap ${cap:.2f}",
                             detail={"proposal_id": pid, "spent_today_usd": spent, "cap_usd": cap})
         return store.update(pid, status="failed", error=f"daily cap reached (${spent:.2f} of ${cap:.2f})") or {}
+
+    if kind == "plugin":  # R4: scaffold → extension layer → approval card
+        from kompany.core.artifact_evolution.incubation import incubate_plugin
+
+        return incubate_plugin(engine, pid, target, instruction)
 
     ws = ArtifactWorkspace(settings.data_dir); ws.ensure()
     path = (ws.souls if kind == "soul" else ws.workflows) / target
@@ -144,6 +150,12 @@ def revert_artifact_proposal(engine: Any, pid: str, reason: str = "founder rever
     ws = ArtifactWorkspace(engine.settings.data_dir)
     revert_sha = ws.revert(row["commit_sha"], reason=reason)
     row = store.update(pid, status="reverted", revert_sha=revert_sha, error=reason) or row
+    if row.get("kind") == "plugin":
+        try:
+            t = str(row["target"])
+            engine.extension_remove(t[:-5] if t.endswith(".yaml") else t)
+        except Exception:  # noqa: BLE001 — the scaffold is already reverted
+            pass
     engine.audit.record(f"{ACTION_TYPE}.reverted", f"Artifact proposal {pid} reverted by founder: {reason}",
                         detail={"proposal_id": pid, "commit": row.get("commit_sha"), "revert": revert_sha, "reason": reason})
     engine.doctor()
@@ -160,7 +172,7 @@ def _normalise_target(target: str) -> str:
     name = target.strip()
     if name.endswith(".yaml"):
         name = name[:-5]
-    if not re.match(r"^[a-z][a-z0-9_-]{1,63}$", name):
+    if not re.match(r"^[a-z][a-z0-9_.-]{1,63}$", name):
         raise ValueError(f"target must be a lowercase slug such as growth-hacker (got {target!r})")
     return name + ".yaml"
 
