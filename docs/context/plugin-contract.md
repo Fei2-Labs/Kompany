@@ -1,6 +1,6 @@
 # Plugin Contract
 
-Status: v1.1.0 (1.0.0 decided 2026-05-22; 1.1.0 additive bump 2026-09-04, see §"1.1.0 additions"). See [ADR-0002](../adr/0002-plugin-contract-design.md) for the trade-off record.
+Status: v1.2.0 (1.0.0 decided 2026-05-22; 1.1.0 additive bump 2026-09-04, see §"1.1.0 additions"; 1.2.0 additive bump 2026-09-07, see §"1.2.0 additions"). See [ADR-0002](../adr/0002-plugin-contract-design.md) for the trade-off record.
 
 The plugin contract is the stable Core↔Pro integration surface, defined in `kompany.plugins.*`. Pro / community packages register contributions via Python entry points and pin a Core version range in their `pyproject.toml`.
 
@@ -82,6 +82,14 @@ All new fields default to `None` / no-op, so every 1.0.0 plugin keeps working un
 | Approval effects | `engine.register_approval_effect` | Plugin-registered post-approve / post-reject effects are consulted before the built-in chain. Effects must be idempotent: stamp `effect_applied` in the payload and return `{"status": "already_applied"}` on replay. |
 
 Reference consumer: the branding department plugin in kompany-pro (`kompany_pro/branding`), documented in [branding-department.md](branding-department.md).
+
+## 1.2.0 additions (additive, 2026-09-07)
+
+| Surface | Addition | Purpose |
+|---|---|---|
+| Workflow YAML step `skills:` | `true` / `false` / `{scopes: [builtin\|company\|agent], limit: N, query: "<template>"}` | Selective skill injection per step (08-29 R3): trigger-word-retrieved skills of the declared scopes are prepended to the rendered prompt. Absent = no injection, so every existing workflow is byte-identical. |
+| `ExecutorContext.skills` | the company `SkillStore` (or `None`) | What the step executor reads for `skills:`. `None` when a bare runner is driven without the engine. |
+| `SkillStore` scopes | `scope` column: `agent` (private to the role that learned it — the default and prior behaviour), `company` (every role may retrieve it), `builtin` | Widening is an explicit act: `kompany skills scope <role> <name> company`, REST `POST /skills/{role}/{name}/scope`, MCP `kompany_skill_set_scope`, SDK; the `save_skill` chat tool accepts `scope`. A shared skill keeps its origin role and is labelled `(shared by <role>)` when injected elsewhere. |
 
 ## Workspace artifacts — the evolution lane (2026-09-07)
 

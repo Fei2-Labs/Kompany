@@ -163,6 +163,30 @@ def self_update_proposals(limit: int = 20) -> list[dict]:
     return get_engine().self_update_list(limit=limit)
 
 
+class SkillScopeRequest(BaseModel):
+    scope: str
+
+
+@router.get("/skills")
+def skills_list(agent_role: str | None = None, scopes: str | None = None) -> list[dict]:
+    """Learned skills; ``scopes`` is a comma list of builtin/company/agent."""
+    try:
+        return get_engine().skills_list(agent_role, [s for s in (scopes or "").split(",") if s] or None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/skills/{agent_role}/{name}/scope")
+def skill_set_scope(agent_role: str, name: str, req: SkillScopeRequest) -> dict:
+    try:
+        row = get_engine().skill_set_scope(agent_role, name, req.scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    return row
+
+
 @router.get("/self-update/role")
 def self_update_role() -> dict:
     """Installation role + what approving a proposal does on this instance."""

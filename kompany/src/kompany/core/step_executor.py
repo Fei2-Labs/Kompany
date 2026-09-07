@@ -57,6 +57,10 @@ class ExecutorContext:
     artifacts, approvals, journal, events, ledger, audit, settings).
     ``python_callable`` steps read it as ``ctx.tool_context``; None when the
     runner is driven without an engine (unit tests, dry runs)."""
+    skills: Any = None
+    """Contract 1.2.0: the company's ``SkillStore`` (or None). A step that
+    declares ``skills:`` gets trigger-word-retrieved skills of the declared
+    scopes prepended to its prompt (08-29 R3 selective injection)."""
 
 
 def _format(template: str, scope: Mapping[str, Any]) -> str:
@@ -143,6 +147,7 @@ def default_step_executor(
 
     scope = _scope(ctx, prior_outputs)
     prompt = _format(template, scope)
+    prompt = _inject_skills(step, role, prompt, ctx)
 
     try:
         agent = ctx.registry.get(role, company_state=ctx.company_state)
@@ -169,6 +174,39 @@ def default_step_executor(
         output=response.text,
         cost_usd=float(response.cost_usd),
     )
+
+
+def skills_spec(step: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Normalise a step's ``skills:`` key. ``true`` → all scopes, limit 3;
+    a mapping may set ``scopes`` (subset of builtin/company/agent), ``limit``
+    and ``query`` (a template; defaults to the rendered prompt). Absent or
+    ``false`` → no injection (reference workflows stay byte-identical)."""
+    raw = step.get("skills")
+    if not raw:
+        return None
+    spec: dict[str, Any] = {"scopes": None, "limit": 3, "query": None}
+    if isinstance(raw, Mapping):
+        if raw.get("scopes"):
+            spec["scopes"] = [str(x) for x in raw["scopes"]]
+        if raw.get("limit") is not None:
+            spec["limit"] = int(raw["limit"])
+        if raw.get("query"):
+            spec["query"] = str(raw["query"])
+    return spec
+
+
+def _inject_skills(step: Mapping[str, Any], role: str, prompt: str, ctx: ExecutorContext) -> str:
+    spec = skills_spec(step)
+    store = getattr(ctx, "skills", None)
+    if spec is None or store is None:
+        return prompt
+    query = _format(spec["query"], _scope(ctx, {})) if spec["query"] else prompt
+    try:
+        block = store.retrieve_text(role, query, limit=spec["limit"], scopes=spec["scopes"])
+    except Exception as exc:  # noqa: BLE001 — skill retrieval never blocks a step
+        log.warning("skill injection skipped for step %s: %s", step.get("id"), exc)
+        return prompt
+    return f"{block}\n\n---\n\n{prompt}" if block else prompt
 
 
 def _scope(ctx: ExecutorContext, prior_outputs: Mapping[str, Any]) -> dict[str, Any]:

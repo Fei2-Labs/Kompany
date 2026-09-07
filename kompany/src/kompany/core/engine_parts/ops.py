@@ -453,6 +453,19 @@ class EngineOpsMixin:
     # kompany doctor (#41) — offline health tree, same payload on all surfaces
     # ------------------------------------------------------------------
 
+    def skills_list(self, agent_role: str | None = None, scopes: list[str] | None = None) -> list[dict]:
+        """Skills (08-29 R3): one role's visible skills, or every skill."""
+        rows = self.skills.list(agent_role, scopes) if agent_role else self.skills.list_all(scopes)
+        return [{k: v for k, v in r.items() if k != "code"} | {"has_code": bool(r.get("code"))} for r in rows]
+
+    def skill_set_scope(self, agent_role: str, name: str, scope: str) -> dict | None:
+        """Widen/narrow a skill's reuse: agent → company (or back). Audited."""
+        row = self.skills.set_scope(agent_role, name, scope)
+        if row is not None:
+            self.audit.record("skill.scope_changed", f"Skill {name!r} of {agent_role} → scope {scope}",
+                              detail={"agent_role": agent_role, "name": name, "scope": scope})
+        return row
+
     def doctor(self) -> dict:
         """Health tree: what is broken and how to fix it. Read-only, no LLM."""
         from kompany.core.doctor import run_doctor

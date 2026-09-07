@@ -634,6 +634,18 @@ Offline and read-only: SQLite `quick_check`, runtime state, LLM provider configu
 
 It is also the engine's **self-test gate**: every soul and workflow (builtin, Pro, your workspace) must load, plugin discovery must be clean, the ledger's running balance must equal its entries, and the artifact workspace must have no uncommitted changes. Each run is written to `<data_dir>/doctor/last.json` (and appended to `history.jsonl`), the daemon runs it on every boot and after each extension install, and a failing node becomes one `doctor_failed` health event in NEEDS YOU that clears itself on the next clean run. The LLM-key check is reported but never raises the event on its own.
 
+### Skills and their scope
+
+Agents crystallize **skills** (reusable SOPs) from successful sessions and retrieve them by trigger words on later tasks. A skill is private to the role that learned it by default (`agent`). Share one company-wide when it deserves it:
+
+```bash
+kompany skills list                          # every skill, with role / scope / usage
+kompany skills list --role cfo --scope company
+kompany skills scope cmo launch-post company # cmo's skill → every role may reuse it
+```
+
+Workflows opt into skills per step: add `skills: true` (or `skills: {scopes: [company], limit: 2}`) to a step and the matching skills are prepended to that step's prompt, labelled `(shared by <role>)` when they came from another role. Steps without the key are unchanged. Same on REST `GET /skills`, `POST /skills/{role}/{name}/scope`, MCP `kompany_skills_list` / `kompany_skill_set_scope`, SDK.
+
 ### Artifact workspace: souls and workflows you (or the team) evolve
 
 `<data_dir>/artifacts/` is a small git repo with `souls/`, `workflows/` and `plugins/`. Drop a soul YAML or a workflow YAML there, commit, restart, and it is discovered after the builtin and Pro ones — never replacing them: a reserved role (`ceo`, `cfo`, …) or an existing `workflow_id` is refused and shows up in `kompany doctor`. Every change is a commit; undo is `git revert`. This is the surface the self-evolution loop writes to (proposal → apply → doctor → auto-revert), so what agents evolve is always reviewable and reversible.

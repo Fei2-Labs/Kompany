@@ -145,6 +145,7 @@ class WorkflowsMixin:
                 directive_id=directive_id,
                 initial_inputs=initial_inputs,
                 tool_context=tool_ctx,
+                skills=getattr(self, "skills", None),
             )
             result = runner.run(
                 ctx, start_at=start_at, prior_outputs=prior_outputs, force_auto=force_auto

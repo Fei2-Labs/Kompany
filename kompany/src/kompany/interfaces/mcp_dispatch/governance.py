@@ -259,6 +259,18 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
         row = engine.extension_set_enabled(arguments["extension_id"], bool(arguments["enabled"]))
         return row if row is not None else {"error": "extension not found"}
 
+    if name == "kompany_skills_list":
+        try:
+            return engine.skills_list(arguments.get("agent_role"), arguments.get("scopes"))
+        except ValueError as exc:
+            return {"error": str(exc)}
+    if name == "kompany_skill_set_scope":
+        try:
+            row = engine.skill_set_scope(arguments["agent_role"], arguments["name"], arguments["scope"])
+        except ValueError as exc:
+            return {"error": str(exc)}
+        return row if row is not None else {"error": "skill not found"}
+
     if name == "kompany_self_update_role":
         return engine.self_update_role()
 

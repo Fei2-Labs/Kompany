@@ -78,6 +78,7 @@ def _save_skill(args: dict[str, Any], ctx: ToolContext) -> str:
         when_to_use=str(args.get("when_to_use", "")).strip(),
         sop=sop,
         code=(str(args.get("code", "")).strip() or None),
+        scope=("company" if str(args.get("scope", "agent")).strip() == "company" else "agent"),
     )
     return f"save_skill: {result['action']} skill {name!r} (id={result['id']})."
 
@@ -139,6 +140,11 @@ def save_skill_tool() -> FunctionTool:
         parameters={
             "type": "object",
             "properties": {
+                "scope": {
+                    "type": "string",
+                    "enum": ["agent", "company"],
+                    "description": "agent = only you reuse it (default); company = every role may reuse it",
+                },
                 "name": {"type": "string", "description": "Short skill name."},
                 "trigger_words": {
                     "type": "array",
