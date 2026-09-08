@@ -169,8 +169,15 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
             return status(engine, state)
         state.target_version = core.version
         pro: feed.ReleaseInfo | None = None
+        pro_feed_error: str | None = None
         if state.installed_pro_version:
-            pro = feed.latest_release("kompany-pro", token=_pro_token(engine), fetch=fetch)
+            # Pro is private. Without a working feed we still update Core and
+            # carry the installed Pro over unchanged — never strand it.
+            try:
+                pro = feed.latest_release("kompany-pro", token=_pro_token(engine), fetch=fetch)
+            except Exception as exc:  # noqa: BLE001
+                pro_feed_error = f"{exc}" + ("" if _pro_token(engine) else
+                                             f" (no {PRO_TOKEN_CREDENTIAL} in the vault — Pro will be carried over, not updated)")
         release_dir = install.releases_dir(data_dir) / core.version
         dl_dir = data_dir / "update" / "downloads" / core.version
 
@@ -192,6 +199,8 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
                 raise feed.FeedError(f"Pro release {pro.tag} carries no wheel")
             _set(engine, state, "downloading", "download", f"{pro.wheel_name}")
             wheels.append(feed.download_asset(pro, pro.wheel_name, dl_dir, token=_pro_token(engine), fetch=fetch))
+        elif pro_feed_error:
+            _set(engine, state, "downloading", "pro_feed_unavailable", pro_feed_error[:400])
         _set(engine, state, "verifying", "verify", "sha256 matched the release manifest; checking provenance")
         att = feed.verify_attestation(wheels[0], core.repo, run=run)
         state.attestation = att
@@ -206,6 +215,11 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
         got = install.installed_version(release_dir, run=run)
         if got and feed.parse_version(got) != feed.parse_version(core.version):
             raise RuntimeError(f"installed venv reports kompany {got}, expected {core.version}")
+        if pro is None and state.installed_pro_version and lay.get("current"):
+            carried = install.carry_over_package(install.releases_dir(data_dir) / str(lay["current"]), release_dir)
+            if carried is None:
+                raise RuntimeError("Pro release feed unavailable and the installed Pro could not be carried over")
+            _set(engine, state, "installing", "pro_carried_over", f"kompany-pro {carried} copied from release {lay['current']}")
 
         # --- switch + restart -------------------------------------------------
         _set(engine, state, "switching", "switch", f"releases/current → {core.version}")

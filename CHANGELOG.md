@@ -4,6 +4,11 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-09-08
+
+### Fixed
+- **Update no longer fails when the private Pro feed is unreachable.** Without `github_release_token` (or on a feed error) Core still updates and the installed Pro is carried over into the new release venv unchanged; the run records `pro_feed_unavailable` + `pro_carried_over` steps. Seen on the first button press on the production server.
+
 ## [0.1.9] - 2026-09-08
 
 ### Fixed
