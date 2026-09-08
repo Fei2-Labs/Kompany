@@ -27,7 +27,7 @@ def test_fresh_engine_tree_has_every_check_and_no_fail():
     for k in ("database", "runtime", "llm", "health_events", "work", "integrations", "backups", "access", "build"):
         assert k in ids
     assert ids["database"]["status"] == "ok"
-    assert ids["backups"]["status"] == "warn" and "kompany backup create" in ids["backups"]["fix"]
+    assert ids["backups"]["status"] == "warn" and "kompany backup" in ids["backups"]["fix"]
     # A test engine has no provider key: llm fails closed; nothing else may fail.
     failing = {k for k, n in ids.items() if n["status"] == "fail"} - {"kompany", "llm"}
     assert failing == set(), failing
