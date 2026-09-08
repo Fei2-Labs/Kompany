@@ -141,6 +141,11 @@ def test_check_reports_update_and_status_explains_layout(engine, monkeypatch):
     assert load_state(engine.settings.data_dir).last_check_at
     monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", None))
     assert pipeline.check_for_update(engine, fetch=gh)["update_available"] is False
+    # pro present but no token → the error carries the fix
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", "0.1.4"))
+    st = pipeline.check_for_update(engine, fetch=lambda url, **kw: SimpleNamespace(status_code=404, headers={}, content=b"", text="")
+                                   if "kompany-pro" in url else gh(url, **kw))
+    assert "credentials set github_release_token" in (st["error"] or "")
     # pro present → pro feed consulted with the vault token
     engine.credentials.set(pipeline.PRO_TOKEN_CREDENTIAL, "ghp_test")
     monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", "0.1.4"))

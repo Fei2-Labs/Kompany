@@ -77,11 +77,14 @@ def check_for_update(engine: Any, *, fetch: Callable[..., Any] | None = None) ->
     except Exception as exc:  # noqa: BLE001
         errors.append(f"kompany: {exc}")
     if state.installed_pro_version:
+        token = _pro_token(engine)
         try:
-            pro = feed.latest_release("kompany-pro", token=_pro_token(engine), fetch=fetch)
+            pro = feed.latest_release("kompany-pro", token=token, fetch=fetch)
             latest["kompany-pro"] = pro.as_dict()
         except Exception as exc:  # noqa: BLE001
-            errors.append(f"kompany-pro: {exc}")
+            hint = ("" if token else f" — the Pro repo is private: `kompany credentials set {PRO_TOKEN_CREDENTIAL}` "
+                    "with a read-only GitHub token")
+            errors.append(f"kompany-pro: {exc}{hint}")
     state.latest = latest
     state.last_check_at = _now()
     core_latest = latest.get("kompany", {}).get("version")
