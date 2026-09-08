@@ -4,6 +4,11 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-08
+
+### Fixed
+- **Release wheel still had no operations board**: hatch drops VCS-ignored files (the root `.gitignore` ignores every `dist/`) even when `include` matches them. `[tool.hatch.build.targets.wheel] artifacts` now re-admits `board_ui/dist`; the Release workflow asserts the wheel contains the board and `release.json` before publishing.
+
 ## [0.1.7] - 2026-09-08
 
 ### Fixed
