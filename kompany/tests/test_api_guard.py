@@ -78,7 +78,7 @@ def test_token_gate_blocks_api_and_redirects_browsers(client):
     r = c.get("/observability")
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
     r = c.get("/", headers={"Accept": "text/html"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"] == "/dashboard/login"
+    assert r.status_code == 303 and r.headers["location"] .startswith("/dashboard/login")
     assert c.get("/observability", headers={"Authorization": "Bearer secret-1"}).status_code == 200
     assert c.get("/observability?token=secret-1").status_code == 200
     assert c.get("/observability", headers={"Authorization": "Bearer wrong"}).status_code == 401

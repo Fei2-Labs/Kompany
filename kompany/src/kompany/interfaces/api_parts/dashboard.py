@@ -6,6 +6,8 @@ verbatim moves onto a domain ``APIRouter``; route paths are unchanged.
 
 from __future__ import annotations
 
+import html
+
 import asyncio  # noqa: F401
 import hmac  # noqa: F401
 import json  # noqa: F401
@@ -57,18 +59,47 @@ def web_dashboard(
     return HTMLResponse(render_dashboard(engine.observability_snapshot()))
 
 
+# Where a fresh login lands. Landing-page requests (the shell's probe paths)
+# go to the founder's start page; a real deep link is honoured as-is.
+_LANDING_PATHS = {"", "/", "/ui", "/ui/", "/dashboard", "/dashboard/", "/dashboard/login"}
+
+
+def _safe_next(raw: str | None) -> str | None:
+    """Same-origin relative path only — never an absolute URL or //host."""
+    if not raw:
+        return None
+    nxt = raw.strip()
+    if not nxt.startswith("/") or nxt.startswith("//") or "://" in nxt or "\\" in nxt:
+        return None
+    return nxt
+
+
+def after_login_path(engine: Any, raw_next: str | None) -> str:
+    nxt = _safe_next(raw_next)
+    if nxt and nxt.split("?", 1)[0] not in _LANDING_PATHS:  # a hash route (/#/x) is a deep link
+        return nxt
+    try:
+        from kompany.interfaces.api import BOARD_AVAILABLE
+        from kompany.state.ui_preferences import start_path
+
+        return start_path(engine.get_ui_preferences(), board_available=BOARD_AVAILABLE)
+    except Exception:  # noqa: BLE001 — never block a login on a preference read
+        return "/"
+
+
 @router.get("/dashboard/login", response_class=HTMLResponse)
-def dashboard_login() -> HTMLResponse:
+def dashboard_login(next: str | None = None) -> HTMLResponse:
     engine = get_engine()
     if not getattr(engine.settings, "web_dashboard_token", ""):
         raise HTTPException(status_code=503, detail="web dashboard auth is not configured")
-    return HTMLResponse(_render_dashboard_login())
+    return HTMLResponse(_render_dashboard_login(next=_safe_next(next)))
 
 
 @router.post("/dashboard/login")
 def dashboard_login_submit(
     request: Request,
     dashboard_token: str = Form(...),
+    next: str | None = Form(None),
 ) -> RedirectResponse:
     engine = get_engine()
     expected = getattr(engine.settings, "web_dashboard_token", "")
@@ -77,7 +108,7 @@ def dashboard_login_submit(
     if not compare_digest(dashboard_token, expected):
         raise HTTPException(status_code=401, detail="invalid dashboard token")
 
-    response = RedirectResponse("/dashboard", status_code=303)
+    response = RedirectResponse(after_login_path(engine, next), status_code=303)
     ttl = getattr(engine.settings, "dashboard_session_ttl_seconds", 12 * 60 * 60)
     response.set_cookie(
         "kompany_dashboard_session",
@@ -193,7 +224,11 @@ def _dashboard_session_signature(token: str, issued_at: str) -> str:
     ).hexdigest()
 
 
-def _render_dashboard_login() -> str:
+def _render_dashboard_login(next: str | None = None) -> str:
+    return _render_dashboard_login_html().replace("__NEXT__", html.escape(next or "", quote=True))
+
+
+def _render_dashboard_login_html() -> str:
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -217,6 +252,7 @@ def _render_dashboard_login() -> str:
     <h1>Enter dashboard token</h1>
     <p>Use the configured dashboard token to start a private browser session.</p>
     <form method="post" action="/dashboard/login">
+      <input type="hidden" name="next" value="__NEXT__">
       <label>
         Dashboard token
         <input name="dashboard_token" type="password" autocomplete="current-password" autofocus required>
