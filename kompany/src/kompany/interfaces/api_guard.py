@@ -178,7 +178,10 @@ class ApiAccessGuard:
         if _supplied_ok(request, expected):
             return None
         if _wants_html(request):
-            return RedirectResponse("/dashboard/login", status_code=303)
+            from urllib.parse import quote
+
+            wanted = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(f"/dashboard/login?next={quote(wanted, safe='/?=&#')}", status_code=303)
         return JSONResponse(
             {"detail": "authentication required: dashboard token (Bearer / ?token= / login cookie)"},
             status_code=401,

@@ -4,6 +4,11 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-09-08
+
+### Fixed
+- **Login lands where you were going.** The token gate now carries the requested path (`/dashboard/login?next=…`) and a successful login returns to it; a landing request (`/`, `/ui/`, `/dashboard`) goes to the founder's **start page** instead of the legacy `/dashboard` view. Only same-origin relative paths are honoured.
+
 ## [0.1.8] - 2026-09-08
 
 ### Fixed

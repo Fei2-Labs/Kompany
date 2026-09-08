@@ -1156,7 +1156,7 @@ def test_api_dashboard_login_sets_httponly_session_cookie(monkeypatch):
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/dashboard"
+    assert response.headers["location"] == "/"  # start page, not the legacy /dashboard
     assert "dashboard-secret" not in response.text
     assert "kompany_dashboard_session" in response.cookies
     set_cookie = response.headers["set-cookie"]
