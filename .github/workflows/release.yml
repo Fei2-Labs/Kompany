@@ -115,6 +115,19 @@ jobs:
         working-directory: kompany
         run: python -m build --wheel --sdist
 
+      - name: Assert the wheel ships the operations board + release identity
+        working-directory: kompany
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          whl = glob.glob("dist/kompany-*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          ok_board = any(n.endswith("board_ui/dist/index.html") for n in names)
+          ok_rel = any(n.endswith("kompany/release.json") for n in names)
+          print(f"{whl}: board={ok_board} release.json={ok_rel}")
+          sys.exit(0 if ok_board and ok_rel else 1)
+          PY
+
       - name: Package ops/browser tarball (if present)
         working-directory: kompany
         run: |
