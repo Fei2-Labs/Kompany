@@ -49,7 +49,7 @@ fi
 
 echo "==> [2/6] backup before anything changes"
 if command -v kompany >/dev/null 2>&1; then
-  KOMPANY_DATA_DIR="$DATA_DIR" kompany backup create --label "pre-release-$CORE_VERSION" || echo "    (backup via old install failed — continuing; sqlite file is untouched by this script)"
+  KOMPANY_DATA_DIR="$DATA_DIR" kompany backup --label "pre-release-$CORE_VERSION" || echo "    (backup via old install failed — continuing; sqlite file is untouched by this script)"
 fi
 
 echo "==> [3/6] venv at $REL/venv"
