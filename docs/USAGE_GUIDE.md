@@ -670,6 +670,10 @@ What happens on `propose`: one economy-tier LLM call returns the complete new YA
 
 Child CLIs get a minimal environment — their own auth variables only, no engine keys or vault key, and none of the nested-harness markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) that made a child `claude` behave as a nested session. The spawn timeout is 120 s by default; when it trips, the error carries the child's last output. Raise it with `KOMPANY_CLI_TIMEOUT_SECONDS` only if your calls are legitimately slow. `kompany-mcp` now exits on its own when the Claude Code session that launched it is gone, so bridge processes no longer pile up across sessions.
 
+### Which page opens at launch
+
+Settings → **Start page** (in the board and in the terminal's Settings page) picks what the desktop app shows once the engine is healthy: Board (default), Terminal (`/ui/`), Talk to the CEO, Needs You, Live, Activity or Projects. It is a UI preference stored in the company database (`start_page` on `GET/PATCH /preferences`); the shell asks `GET /start` at launch and only falls back to probing `/` when the engine cannot answer. Takes effect on the next launch. On an engine without the built board bundle every board page degrades to the terminal.
+
 ### One engine, shared by app and daemon
 
 Exactly one Kompany server runs per data directory — the discovery file `<data_dir>/server.json` is the lock:

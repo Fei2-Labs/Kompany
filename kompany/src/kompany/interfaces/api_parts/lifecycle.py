@@ -186,6 +186,7 @@ class UIPreferencesResponse(BaseModel):
     theme_id: str
     auto_enabled: bool
     reduce_motion: str  # "auto" | "on" | "off"
+    start_page: str = "board"  # see state.ui_preferences.START_PAGE_PATHS
 
 
 class UIPreferencesUpdateRequest(BaseModel):
@@ -196,6 +197,7 @@ class UIPreferencesUpdateRequest(BaseModel):
     theme_id: str | None = None
     auto_enabled: bool | None = None
     reduce_motion: str | None = None
+    start_page: str | None = None
 
 
 @router.get("/preferences", response_model=UIPreferencesResponse)
@@ -213,10 +215,33 @@ def patch_preferences(req: UIPreferencesUpdateRequest) -> UIPreferencesResponse:
             theme_id=req.theme_id,
             auto_enabled=req.auto_enabled,
             reduce_motion=req.reduce_motion,
+            start_page=req.start_page,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return UIPreferencesResponse(**prefs.model_dump(mode="json"))
+
+
+@router.get("/start")
+def start_page() -> dict[str, Any]:
+    """Where a shell should land after the engine is healthy.
+
+    The desktop app calls this once at launch (falling back to probing ``/``
+    when it is unreachable) so the founder's ``start_page`` preference, not a
+    hard-coded path, decides the first screen. ``options`` feeds the Settings
+    pickers so both UIs list the same choices.
+    """
+    from kompany.state.ui_preferences import START_PAGE_LABELS, START_PAGE_PATHS, start_path
+
+    from kompany.interfaces.api import BOARD_AVAILABLE
+
+    prefs = get_engine().get_ui_preferences()
+    return {
+        "start_page": prefs.start_page,
+        "path": start_path(prefs, board_available=BOARD_AVAILABLE),
+        "board_available": BOARD_AVAILABLE,
+        "options": [{"id": k, "label": START_PAGE_LABELS[k], "path": v} for k, v in START_PAGE_PATHS.items()],
+    }
 
 
 @router.get("/targets")

@@ -48,6 +48,17 @@
     </div>
 
     <div class="frame" data-label="SETTINGS // model source">
+      <h2 class="set-h">// START PAGE</h2>
+      <div class="set-meta">What the desktop app opens at launch. Takes effect next launch.</div>
+      <div class="set-row">
+        <label for="sp-select">Open at launch</label>
+        <select id="sp-select"><option>loading…</option></select>
+        <button type="button" id="sp-save" class="onb-btn onb-btn-submit" disabled>[ ▸ SAVE ]</button>
+      </div>
+      <div class="set-result" id="sp-result" hidden></div>
+    </section>
+
+    <section class="set-card">
       <h2 class="set-h">// MODEL SOURCE</h2>
       <p class="set-note">Where the company's AI work runs and how it's billed. A custom API key books real per-token cost; a subscription books its monthly fee as the real recurring expense (per-call spend is tracked as shadow value only).</p>
       <div class="set-meta" id="ms-clis">probing installed CLIs…</div>
@@ -190,6 +201,45 @@
   </div>
 
   <script type="module">
+    // Start page (dev-inbox #63): GET /start lists options + current; PATCH /preferences saves.
+    (async () => {
+      const spSel = document.getElementById("sp-select");
+      const spSave = document.getElementById("sp-save");
+      const spRes = document.getElementById("sp-result");
+      const spShow = (msg, ok) => { spRes.hidden = false; spRes.textContent = msg; spRes.className = "set-result " + (ok ? "ok" : "err"); };
+      try {
+        const r = await fetch("/start", { headers: { Accept: "application/json" } });
+        const d = await r.json();
+        spSel.innerHTML = "";
+        for (const o of d.options || []) {
+          const el = document.createElement("option");
+          el.value = o.id; el.textContent = `${o.label} — ${o.path}`;
+          if (o.id === d.start_page) el.selected = true;
+          spSel.appendChild(el);
+        }
+        if (d.board_available === false) spShow("board bundle not built on this engine — board pages open the terminal", true);
+        spSave.disabled = false;
+      } catch (e) {
+        spShow("failed to load: " + e.message, false);
+      }
+      spSave.addEventListener("click", async () => {
+        spSave.disabled = true;
+        try {
+          const r = await fetch("/preferences", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ start_page: spSel.value }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          spShow("saved — the desktop app opens this page on its next launch", true);
+        } catch (e) {
+          spShow("save failed: " + e.message, false);
+        } finally {
+          spSave.disabled = false;
+        }
+      });
+    })();
+
     const sel = document.getElementById("set-model");
     const apply = document.getElementById("set-apply");
     const meta = document.getElementById("set-meta");

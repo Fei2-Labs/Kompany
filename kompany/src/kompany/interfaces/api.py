@@ -228,7 +228,9 @@ _NON_SPA_PREFIXES = (
     "assets",
 )
 
-if _BOARD_INDEX.is_file():
+BOARD_AVAILABLE = _BOARD_INDEX.is_file()
+
+if BOARD_AVAILABLE:
     # Serve the hashed JS/CSS bundle. ``base: '/'`` in vite.config.ts makes
     # the SPA request ``/assets/*``, so mount the assets dir there.
     _BOARD_ASSETS = _BOARD_UI_DIR / "assets"
