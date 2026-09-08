@@ -59,6 +59,20 @@
     </section>
 
     <section class="set-card">
+      <h2 class="set-h">// UPDATE</h2>
+      <div class="set-meta" id="up-meta">loading…</div>
+      <div class="set-row">
+        <button type="button" id="up-check" class="onb-btn onb-btn-discuss">[ ↻ check ]</button>
+        <button type="button" id="up-apply" class="onb-btn onb-btn-submit" disabled>[ ▸ UPDATE ]</button>
+        <select id="up-mode">
+          <option value="manual">manual</option>
+          <option value="automatic_when_idle">automatic when idle</option>
+        </select>
+      </div>
+      <div class="set-result" id="up-result" hidden></div>
+    </section>
+
+    <section class="set-card">
       <h2 class="set-h">// MODEL SOURCE</h2>
       <p class="set-note">Where the company's AI work runs and how it's billed. A custom API key books real per-token cost; a subscription books its monthly fee as the real recurring expense (per-call spend is tracked as shadow value only).</p>
       <div class="set-meta" id="ms-clis">probing installed CLIs…</div>
@@ -201,6 +215,37 @@
   </div>
 
   <script type="module">
+    // One-button update: GET /update, POST /update/check|apply|mode; polls while in flight.
+    (() => {
+      const meta = document.getElementById("up-meta"), chk = document.getElementById("up-check");
+      const apply = document.getElementById("up-apply"), mode = document.getElementById("up-mode");
+      const res = document.getElementById("up-result");
+      const BUSY = new Set(["checking", "backing_up", "downloading", "verifying", "installing", "switching", "restarting"]);
+      let timer = null;
+      const show = (msg, ok) => { res.hidden = false; res.textContent = msg; res.className = "set-result " + (ok ? "ok" : "err"); };
+      const render = (st) => {
+        const latest = (st.latest || {}).kompany?.version;
+        meta.textContent = `installed ${st.installed_version}${st.installed_pro_version ? " · pro " + st.installed_pro_version : ""}`
+          + ` — latest ${latest || "?"}${st.update_available ? " ✦ update available" : ""} · ${st.phase}`
+          + (st.target_version && BUSY.has(st.phase) ? " → " + st.target_version : "");
+        mode.value = st.mode || "manual";
+        apply.disabled = !(st.can_apply && st.update_available) || BUSY.has(st.phase);
+        apply.textContent = latest && st.update_available ? `[ ▸ UPDATE TO ${latest} ]` : "[ ▸ UP TO DATE ]";
+        if (!st.can_apply && st.cannot_apply_reason) show(st.cannot_apply_reason, true);
+        else if (st.error && (st.phase === "failed" || st.phase === "rolled_back")) show(st.error, false);
+        else if (st.phase === "done") show(`running ${st.installed_version}`, true);
+        else if (BUSY.has(st.phase)) { const last = (st.steps || []).slice(-1)[0]; show(`${st.phase}${last ? " · " + last.step + ": " + last.detail : ""}`, true); }
+        if (BUSY.has(st.phase) && !timer) timer = setInterval(load, 2000);
+        if (!BUSY.has(st.phase) && timer) { clearInterval(timer); timer = null; }
+      };
+      const load = async () => { try { render(await (await fetch("/update", { headers: { Accept: "application/json" } })).json()); } catch (e) { meta.textContent = "update status unavailable: " + e.message; } };
+      const post = async (path, body) => { try { render(await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(body || {}) })).json()); } catch (e) { show(e.message, false); } };
+      chk.addEventListener("click", () => post("/update/check"));
+      apply.addEventListener("click", () => post("/update/apply", {}));
+      mode.addEventListener("change", () => post("/update/mode", { mode: mode.value }));
+      load();
+    })();
+
     // Start page (dev-inbox #63): GET /start lists options + current; PATCH /preferences saves.
     (async () => {
       const spSel = document.getElementById("sp-select");

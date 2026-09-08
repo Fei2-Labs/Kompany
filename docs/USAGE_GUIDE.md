@@ -709,6 +709,29 @@ On Linux the same `kompany daemon install` writes `/etc/systemd/system/kompany-d
 
 The unit is hardened by default: `ProtectSystem=strict` makes the whole filesystem read-only except `ReadWritePaths=` (the data dir and the daemon user's home, where CLI harnesses keep their own state), plus `NoNewPrivileges`, `PrivateTmp`, empty capability sets, kernel/cgroup/clock protection and `UMask=0077`. Install the release wheel root-owned under `/opt/kompany/releases/<version>/venv` and the daemon cannot modify its own code — the failure mode of a production box quietly turning into a dev checkout is closed at the OS level. Check the score with `systemd-analyze security kompany-daemon`. Namespaces stay enabled because agent tools may spawn sandboxed browsers.
 
+### Updating: one button
+
+Once a server runs from the release layout, updating is a click. Settings → **Update** (board or terminal Settings page) shows installed vs latest GitHub release; **Update to vX** downloads the Core (and Pro) wheels, verifies each against the release manifest's sha256 and GitHub's build-provenance attestation (when `gh` is installed), installs them into a fresh `<data_dir>/releases/<version>/venv`, takes a database backup, flips `releases/current` and exits so systemd restarts the new version. The first boot runs `kompany doctor`; a red node rolls back to the previous release automatically. Same on the CLI and the other surfaces:
+
+```bash
+kompany update                 # check GitHub for a newer release
+kompany update apply           # download → verify → install → backup → switch → restart
+kompany update status          # phase, steps, provenance, layout
+kompany update rollback        # back to the previous release
+kompany update mode automatic_when_idle   # or: manual (default — report only)
+```
+
+REST `GET /update`, `POST /update/check|apply|rollback|mode`; MCP `kompany_update_*`; SDK `k.update_*()`. In `automatic_when_idle` mode the daemon checks every `update_check_interval_hours` (6) and installs when no agent is working. The private Pro wheel needs a read-only GitHub token in the vault: `kompany credentials set github_release_token`. Core needs no credential.
+
+**First time only** — a server that still runs from a git checkout or a hand-made venv has no `releases/current`; migrate it once with the bootstrap script (it backs up, installs the release, writes the hardened systemd unit pointing at `releases/current`, restarts and runs the doctor):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Fei2-Labs/Kompany/main/kompany/ops/bootstrap_release.sh -o bootstrap_release.sh
+bash bootstrap_release.sh --core-version 0.1.6 --pro-wheel /tmp/kompany_pro-0.1.5-py3-none-any.whl --role maintainer
+```
+
+The desktop app's bundled sidecar is not updated this way: reinstall Kompany.app (Settings → Update says so).
+
 ### Releases, deployment identity and drift
 
 Production runs **only** wheels built by GitHub Actions from `main`; nobody pushes code to a server and nobody edits it there. The pieces that make this a property instead of a habit:

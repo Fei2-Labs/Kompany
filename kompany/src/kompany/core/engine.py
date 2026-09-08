@@ -147,12 +147,14 @@ from kompany.core.engine_parts import (
     WorkflowsMixin,
     ExtensionsMixin,
     ArtifactEvolutionMixin,
+    UpdateMixin,
 )
 
 log = logging.getLogger(__name__)
 
 
 class KompanyEngine(
+    UpdateMixin,
     ArtifactEvolutionMixin,
     ExtensionsMixin,
     AgenticChatMixin,
@@ -350,6 +352,17 @@ class KompanyEngine(
         self.ticker.actions.append(
             ("outward", self.outward_lane.dispatch_once)
         )
+        # One-button update (Stage C step 9): periodic release check; in
+        # automatic_when_idle mode the ticker also applies it when idle.
+        try:
+            row = self.db.execute("SELECT value FROM company_config WHERE key = 'update_mode'").fetchone()
+            if row and row["value"] in ("manual", "automatic_when_idle"):
+                self.settings.update_mode = row["value"]
+        except Exception:  # noqa: BLE001
+            pass
+        from kompany.core.updater.pipeline import tick_action as _update_tick
+
+        self.ticker.actions.append(("update", lambda: _update_tick(self)))
 
         # Anima persona layer (06-12-anima-persona): emotion + diary tick
         # intents appended to the ticker's actions list (PRD D4 — the
@@ -620,6 +633,13 @@ class KompanyEngine(
             self.doctor()
         except Exception:  # noqa: BLE001 — a broken self-test must never take the daemon down
             log.exception("boot doctor failed")
+        # First boot after an update switch: doctor clean → done, else roll back.
+        try:
+            from kompany.core.updater.pipeline import verify_after_restart
+
+            verify_after_restart(self)
+        except Exception:  # noqa: BLE001
+            log.exception("update verification failed")
 
     async def stop(self) -> None:
         """Stop engine background workers."""

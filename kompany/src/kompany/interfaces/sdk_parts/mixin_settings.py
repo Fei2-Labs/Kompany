@@ -309,6 +309,23 @@ class KompanySettingsOps:
     def evolution_status(self) -> dict[str, Any]:
         return self._engine.evolution_status()
 
+    # -- one-button update (Stage C step 9) ----------------------------------
+
+    def update_status(self) -> dict[str, Any]:
+        return self._engine.update_status()
+
+    def update_check(self) -> dict[str, Any]:
+        return self._engine.update_check()
+
+    def update_apply(self, version: str | None = None, background: bool = True) -> dict[str, Any]:
+        return self._engine.update_apply(version, background=background)
+
+    def update_rollback(self) -> dict[str, Any]:
+        return self._engine.update_rollback()
+
+    def update_set_mode(self, mode: str) -> dict[str, Any]:
+        return self._engine.update_set_mode(mode)
+
     def self_update_role(self) -> dict[str, Any]:
         """Installation role (customer/contributor/maintainer) and whether
         approving a proposal pushes + opens a PR or exports a patch."""

@@ -218,6 +218,13 @@ class KompanySettings(BaseSettings):
     artifact_evolution_daily_cap_usd: float = 2.0
     artifact_evolution_model_tier: str = "economy"
 
+    # One-button update (Stage C step 9). ``manual`` only reports that a
+    # release exists; ``automatic_when_idle`` lets the ticker apply it when no
+    # agent is working. The founder's choice made in Settings is persisted
+    # in company_config('update_mode') and wins over YAML at engine boot.
+    update_mode: str = "manual"
+    update_check_interval_hours: float = 6.0
+
     # Anima persona layer (06-12-anima-persona). ``anima_enabled``
     # registers the emotion + diary tick intents; ``anima_diary_enabled``
     # gates ONLY the daily economy-tier diary call (emotion stays pure
@@ -436,6 +443,10 @@ class KompanySettings(BaseSettings):
                 overrides["artifact_evolution_daily_cap_usd"] = float(data["artifact_evolution_daily_cap_usd"])
             if "artifact_evolution_model_tier" in data:
                 overrides["artifact_evolution_model_tier"] = str(data["artifact_evolution_model_tier"])
+            if "update_mode" in data:
+                overrides["update_mode"] = str(data["update_mode"])
+            if "update_check_interval_hours" in data:
+                overrides["update_check_interval_hours"] = float(data["update_check_interval_hours"])
             # Remote backup config block (07-14 step 5).
             if "remote_backup" in data and isinstance(data["remote_backup"], dict):
                 overrides["remote_backup"] = data["remote_backup"]

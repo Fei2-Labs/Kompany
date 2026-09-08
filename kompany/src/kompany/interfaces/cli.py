@@ -56,6 +56,7 @@ from kompany.interfaces.cli_founder import (  # noqa: E402
 )
 from kompany.interfaces.cli_self_update import self_update_app  # noqa: E402
 from kompany.interfaces.cli_skills import skills_app  # noqa: E402
+from kompany.interfaces.cli_update import update_app  # noqa: E402
 from kompany.interfaces.cli_workspace import workspace_app  # noqa: E402
 
 app.add_typer(anima_app, name="anima")
@@ -67,6 +68,7 @@ app.add_typer(founder_app, name="founder")
 app.add_typer(outward_policy_app, name="outward-policy")
 app.add_typer(self_update_app, name="self-update")
 app.add_typer(skills_app, name="skills")
+app.add_typer(update_app, name="update")
 app.add_typer(workspace_app, name="workspace")
 
 from kompany.interfaces.cli_parts import (  # noqa: E402,F401

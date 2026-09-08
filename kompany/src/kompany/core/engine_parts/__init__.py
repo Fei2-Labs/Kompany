@@ -15,6 +15,7 @@ from kompany.core.engine_parts.channel_actions import ChannelActionsMixin
 from kompany.core.engine_parts.approvals import ApprovalsMixin
 from kompany.core.engine_parts.extensions import ExtensionsMixin
 from kompany.core.engine_parts.evolution import ArtifactEvolutionMixin
+from kompany.core.engine_parts.update import UpdateMixin
 from kompany.core.engine_parts.governance import GovernanceMixin
 from kompany.core.engine_parts.handlers import DirectiveHandlersMixin
 from kompany.core.engine_parts.agentic_chat import AgenticChatMixin
@@ -22,6 +23,7 @@ from kompany.core.engine_parts.skill_crystallize import SkillCrystallizationMixi
 from kompany.core.engine_parts.workflows import WorkflowsMixin
 
 __all__ = [
+    "UpdateMixin",
     "ArtifactEvolutionMixin",
     "ExtensionsMixin",
     "AgenticChatMixin",
