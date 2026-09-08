@@ -146,7 +146,7 @@ def check_integrations(engine: Any) -> dict[str, Any]:
 def check_backups(engine: Any) -> dict[str, Any]:
     rows = engine.backups.list_backups()
     if not rows:
-        return node("backups", "Backups", "warn", "no backups yet", "Run `kompany backup create` (or enable remote backup).")
+        return node("backups", "Backups", "warn", "no backups yet", "Run `kompany backup` (or enable remote backup).")
     latest = rows[0]
     created = latest.get("created_at") or ""
     age_days = None
@@ -161,7 +161,7 @@ def check_backups(engine: Any) -> dict[str, Any]:
     if not latest.get("sha256"):
         detail += "; latest has no integrity digest"
     return node("backups", "Backups", "warn" if stale else "ok", detail,
-                "Take a fresh snapshot: `kompany backup create`." if stale else None)
+                "Take a fresh snapshot: `kompany backup`." if stale else None)
 
 
 def check_access(engine: Any) -> dict[str, Any]:
