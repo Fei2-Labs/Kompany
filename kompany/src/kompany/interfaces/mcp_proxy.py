@@ -93,7 +93,11 @@ def write_discovery_file(
     }
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        # Atomic publish: readers (the MCP proxy, the desktop shell, tests)
+        # poll for this file and must never observe a half-written JSON.
+        tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
     except OSError:
         return None
     return path

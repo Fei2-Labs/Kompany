@@ -30,10 +30,22 @@ def venv_python(release_dir: Path) -> Path:
 
 
 def layout(data_dir: Path | str, executable: str | None = None) -> dict[str, Any]:
-    """Where this process runs from and what ``current`` points to."""
+    """Where this process runs from and what ``current`` points to.
+
+    Detection uses the interpreter *prefix* (the venv root), not
+    ``sys.executable``: a venv's ``bin/python`` is a symlink to the system
+    interpreter, so resolving it would always escape the releases dir.
+    """
     rd = releases_dir(data_dir)
-    exe = Path(executable or sys.executable).resolve()
-    running_from_release = rd.resolve() in exe.parents if rd.exists() else False
+    here = Path(executable) if executable else Path(sys.prefix)
+    candidates = {here, here.resolve()}
+    try:
+        rd_resolved = rd.resolve()
+    except OSError:
+        rd_resolved = rd
+    running_from_release = rd.exists() and any(
+        rd in c.parents or rd_resolved in c.parents for c in candidates
+    )
     current = None
     try:
         if current_link(data_dir).is_symlink():
