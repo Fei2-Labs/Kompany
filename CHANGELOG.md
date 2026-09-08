@@ -4,6 +4,13 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-08
+
+### Fixed
+- **Updater layout detection** used `sys.executable` resolved through the venv symlink and therefore never recognised a release venv; now uses the interpreter prefix (`can_apply` was always false on real installs).
+- **Release wheel shipped without the operations board** — the Release workflow now builds board-ui before packaging, so `/start` no longer degrades every board page to the terminal.
+- `ops/bootstrap_release.sh` keeps an existing unit's `--host/--port` and env (only repoints ExecStart) instead of rewriting the unit.
+
 ## [0.1.6] - 2026-09-08
 
 Everything listed under Unreleased since 0.1.5 — security audit fixes (token gate, bind refusal, SSRF guard, env scrub), doctor, merge, build identity + drift, installation role, customer extensions, self-evolution lane, skill scopes, start page, one-button update, workflow inputs / dry run.

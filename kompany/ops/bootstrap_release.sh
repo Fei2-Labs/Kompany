@@ -67,13 +67,37 @@ GOT="$("$REL/venv/bin/python" -c 'import kompany; print(kompany.__version__)')"
 echo "==> [4/6] releases/current -> $CORE_VERSION"
 ln -sfn "$CORE_VERSION" "$DATA_DIR/releases/current"
 
-echo "==> [5/6] supervisor unit (hardened, ExecStart via releases/current) + installation role"
+echo "==> [5/6] supervisor unit + installation role"
 if [[ "$(uname -s)" == "Linux" ]]; then
-  sudo systemctl stop kompany-daemon.service 2>/dev/null || true
-  sudo -E KOMPANY_DATA_DIR="$DATA_DIR" SUDO_USER="${SUDO_USER:-$USER}" \
-    "$DATA_DIR/releases/current/venv/bin/kompany" daemon install --role "$ROLE" --data-dir "$DATA_DIR"
-  sudo systemctl daemon-reload
-  sudo systemctl restart kompany-daemon.service
+  UNIT=/etc/systemd/system/kompany-daemon.service
+  sudo mkdir -p /etc/kompany && echo "$ROLE" | sudo tee /etc/kompany/installation_role >/dev/null && sudo chmod 644 /etc/kompany/installation_role
+  if [[ -f "$UNIT" ]]; then
+    # Existing unit: keep its ExecStart arguments (--host/--port), env and
+    # user; only repoint the interpreter at releases/current and add what the
+    # updater needs. A full hardened rewrite is `kompany daemon install`.
+    sudo cp "$UNIT" "$UNIT.bak-$(date +%Y%m%d%H%M%S)"
+    sudo "$PYTHON" - "$UNIT" "$DATA_DIR" <<'PY'
+import re, sys, pathlib
+unit, data_dir = pathlib.Path(sys.argv[1]), sys.argv[2]
+s = unit.read_text()
+s = re.sub(r"^ExecStart=\S+\s+-m\s+kompany\.interfaces\.daemon_main(.*)$",
+           lambda m: f"ExecStart={data_dir}/releases/current/venv/bin/python3 -m kompany.interfaces.daemon_main{m.group(1)}",
+           s, flags=re.M)
+if "KOMPANY_SUPERVISED" not in s:
+    s = s.replace("[Service]\n", "[Service]\nEnvironment=KOMPANY_SUPERVISED=systemd\n", 1)
+unit.write_text(s)
+PY
+    if [[ -f "$DATA_DIR/daemon.env" ]] && ! grep -q "daemon.env" "$UNIT"; then
+      sudo sed -i "s#^\[Service\]#[Service]\nEnvironmentFile=$DATA_DIR/daemon.env#" "$UNIT"
+    fi
+    sudo systemctl daemon-reload
+    sudo systemctl restart kompany-daemon.service
+  else
+    sudo -E KOMPANY_DATA_DIR="$DATA_DIR" SUDO_USER="${SUDO_USER:-$USER}" \
+      "$DATA_DIR/releases/current/venv/bin/kompany" daemon install --role "$ROLE" --data-dir "$DATA_DIR"
+    sudo systemctl daemon-reload && sudo systemctl restart kompany-daemon.service
+  fi
+  echo "    NOTE: a non-loopback bind needs WEB_DASHBOARD_TOKEN — put it in $DATA_DIR/daemon.env (chmod 600) before the first start."
 else
   KOMPANY_DATA_DIR="$DATA_DIR" "$DATA_DIR/releases/current/venv/bin/kompany" daemon install --data-dir "$DATA_DIR"
 fi

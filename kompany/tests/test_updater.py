@@ -89,6 +89,7 @@ def _release_layout(engine, monkeypatch, version="0.1.5"):
     (d / "python").write_text("")
     os.symlink(version, Path(engine.settings.data_dir) / "releases" / "current")
     monkeypatch.setattr(sys, "executable", str(d / "python"))
+    monkeypatch.setattr(sys, "prefix", str(d.parent))  # the venv root, like a real venv
     monkeypatch.setattr(pipeline, "_versions", lambda: (version, None))
 
 
@@ -130,6 +131,12 @@ def test_layout_and_switch(tmp_path):
     with pytest.raises(RuntimeError):
         install.switch_current(tmp_path, "9.9.9")
     assert install.layout(tmp_path, executable=str(tmp_path / "releases/0.1.6/venv/bin/python"))["running_from_release"]
+    # a venv whose python is a symlink to the system interpreter still counts (real-world case)
+    (tmp_path / "releases/0.1.6/venv/bin/python").unlink()
+    (tmp_path / "releases/0.1.6/venv/bin/python").symlink_to(sys.executable)
+    assert install.layout(tmp_path, executable=str(tmp_path / "releases/0.1.6/venv"))["running_from_release"]
+    # through the `current` symlink too
+    assert install.layout(tmp_path, executable=str(tmp_path / "releases/current/venv"))["running_from_release"]
 
 
 def test_check_reports_update_and_status_explains_layout(engine, monkeypatch):
