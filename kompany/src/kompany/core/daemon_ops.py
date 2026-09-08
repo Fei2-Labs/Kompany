@@ -195,8 +195,23 @@ def _systemd_status_block() -> dict[str, Any]:
     }
 
 
-def resolve_program_arguments() -> list[str]:
-    """ProgramArguments for the LaunchAgent, resolved at install time (D4)."""
+def resolve_program_arguments(data_dir: Path | None = None) -> list[str]:
+    """ProgramArguments for the supervisor, resolved at install time (D4).
+
+    When this process runs from ``<data_dir>/releases/<v>/venv`` the unit
+    points at the ``releases/current`` symlink instead of the concrete venv,
+    so the one-button updater can switch releases by flipping the link and
+    restarting (Stage C step 9).
+    """
+    try:
+        from kompany.core.updater.install import layout, venv_python
+
+        dd = _resolve_data_dir(data_dir)
+        if layout(dd)["running_from_release"]:
+            current = dd / "releases" / "current"
+            return [str(venv_python(current)), "-m", "kompany.interfaces.daemon_main"]
+    except Exception:  # noqa: BLE001 — fall back to the concrete interpreter
+        pass
     if BUNDLED_SERVER_BINARY.exists():
         return [str(BUNDLED_SERVER_BINARY), "--host", "127.0.0.1", "--port", "0"]
     return [sys.executable, "-m", "kompany.interfaces.daemon_main"]
@@ -245,7 +260,7 @@ def install_launchd(data_dir: Path | None = None) -> dict[str, Any]:
     data_dir = _resolve_data_dir(data_dir)
     logs_dir = data_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    program_arguments = resolve_program_arguments()
+    program_arguments = resolve_program_arguments(data_dir)
     plist: dict[str, Any] = {
         "Label": LAUNCHD_LABEL,
         "ProgramArguments": program_arguments,
@@ -345,6 +360,7 @@ def _systemd_unit_content(
         "RestartSec=5\n"
         f"Environment=KOMPANY_DATA_DIR={data_dir}\n"
         f"Environment=PATH={path_env}\n"
+        "Environment=KOMPANY_SUPERVISED=systemd\n"
         "\n"
         "# Hardening (Stage C). The daemon may write only its data dir and the\n"
         "# user's home; the installed release stays read-only.\n"
@@ -408,7 +424,7 @@ def install_systemd(data_dir: Path | None = None) -> dict[str, Any]:
     data_dir = _resolve_data_dir(data_dir)
     logs_dir = data_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    program_arguments = resolve_program_arguments()
+    program_arguments = resolve_program_arguments(data_dir)
     path_env = resolve_daemon_path()
     # Run as the current user so the daemon accesses the right home
     # dir, venv, and CLI harness tools (claude/codex/opencode). Under

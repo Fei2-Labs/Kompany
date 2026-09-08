@@ -230,6 +230,29 @@ def _evo_checks() -> tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...
     )
 
 
+def check_update(engine: Any) -> dict[str, Any]:
+    """Offline: reports the cached release check; warns when behind or a switch is unverified."""
+    from kompany.core.updater.install import layout
+    from kompany.core.updater.state import load_state
+
+    st = load_state(engine.settings.data_dir)
+    lay = layout(engine.settings.data_dir)
+    from kompany import __version__
+
+    detail = f"installed {__version__}"
+    latest = (st.latest or {}).get("kompany", {}).get("version")
+    if latest:
+        detail += f", latest release {latest} (checked {str(st.last_check_at)[:10]})"
+    detail += ", release layout" if lay["running_from_release"] else (", desktop bundle" if lay["frozen"] else ", checkout/venv install")
+    if st.phase in ("failed", "rolled_back") and st.error:
+        return node("update", "Update", "warn", detail + f"; last update {st.phase}", st.error)
+    if st.update_available:
+        return node("update", "Update", "warn", detail + " — update available",
+                    "Settings → Update, or `kompany update apply`." if lay["running_from_release"]
+                    else "Reinstall the desktop app." if lay["frozen"] else "Run ops/bootstrap_release.sh once, then `kompany update apply`.")
+    return node("update", "Update", "info", detail)
+
+
 CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("database", "SQLite database", check_database),
     ("runtime", "Runtime", check_runtime),
@@ -242,6 +265,7 @@ CHECKS: tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...] = (
     ("build", "Build", check_build),
     ("installation_role", "Installation role", check_installation_role),
     ("extensions", "Extensions", check_extensions),
+    ("update", "Update", check_update),
 )
 
 

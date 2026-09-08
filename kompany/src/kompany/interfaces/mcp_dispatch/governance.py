@@ -287,6 +287,20 @@ def dispatch_governance_tool(engine: KompanyEngine, name: str, arguments: dict) 
     if name == "kompany_evolution_status":
         return engine.evolution_status()
 
+    if name == "kompany_update_status":
+        return engine.update_status()
+    if name == "kompany_update_check":
+        return engine.update_check()
+    if name == "kompany_update_apply":
+        return engine.update_apply(arguments.get("version") or None)
+    if name == "kompany_update_rollback":
+        return engine.update_rollback()
+    if name == "kompany_update_set_mode":
+        try:
+            return engine.update_set_mode(str(arguments["mode"]))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_self_update_role":
         return engine.self_update_role()
 

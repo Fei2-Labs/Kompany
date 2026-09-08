@@ -23,6 +23,10 @@ ALLOWED_CREDENTIALS = {
     "telegram_allowed_chat_ids",
     "mobile_remote_token",
     "web_dashboard_token",
+    # One-button update (Stage C step 9): read-only GitHub token used ONLY
+    # to download the private Pro release wheel. Core comes from the public
+    # repo without any credential.
+    "github_release_token",
     # Email integration (#5) — generic SMTP so it works with Gmail
     # app-passwords or any SMTP provider. Lets agents actually SEND
     # outreach instead of only drafting it.
