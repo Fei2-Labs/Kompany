@@ -4,6 +4,10 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-09-08
+
+Everything listed under Unreleased since 0.1.5 — security audit fixes (token gate, bind refusal, SSRF guard, env scrub), doctor, merge, build identity + drift, installation role, customer extensions, self-evolution lane, skill scopes, start page, one-button update, workflow inputs / dry run.
+
 ### Added
 - **One-button update** — `kompany update` / Settings → Update: verified wheels from GitHub Releases into `<data_dir>/releases/<v>/venv`, database backup, `releases/current` switch, supervisor restart, doctor-gated automatic rollback; `manual` / `automatic_when_idle`; `ops/bootstrap_release.sh` migrates a checkout install once; systemd unit now points at `releases/current` and sets `KOMPANY_SUPERVISED`.
 - **Start page setting** — `start_page` UI preference (board / terminal / talk / needs-you / live / activity / projects) settable from both Settings UIs; the desktop shell reads `GET /start` at launch instead of hard-coding `/`.
