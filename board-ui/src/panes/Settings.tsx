@@ -7,6 +7,7 @@
 
 import { ModelCard } from './settings/ModelCard';
 import { DesktopConnectionCard } from './settings/DesktopConnectionCard';
+import { StartPageCard } from './settings/StartPageCard';
 import { ModelSourceCard } from './settings/ModelSourceCard';
 import { ResendCard } from './settings/ResendCard';
 import { EmailSmtpCard } from './settings/EmailSmtpCard';
@@ -31,6 +32,7 @@ export function Settings() {
 
       <div className="settings">
         <DesktopConnectionCard />
+        <StartPageCard />
         <ModelCard />
         <ModelSourceCard />
         <ResendCard />

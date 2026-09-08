@@ -26,6 +26,28 @@ from kompany.state.database import Database
 _KEY = "ui_preferences"
 
 ReduceMotion = Literal["auto", "on", "off"]
+# Which page the desktop shell opens after the engine is healthy (dev-inbox:
+# start_page). Paths are what the Tauri WebView loads; the board is a
+# HashRouter SPA so its panes live under ``/#/``.
+StartPage = Literal["board", "terminal", "talk", "needs-you", "live", "activity", "projects"]
+START_PAGE_PATHS: dict[str, str] = {
+    "board": "/",
+    "terminal": "/ui/",
+    "talk": "/#/talk",
+    "needs-you": "/#/needs-you",
+    "live": "/#/live",
+    "activity": "/#/activity",
+    "projects": "/#/projects",
+}
+START_PAGE_LABELS: dict[str, str] = {
+    "board": "Board (operations board)",
+    "terminal": "Terminal (cyberpunk dashboard)",
+    "talk": "Talk to the CEO",
+    "needs-you": "Needs You",
+    "live": "Live (terminal inside the board)",
+    "activity": "Activity",
+    "projects": "Projects",
+}
 
 
 class UIPreferences(BaseModel):
@@ -43,6 +65,7 @@ class UIPreferences(BaseModel):
     theme_id: str = Field(default="cyberpunk", min_length=1, max_length=40)
     auto_enabled: bool = False
     reduce_motion: ReduceMotion = "auto"
+    start_page: StartPage = "board"
 
 
 def _read_config(db: Database, key: str) -> str | None:
@@ -81,6 +104,7 @@ def set_preferences(
     theme_id: str | None = None,
     auto_enabled: bool | None = None,
     reduce_motion: str | None = None,
+    start_page: str | None = None,
 ) -> UIPreferences:
     """Patch the given fields (others untouched) and persist. Returns the result.
 
@@ -99,6 +123,12 @@ def set_preferences(
                 f"got {reduce_motion!r}"
             )
         prefs.reduce_motion = reduce_motion
+    if start_page is not None:
+        if start_page not in START_PAGE_PATHS:
+            raise ValueError(
+                f"start_page must be one of {sorted(START_PAGE_PATHS)}; got {start_page!r}"
+            )
+        prefs.start_page = start_page
     # Re-validate the whole model (catches a bad theme_id length, etc.).
     prefs = UIPreferences.model_validate(prefs.model_dump())
     _write_config(db, _KEY, prefs.model_dump_json())
@@ -106,4 +136,16 @@ def set_preferences(
     return prefs
 
 
-__all__ = ["UIPreferences", "ReduceMotion", "get_preferences", "set_preferences"]
+def start_path(prefs: UIPreferences, *, board_available: bool) -> str:
+    """Path the desktop shell should load. Board panes need the built SPA;
+    without it every board choice degrades to the terminal."""
+    path = START_PAGE_PATHS.get(prefs.start_page, "/")
+    if not board_available and path != "/ui/":
+        return "/ui/"
+    return path
+
+
+__all__ = [
+    "START_PAGE_LABELS", "START_PAGE_PATHS", "StartPage", "UIPreferences", "ReduceMotion",
+    "get_preferences", "set_preferences", "start_path",
+]

@@ -284,6 +284,30 @@ fn probe_root(base_url: &str) -> ProbeResult {
     }
 }
 
+/// Ask the engine which path the founder wants opened at launch
+/// (`GET /start` → `{"path": "/#/talk", ...}`). `None` on any failure so the
+/// caller can fall back to probing `/`. Only same-origin relative paths are
+/// accepted — the engine must never be able to redirect the shell elsewhere.
+fn fetch_start_path(base_url: &str) -> Option<String> {
+    let url = format!("{}/start", base_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok()?;
+    let resp = client.get(&url).send().ok()?;
+    if resp.status().as_u16() != 200 {
+        return None;
+    }
+    let body: serde_json::Value = serde_json::from_str(&resp.text().ok()?).ok()?;
+    let path = body.get("path")?.as_str()?.trim().to_string();
+    if path.starts_with('/') && !path.starts_with("//") && !path.contains("://") {
+        Some(path)
+    } else {
+        None
+    }
+}
+
 /// Open the main WebView window against a healthy server at `base_url`.
 ///
 /// `base_url` is the origin (scheme + host + port, no path) of either:
@@ -308,10 +332,17 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
     // `/ui/` if it doesn't return 200 OK. This keeps the local sidecar
     // path (board present) on the fast path and fixes the remote VPS path.
     let base = base_url.trim_end_matches('/');
-    let path = match probe_root(base) {
-        ProbeResult::Board => "/",
-        ProbeResult::Redirect => "/ui/",
-        ProbeResult::Unreachable => "/",
+    // Founder's start_page preference (Settings → Start page) decides the first
+    // screen; the engine resolves it to a path and already degrades board
+    // panes to /ui/ when the board bundle is absent. Only when /start is
+    // unreachable do we fall back to the old probe.
+    let path: String = match fetch_start_path(base) {
+        Some(p) => p,
+        None => match probe_root(base) {
+            ProbeResult::Board => "/".to_string(),
+            ProbeResult::Redirect => "/ui/".to_string(),
+            ProbeResult::Unreachable => "/".to_string(),
+        },
     };
     let url = format!("{}{}", base, path);
     let webview_url =
