@@ -319,3 +319,30 @@ def test_systemd_unit_uses_current_symlink_in_release_layout(engine, monkeypatch
     assert args[0].endswith("releases/current/venv/bin/python") and args[1:] == ["-m", "kompany.interfaces.daemon_main"]
     body = daemon_ops._systemd_unit_content(Path(engine.settings.data_dir), args, "/bin", user="u", home=Path("/home/u"))
     assert "KOMPANY_SUPERVISED=systemd" in body and "releases/current/venv/bin/python" in body
+
+
+def test_core_update_carries_pro_over_when_pro_feed_is_unavailable(engine, monkeypatch):
+    """Private Pro repo, no token → Core still updates; installed Pro is copied into the new venv."""
+    _release_layout(engine, monkeypatch, "0.1.5")
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.5", "0.1.4"))
+    data = Path(engine.settings.data_dir)
+    sp = data / "releases/0.1.5/venv/lib/python3.12/site-packages"
+    (sp / "kompany_pro").mkdir(parents=True); (sp / "kompany_pro/__init__.py").write_text("x = 1\n")
+    (sp / "kompany_pro-0.1.4.dist-info").mkdir(); (sp / "kompany_pro-0.1.4.dist-info/top_level.txt").write_text("kompany_pro\n")
+    (sp / "kompany_pro-0.1.4.dist-info/entry_points.txt").write_text("[kompany.souls]\n")
+    gh = FakeGitHub()  # answers Core only; the Pro feed 404s (no token)
+    def fetch(url, **kw):
+        if "kompany-pro" in url:
+            return SimpleNamespace(status_code=404, headers={}, content=b"", text="")
+        return gh(url, **kw)
+    run, calls = fake_run_factory("0.1.6")
+    monkeypatch.setattr(feed.shutil, "which", lambda name: None)
+    st = pipeline.apply_update(engine, fetch=fetch, run=run, restart=lambda: None)
+    assert st["phase"] == "restarting", st
+    steps = [x["step"] for x in st["steps"]]
+    assert "pro_feed_unavailable" in steps and "pro_carried_over" in steps
+    assert any("github_release_token" in x["detail"] for x in st["steps"] if x["step"] == "pro_feed_unavailable")
+    new_sp = data / "releases/0.1.6/venv/lib/python3.12/site-packages"
+    assert (new_sp / "kompany_pro/__init__.py").read_text() == "x = 1\n" and (new_sp / "kompany_pro-0.1.4.dist-info/entry_points.txt").is_file()
+    assert not any("kompany_pro" in " ".join(c) for c in calls if "pip" in c)  # pip installed Core only
+    assert install.carry_over_package(data / "releases/0.1.5", data / "releases/0.1.6", dist_name="nothing") is None

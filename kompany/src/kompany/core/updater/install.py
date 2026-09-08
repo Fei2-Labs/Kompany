@@ -96,6 +96,43 @@ def installed_version(release_dir: Path, package: str = "kompany", *, run: Calla
     return (getattr(proc, "stdout", "") or "").strip() or None if getattr(proc, "returncode", 1) == 0 else None
 
 
+def site_packages(release_dir: Path) -> Path | None:
+    """The venv's site-packages (``lib/pythonX.Y/site-packages``), if present."""
+    hits = sorted((release_dir / "venv" / "lib").glob("python*/site-packages")) if (release_dir / "venv" / "lib").is_dir() else []
+    return hits[0] if hits else None
+
+
+def carry_over_package(src_release: Path, dst_release: Path, dist_name: str = "kompany_pro") -> str | None:
+    """Copy a pure-Python distribution (package dir + dist-info) from the
+    current release venv into the new one — used when the Pro release feed
+    is unreachable (private repo, no token) so a Core update never strands
+    the installed Pro. Same interpreter series required. Returns the carried
+    version, or None when the source has no such distribution."""
+    import shutil
+
+    src_sp = site_packages(src_release)
+    if src_sp is None:
+        return None
+    infos = sorted(src_sp.glob(f"{dist_name}-*.dist-info"))
+    if not infos:
+        return None
+    info = infos[-1]
+    version = info.name[len(dist_name) + 1:-len(".dist-info")]
+    dst_sp = dst_release / "venv" / "lib" / src_sp.parent.name / "site-packages"
+    dst_sp.mkdir(parents=True, exist_ok=True)
+    tops = [t for t in (info / "top_level.txt").read_text().split() if t] if (info / "top_level.txt").is_file() else [dist_name]
+    for top in tops:
+        src_pkg = src_sp / top
+        if src_pkg.is_dir():
+            if (dst_sp / top).exists():
+                shutil.rmtree(dst_sp / top)
+            shutil.copytree(src_pkg, dst_sp / top, ignore=shutil.ignore_patterns("__pycache__"))
+    if (dst_sp / info.name).exists():
+        shutil.rmtree(dst_sp / info.name)
+    shutil.copytree(info, dst_sp / info.name)
+    return version
+
+
 def switch_current(data_dir: Path | str, version: str) -> str | None:
     """Atomically point ``current`` at ``version``; returns the previous target name."""
     rd = releases_dir(data_dir)
@@ -123,5 +160,5 @@ def supervised() -> str | None:
     return None
 
 
-__all__ = ["create_venv", "current_link", "installed_version", "layout", "pip_install", "releases_dir",
-           "supervised", "switch_current", "venv_python"]
+__all__ = ["carry_over_package", "create_venv", "current_link", "installed_version", "layout", "pip_install", "releases_dir",
+           "site_packages", "supervised", "switch_current", "venv_python"]
