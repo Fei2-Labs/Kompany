@@ -4,6 +4,11 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-09-10
+
+### Added
+- **Studio stage 2 — NEEDS YOU.** `/#/needs-you` is a real pane and the Studio right rail carries the same cards: three kinds only — money (spend approvals), connect (a blocked task naming an unconnected integration, one click to Settings), decision (every other gate, plus blocked-task escalations handed to the CEO through the shared channel). Approve / reject / revise / snooze / comment reuse the board's `ApprovalActions` (same endpoints and payloads). Delivered tasks waiting for a human are never listed — founder labor is not a founder job.
+
 ## [0.1.13] - 2026-09-10
 
 ### Added

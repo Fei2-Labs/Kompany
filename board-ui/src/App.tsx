@@ -13,6 +13,7 @@ import { Runtimes } from './panes/Runtimes';
 import { Live } from './panes/Live';
 import { Settings } from './panes/Settings';
 import { TalkToCeo } from './channel/TalkToCeo';
+import { NeedsYou } from './panes/NeedsYou';
 import { CommandBar } from './channel/CommandBar';
 import { ActivityTimeline } from './timeline/ActivityTimeline';
 import { useChannel } from './channel/useChannel';
@@ -47,16 +48,13 @@ export function App() {
       <Sidebar onOpenPalette={openPalette} />
       <main className="content">
         <Routes>
-          <Route path="/" element={<Studio />} />
+          <Route path="/" element={<Studio channel={channel} />} />
           <Route path="/board" element={<Board />} />
           <Route
             path="/talk"
             element={<TalkToCeo channel={channel} focusSignal={ceoFocus} />}
           />
-          <Route
-            path="/needs-you"
-            element={<Placeholder title="Needs You" hint="Act on approvals + blocked tasks from the Board's Needs-You column." />}
-          />
+          <Route path="/needs-you" element={<NeedsYou channel={channel} />} />
           <Route path="/activity" element={<ActivityTimeline variant="pane" />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/autopilot" element={<Autopilot />} />

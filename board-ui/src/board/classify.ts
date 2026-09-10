@@ -14,7 +14,7 @@ import type {
 /** Needs-You sub-badge for an approval card. */
 export type ActionBadge = 'money' | 'ship-gate' | 'decision';
 
-const MONEY_ACTIONS: ReadonlySet<string> = new Set([
+export const MONEY_ACTIONS: ReadonlySet<string> = new Set([
   'envelope_topup',
   'budget_increase',
   'tool_action',
