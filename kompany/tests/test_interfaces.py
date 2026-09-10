@@ -1162,7 +1162,7 @@ def test_api_dashboard_login_sets_httponly_session_cookie(monkeypatch):
     set_cookie = response.headers["set-cookie"]
     assert "HttpOnly" in set_cookie
     assert "SameSite=lax" in set_cookie
-    assert "Max-Age=43200" in set_cookie
+    assert "Max-Age=2592000" in set_cookie  # 30 days
     assert "dashboard-secret" not in set_cookie
 
 

@@ -4,6 +4,14 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-10
+
+### Added
+- **Desktop remote mode signs in by itself.** Settings → Desktop Connection now stores the remote engine's dashboard token (`~/.kompany/remote_token`, 0600). At launch the shell opens `GET /dashboard/session?token=…&next=…`, which sets the login cookie and redirects without the token, so the login form never appears.
+
+### Changed
+- Login cookie lifetime default raised from 12 hours to 30 days (`DASHBOARD_SESSION_TTL_SECONDS`).
+
 ## [0.1.12] - 2026-09-10
 
 ### Fixed
