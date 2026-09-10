@@ -13,6 +13,7 @@ interface DesktopConnection {
   mode: string;
   remote_url: string;
   from_env: boolean;
+  has_token: boolean;
 }
 
 // Type for Tauri's invoke function — loaded dynamically since it only
@@ -41,6 +42,7 @@ export function DesktopConnectionCard() {
   const conn = useAsync<DesktopConnection>(connectionLoader);
 
   const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [resultOk, setResultOk] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -61,9 +63,16 @@ export function DesktopConnectionCard() {
     setResult(null);
     setSubmitting(true);
     try {
-      const r = (await invoke('set_remote_url', { url: url.trim() })) as DesktopConnection;
-      setResult(`✓ Saved — remote mode will activate on next launch: ${r.remote_url}`);
+      const r = (await invoke('set_remote_url', {
+        url: url.trim(),
+        token: token.trim() || null,
+      })) as DesktopConnection;
+      setResult(
+        `✓ Saved — remote mode will activate on next launch: ${r.remote_url}` +
+          (r.has_token ? ' (auto sign-in on)' : ' (login form will ask for the token)'),
+      );
       setResultOk(true);
+      setToken('');
       conn.reload();
     } catch (err) {
       setResult(err instanceof Error ? err.message : 'save failed');
@@ -71,7 +80,7 @@ export function DesktopConnectionCard() {
     } finally {
       setSubmitting(false);
     }
-  }, [url, invoke, conn]);
+  }, [url, token, invoke, conn]);
 
   const onClear = useCallback(async () => {
     if (!invoke) return;
@@ -137,6 +146,26 @@ export function DesktopConnectionCard() {
           disabled={data?.from_env}
         />
       </label>
+
+      <label className="settings__field">
+        <span className="settings__label">
+          Dashboard token {data?.has_token ? '(stored — leave blank to keep)' : ''}
+        </span>
+        <input
+          className="settings__input"
+          type="password"
+          value={token}
+          placeholder={data?.has_token ? '••••••••' : 'WEB_DASHBOARD_TOKEN of the remote engine'}
+          onChange={(e) => setToken(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={data?.from_env}
+        />
+      </label>
+      <p className="settings__hint">
+        Stored on this Mac only (mode 0600). At launch the app signs in with it, so the login
+        form never appears. Without it the remote engine asks for the token once per 30 days.
+      </p>
 
       <div className="settings__actions">
         <button

@@ -62,3 +62,18 @@ def test_guard_carries_next_and_login_honours_it(client):
     # the login page escapes what it echoes
     page = c.get('/dashboard/login?next=/x"><script>')
     assert "<script>" not in page.text.split('name="next"')[1][:80]
+
+
+def test_session_exchange_sets_cookie_without_the_form(client):
+    """The desktop shell in remote mode logs in with one GET; the token never survives the redirect."""
+    c, e = client
+    r = c.get("/dashboard/session?token=t0ken-for-tests&next=/%23/talk")
+    assert r.status_code == 303 and r.headers["location"] == "/#/talk"
+    cookie = r.headers["set-cookie"]
+    assert "kompany_dashboard_session=" in cookie and "t0ken-for-tests" not in cookie
+    assert f"Max-Age={30 * 24 * 60 * 60}" in cookie
+    c.cookies.set("kompany_dashboard_session", r.cookies["kompany_dashboard_session"])
+    assert c.get("/preferences").status_code == 200
+    # wrong or missing token: back to the form, no cookie
+    r = c.get("/dashboard/session?token=nope&next=/x")
+    assert r.status_code == 303 and r.headers["location"] == "/dashboard/login?next=/x" and "set-cookie" not in r.headers

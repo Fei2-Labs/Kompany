@@ -65,6 +65,35 @@ struct DesktopConnection {
     remote_url: String,
     /// Whether the URL came from env var (one-shot, can't be cleared from UI)
     from_env: bool,
+    /// Whether a dashboard token is stored for the remote engine. The token
+    /// itself never leaves the shell.
+    has_token: bool,
+}
+
+/// `<data_dir>/remote_token` — the remote engine's WEB_DASHBOARD_TOKEN,
+/// typed once in Settings → Desktop Connection. Mode 0600. At launch the
+/// shell exchanges it for the login cookie via `/dashboard/session`, so
+/// the founder never sees the login form again on this device.
+fn remote_token_path() -> std::path::PathBuf {
+    kompany_data_dir().join("remote_token")
+}
+
+fn read_remote_token() -> Option<String> {
+    std::fs::read_to_string(remote_token_path())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn write_remote_token(token: &str) -> Result<(), String> {
+    let path = remote_token_path();
+    std::fs::write(&path, token).map_err(|e| format!("write remote_token: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
 /// `get_desktop_connection` — read current connection mode + URL.
@@ -83,13 +112,21 @@ fn get_desktop_connection() -> DesktopConnection {
         (None, Some(f)) => ("remote".into(), f, false),
         (None, None) => ("local".into(), String::new(), false),
     };
-    DesktopConnection { mode, remote_url: url, from_env }
+    DesktopConnection {
+        mode,
+        remote_url: url,
+        from_env,
+        has_token: read_remote_token().is_some(),
+    }
 }
 
 /// `set_remote_url` — persist a remote URL to ~/.kompany/remote_url.
 /// Returns the new connection state. The change takes effect on next app launch.
+/// `token`: the remote engine's dashboard token. Empty string keeps the
+/// stored token; `None`/empty with no stored token means the login form
+/// will ask at launch.
 #[tauri::command]
-fn set_remote_url(url: String) -> Result<DesktopConnection, String> {
+fn set_remote_url(url: String, token: Option<String>) -> Result<DesktopConnection, String> {
     let url = url.trim().trim_end_matches('/').to_string();
     if url.is_empty() {
         return Err("URL is required".into());
@@ -98,10 +135,14 @@ fn set_remote_url(url: String) -> Result<DesktopConnection, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("create data dir: {e}"))?;
     std::fs::write(dir.join("remote_url"), &url)
         .map_err(|e| format!("write remote_url: {e}"))?;
+    if let Some(t) = token.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        write_remote_token(&t)?;
+    }
     Ok(DesktopConnection {
         mode: "remote".into(),
         remote_url: url,
         from_env: false,
+        has_token: read_remote_token().is_some(),
     })
 }
 
@@ -112,10 +153,15 @@ fn clear_remote_url() -> Result<DesktopConnection, String> {
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| format!("remove remote_url: {e}"))?;
     }
+    let token_path = remote_token_path();
+    if token_path.exists() {
+        std::fs::remove_file(&token_path).map_err(|e| format!("remove remote_token: {e}"))?;
+    }
     Ok(DesktopConnection {
         mode: "local".into(),
         remote_url: String::new(),
         from_env: false,
+        has_token: false,
     })
 }
 
@@ -288,14 +334,18 @@ fn probe_root(base_url: &str) -> ProbeResult {
 /// (`GET /start` → `{"path": "/#/talk", ...}`). `None` on any failure so the
 /// caller can fall back to probing `/`. Only same-origin relative paths are
 /// accepted — the engine must never be able to redirect the shell elsewhere.
-fn fetch_start_path(base_url: &str) -> Option<String> {
+fn fetch_start_path(base_url: &str, token: Option<&str>) -> Option<String> {
     let url = format!("{}/start", base_url.trim_end_matches('/'));
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .ok()?;
-    let resp = client.get(&url).send().ok()?;
+    let mut req = client.get(&url);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    let resp = req.send().ok()?;
     if resp.status().as_u16() != 200 {
         return None;
     }
@@ -320,7 +370,7 @@ fn fetch_start_path(base_url: &str) -> Option<String> {
 /// in attach/remote mode that state is empty, so an attached foreign
 /// server (e.g. the launchd daemon, or a remote VPS) is never touched
 /// on app exit.
-fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
+fn open_main_window(handle: &AppHandle, base_url: &str, token: Option<&str>) -> Result<(), String> {
     // Open the operations board at the site root. FastAPI serves the React
     // board at `/` and gracefully redirects to `/ui/` (cyberpunk terminal)
     // when the board hasn't been built yet, so this is safe pre-build.
@@ -336,7 +386,7 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
     // screen; the engine resolves it to a path and already degrades board
     // panes to /ui/ when the board bundle is absent. Only when /start is
     // unreachable do we fall back to the old probe.
-    let path: String = match fetch_start_path(base) {
+    let path: String = match fetch_start_path(base, token) {
         Some(p) => p,
         None => match probe_root(base) {
             ProbeResult::Board => "/".to_string(),
@@ -344,7 +394,18 @@ fn open_main_window(handle: &AppHandle, base_url: &str) -> Result<(), String> {
             ProbeResult::Unreachable => "/".to_string(),
         },
     };
-    let url = format!("{}{}", base, path);
+    // Remote mode with a stored token: one GET exchanges the token for the
+    // login cookie and lands on `path`. The token is in the URL for that
+    // single hop only; the engine strips it on redirect.
+    let url = match token {
+        Some(t) => format!(
+            "{}/dashboard/session?token={}&next={}",
+            base,
+            urlencoding::encode(t),
+            urlencoding::encode(&path)
+        ),
+        None => format!("{}{}", base, path),
+    };
     let webview_url =
         WebviewUrl::External(url.parse().map_err(|e| format!("invalid url: {}", e))?);
 
@@ -501,7 +562,8 @@ fn main() {
                     )
                     .into());
                 }
-                open_main_window(&handle, &base)?;
+                let token = read_remote_token();
+                open_main_window(&handle, &base, token.as_deref())?;
                 return Ok(());
             }
 
@@ -516,7 +578,7 @@ fn main() {
                     "kompany: attaching to existing server on port {} (pid {}), not spawning a sidecar",
                     port, pid
                 );
-                open_main_window(&handle, &base)?;
+                open_main_window(&handle, &base, None)?;
                 return Ok(());
             }
 
@@ -551,7 +613,7 @@ fn main() {
             }
 
             let final_base = format!("http://127.0.0.1:{}", port);
-            open_main_window(&handle, &final_base)?;
+            open_main_window(&handle, &final_base, None)?;
             Ok(())
         })
         .build(tauri::generate_context!())

@@ -35,8 +35,10 @@ class KompanySettings(BaseSettings):
     # when unset so founders with mobile remote configured need no extra step.
     intake_token: str = Field(default="", alias="INTAKE_TOKEN")
     web_dashboard_token: str = Field(default="", alias="WEB_DASHBOARD_TOKEN")
+    # Login cookie lifetime. 30 days: the founder types the token once per
+    # device, not every morning. Override with DASHBOARD_SESSION_TTL_SECONDS.
     dashboard_session_ttl_seconds: int = Field(
-        default=12 * 60 * 60,
+        default=30 * 24 * 60 * 60,
         alias="DASHBOARD_SESSION_TTL_SECONDS",
     )
     vault_key: str = Field(default="", alias="KOMPANY_VAULT_KEY")

@@ -109,7 +109,34 @@ def dashboard_login_submit(
         raise HTTPException(status_code=401, detail="invalid dashboard token")
 
     response = RedirectResponse(after_login_path(engine, next), status_code=303)
-    ttl = getattr(engine.settings, "dashboard_session_ttl_seconds", 12 * 60 * 60)
+    _set_session_cookie(response, request, engine, expected)
+    return response
+
+
+@router.get("/dashboard/session")
+def dashboard_session(request: Request, token: str = "", next: str | None = None) -> RedirectResponse:
+    """Exchange a dashboard token for the login cookie in one GET.
+
+    The desktop shell in remote mode opens this URL at launch with the token it
+    stored in Settings → Desktop Connection, so the founder never sees the
+    login form. The token lives in the URL for exactly one hop; the redirect
+    target never carries it.
+    """
+    engine = get_engine()
+    expected = getattr(engine.settings, "web_dashboard_token", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="web dashboard auth is not configured")
+    if not token or not compare_digest(token, expected):
+        return RedirectResponse(
+            "/dashboard/login" + (f"?next={_safe_next(next)}" if _safe_next(next) else ""), status_code=303
+        )
+    response = RedirectResponse(after_login_path(engine, next), status_code=303)
+    _set_session_cookie(response, request, engine, expected)
+    return response
+
+
+def _set_session_cookie(response: RedirectResponse, request: Request, engine: Any, expected: str) -> None:
+    ttl = getattr(engine.settings, "dashboard_session_ttl_seconds", 30 * 24 * 60 * 60)
     response.set_cookie(
         "kompany_dashboard_session",
         _dashboard_session_value(expected),
@@ -118,7 +145,6 @@ def dashboard_login_submit(
         samesite="lax",
         max_age=ttl,
     )
-    return response
 
 
 @router.get("/dashboard/logout")
@@ -195,7 +221,7 @@ def _dashboard_auth_error(
         return None
     if request is not None:
         session = request.cookies.get("kompany_dashboard_session", "")
-        ttl = getattr(settings, "dashboard_session_ttl_seconds", 12 * 60 * 60)
+        ttl = getattr(settings, "dashboard_session_ttl_seconds", 30 * 24 * 60 * 60)
         if session and _dashboard_session_valid(expected, session, ttl):
             return None
     return HTTPException(status_code=401, detail="invalid dashboard token")
