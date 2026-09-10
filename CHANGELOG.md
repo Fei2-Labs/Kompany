@@ -4,6 +4,13 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-09-10
+
+Ships Studio stage 1 (see Unreleased → Added: Studio) and:
+
+### Fixed
+- **Thread-safe query results.** `Database.execute` now fetches rows inside the connection lock and returns a cursor-compatible `Result`; a caller's `fetchone()` after the lock was released could race another thread's statement (`InterfaceError: bad parameter or other API misuse` — the CI flake and the wedged remote settings page).
+
 ## [0.1.10] - 2026-09-08
 
 ### Fixed

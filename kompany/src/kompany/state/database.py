@@ -6,12 +6,49 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .database_parts.schema import _SCHEMA, _RUN_ID_TABLES
 from .database_parts.migrations import run_migrations
 
 __all__ = ["Database", "_SCHEMA", "_RUN_ID_TABLES"]
+
+
+class Result:
+    """Rows fetched eagerly under the connection lock; cursor-compatible surface."""
+
+    __slots__ = ("_rows", "_pos", "rowcount", "lastrowid", "description")
+
+    def __init__(self, rows: list[sqlite3.Row], rowcount: int, lastrowid: int | None, description: Any) -> None:
+        self._rows = rows
+        self._pos = 0
+        self.rowcount = rowcount
+        self.lastrowid = lastrowid
+        self.description = description
+
+    def fetchone(self) -> sqlite3.Row | None:
+        if self._pos >= len(self._rows):
+            return None
+        row = self._rows[self._pos]
+        self._pos += 1
+        return row
+
+    def fetchall(self) -> list[sqlite3.Row]:
+        rest = self._rows[self._pos:]
+        self._pos = len(self._rows)
+        return rest
+
+    def fetchmany(self, size: int = 1) -> list[sqlite3.Row]:
+        chunk = self._rows[self._pos:self._pos + max(0, size)]
+        self._pos += len(chunk)
+        return chunk
+
+    def __iter__(self) -> Iterator[sqlite3.Row]:
+        while self._pos < len(self._rows):
+            yield self.fetchone()  # type: ignore[misc]
+
+    def close(self) -> None:
+        self._pos = len(self._rows)
 
 
 class Database:
@@ -64,9 +101,22 @@ class Database:
         run_migrations(self.conn)
         self.conn.commit()
 
-    def execute(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
+    def execute(self, sql: str, params: tuple = ()) -> "Result":
+        """Run one statement and return its rows *materialized under the lock*.
+
+        A raw ``sqlite3.Cursor`` shares the connection's step state, so a
+        caller doing ``.fetchone()`` after the lock was released raced with
+        every other thread's ``execute`` (``InterfaceError: bad parameter or
+        other API misuse``, seen as a CI flake and as a wedged remote
+        settings page). :class:`Result` keeps the cursor API callers use —
+        ``fetchone`` / ``fetchall`` / iteration / ``rowcount`` /
+        ``lastrowid`` / ``description`` — but all SQLite work happens here,
+        inside the lock.
+        """
         with self._lock:
-            return self.conn.execute(sql, params)
+            cur = self.conn.execute(sql, params)
+            rows = cur.fetchall() if cur.description is not None else []
+            return Result(rows, cur.rowcount, cur.lastrowid, cur.description)
 
     @contextmanager
     def locked(self) -> Iterator[None]:
