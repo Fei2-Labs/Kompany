@@ -292,6 +292,12 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
             ttl_seconds=arguments.get("ttl_seconds"),
         )
 
+    if name == "kompany_activity_recent":
+        try:
+            return engine.activity_recent(str(arguments["role"]), int(arguments.get("limit") or 200))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_observability":
         return engine.observability_snapshot()
 

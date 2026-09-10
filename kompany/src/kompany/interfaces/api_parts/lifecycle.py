@@ -187,6 +187,7 @@ class UIPreferencesResponse(BaseModel):
     auto_enabled: bool
     reduce_motion: str  # "auto" | "on" | "off"
     start_page: str = "board"  # see state.ui_preferences.START_PAGE_PATHS
+    skin: str = "indigo"  # Studio skin, see state.ui_preferences.SKINS
 
 
 class UIPreferencesUpdateRequest(BaseModel):
@@ -198,6 +199,7 @@ class UIPreferencesUpdateRequest(BaseModel):
     auto_enabled: bool | None = None
     reduce_motion: str | None = None
     start_page: str | None = None
+    skin: str | None = None
 
 
 @router.get("/preferences", response_model=UIPreferencesResponse)
@@ -216,6 +218,7 @@ def patch_preferences(req: UIPreferencesUpdateRequest) -> UIPreferencesResponse:
             auto_enabled=req.auto_enabled,
             reduce_motion=req.reduce_motion,
             start_page=req.start_page,
+            skin=req.skin,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

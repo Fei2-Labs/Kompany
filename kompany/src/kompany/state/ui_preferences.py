@@ -30,6 +30,11 @@ ReduceMotion = Literal["auto", "on", "off"]
 # start_page). Paths are what the Tauri WebView loads; the board is a
 # HashRouter SPA so its panes live under ``/#/``.
 StartPage = Literal["board", "terminal", "talk", "needs-you", "live", "activity", "projects"]
+# Studio skin (09-08-studio-ui). Token sets measured from real products
+# (Mozaika); default Indigo Night by founder decision 2026-09-10. Separate
+# from the terminal's ``theme_id`` so each surface keeps its own look.
+Skin = Literal["indigo", "cyberpunk", "signal", "paper", "blueprint"]
+SKINS: tuple[str, ...] = ("indigo", "cyberpunk", "signal", "paper", "blueprint")
 START_PAGE_PATHS: dict[str, str] = {
     "board": "/",
     "terminal": "/ui/",
@@ -66,6 +71,7 @@ class UIPreferences(BaseModel):
     auto_enabled: bool = False
     reduce_motion: ReduceMotion = "auto"
     start_page: StartPage = "board"
+    skin: Skin = "indigo"
 
 
 def _read_config(db: Database, key: str) -> str | None:
@@ -105,6 +111,7 @@ def set_preferences(
     auto_enabled: bool | None = None,
     reduce_motion: str | None = None,
     start_page: str | None = None,
+    skin: str | None = None,
 ) -> UIPreferences:
     """Patch the given fields (others untouched) and persist. Returns the result.
 
@@ -129,6 +136,10 @@ def set_preferences(
                 f"start_page must be one of {sorted(START_PAGE_PATHS)}; got {start_page!r}"
             )
         prefs.start_page = start_page
+    if skin is not None:
+        if skin not in SKINS:
+            raise ValueError(f"skin must be one of {list(SKINS)}; got {skin!r}")
+        prefs.skin = skin
     # Re-validate the whole model (catches a bad theme_id length, etc.).
     prefs = UIPreferences.model_validate(prefs.model_dump())
     _write_config(db, _KEY, prefs.model_dump_json())
@@ -146,6 +157,6 @@ def start_path(prefs: UIPreferences, *, board_available: bool) -> str:
 
 
 __all__ = [
-    "START_PAGE_LABELS", "START_PAGE_PATHS", "StartPage", "UIPreferences", "ReduceMotion",
+    "SKINS", "START_PAGE_LABELS", "START_PAGE_PATHS", "Skin", "StartPage", "UIPreferences", "ReduceMotion",
     "get_preferences", "set_preferences", "start_path",
 ]

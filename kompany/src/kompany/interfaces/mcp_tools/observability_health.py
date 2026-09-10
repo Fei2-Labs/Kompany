@@ -219,4 +219,10 @@ TOOLS: list[Tool] = [
             "required": ["agent_role"],
         },
     ),
+    Tool(
+        name="kompany_activity_recent",
+        description="Recent activity stream for one agent role (audit + AI spend lines, oldest first) — what Studio shows when you click an agent.",
+        inputSchema={"type": "object", "properties": {"role": {"type": "string"}, "limit": {"type": "integer", "default": 200}},
+                     "required": ["role"]},
+    ),
 ]

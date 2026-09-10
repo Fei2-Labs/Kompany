@@ -300,3 +300,23 @@ def doctor(
     if s["status"] != "ok" and not console.is_terminal:
         console.print(render_tree(report))
     raise typer.Exit(1 if s["fail"] else 0)
+
+
+@app.command("activity")
+def activity(
+    role: str = typer.Argument(..., help="Agent role, e.g. cmo"),
+    limit: int = typer.Option(60, "--limit"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Recent activity of one agent (what Studio shows when you click it)."""
+    out = _get_engine(config).activity_recent(role, limit)
+    if as_json:
+        _emit_json(out)
+        return
+    st = out.get("status") or {}
+    console.print(f"[bold]{out['role']}[/bold] — {st.get('status', 'unknown')}"
+                  + (f" · {st.get('current_task')}" if st.get("current_task") else ""))
+    for ln in out["lines"]:
+        console.print(f"[dim]{str(ln['ts'])[11:19]}[/dim] {ln['kind']:<8} {ln['text']}"
+                      + (f" [dim]— {ln['detail']}[/dim]" if ln.get("detail") else ""))

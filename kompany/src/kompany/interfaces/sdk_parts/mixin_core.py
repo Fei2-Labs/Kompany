@@ -209,6 +209,10 @@ class KompanyCoreOps:
         """Execute an approved decision-chain packet under governance."""
         return self._engine.execute_decision_packet(approval_id)
 
+    def activity_recent(self, role: str, limit: int = 200) -> dict[str, Any]:
+        """Recent stream lines for one agent role (Studio backfill)."""
+        return self._engine.activity_recent(role, limit)
+
     def release_delivery(self, approval_id: str) -> dict[str, Any]:
         """Release a delivery package after delivery_approval is approved."""
         return self._engine.release_delivery(approval_id)

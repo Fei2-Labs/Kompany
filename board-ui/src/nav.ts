@@ -22,6 +22,7 @@ export interface NavGroup {
 
 // Top, ungrouped items (above the first group).
 export const TOP_ITEMS: NavItem[] = [
+  { path: '/', label: 'Studio', glyph: '◈' },
   { path: '/talk', label: 'kompany>', glyph: '›' },
   { path: '/needs-you', label: 'Needs You', glyph: '!' },
 ];
@@ -46,7 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Workspace',
     items: [
-      { path: '/', label: 'Board', glyph: '▦' },
+      { path: '/board', label: 'Board', glyph: '▦' },
       { path: '/activity', label: 'Activity', glyph: '≣' },
       { path: '/projects', label: 'Projects', glyph: '◧' },
       { path: '/autopilot', label: 'Autopilot', glyph: '◆' },

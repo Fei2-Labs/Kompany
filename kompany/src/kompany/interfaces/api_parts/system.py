@@ -15,7 +15,7 @@ from pathlib import Path  # noqa: F401
 from secrets import compare_digest  # noqa: F401
 from typing import Any, AsyncIterator  # noqa: F401
 
-from fastapi import (  # noqa: F401
+from fastapi import (  # noqa: F401, HTTPException
     APIRouter,
     BackgroundTasks,
     Body,
@@ -269,6 +269,18 @@ def agents_work_summary() -> dict[str, dict[str, Any]]:
     Keyed by lowercase role; lets the UI distinguish "worked but no
     episode closed yet" from "never worked"."""
     return get_engine().agent_work_summary()
+
+
+@router.get("/activity/{role}")
+def activity_recent(role: str, limit: int = 200) -> dict[str, Any]:
+    """Recent stream lines for one role (audit + AI spend), oldest → newest.
+
+    Studio's session pane backfills from this on open, then follows SSE.
+    """
+    try:
+        return get_engine().activity_recent(role, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/agents/status")

@@ -34,14 +34,16 @@ class GovernanceMixin:
         auto_enabled: bool | None = None,
         reduce_motion: str | None = None,
         start_page: str | None = None,
+        skin: str | None = None,
     ) -> UIPreferences:
-        """Patch UI preferences; ``ValueError`` on a bad ``reduce_motion`` / ``start_page``."""
+        """Patch UI preferences; ``ValueError`` on a bad ``reduce_motion`` / ``start_page`` / ``skin``."""
         prefs = set_ui_preferences(
             self.db,
             theme_id=theme_id,
             auto_enabled=auto_enabled,
             reduce_motion=reduce_motion,
             start_page=start_page,
+            skin=skin,
         )
         self.audit.record(
             event_type="preferences.updated",

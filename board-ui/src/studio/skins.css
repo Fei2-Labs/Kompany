@@ -1,0 +1,72 @@
+/* Studio skins (09-08-studio-ui). Five token sets measured from real products
+   via Mozaika (Linear / Raycast / Stripe / Vercel) plus Kompany's own
+   cyberpunk. Applied as `data-skin` on <html>; every shell token is overridden
+   so the whole app (not only Studio) follows the founder's choice. */
+
+:root, :root[data-skin='indigo'] {
+  --bg: #08090a; --bg-rail: #0f1011; --bg-elev: #141516; --bg-2: #1c1c1f;
+  --border: #23252a; --border-strong: #34343a;
+  --text: #f7f8f8; --text-dim: #d0d6e0; --text-faint: #8a8f98; --text-ghost: #62666d;
+  --accent: #7170ff; --accent-hover: #828fff; --on-accent: #ffffff;
+  --ok: #27a644; --warn: #f0bf00; --danger: #eb5757; --info: #4ea7fc; --orange: #fc7840;
+  --radius: 6px; --radius-btn: 9999px;
+  --bg-term: #0b0b0c; --text-term: #d0d6e0;
+  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Berkeley Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --motion: 160ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  color-scheme: dark;
+}
+
+:root[data-skin='cyberpunk'] {
+  --bg: #050805; --bg-rail: #071007; --bg-elev: #0c1a0c; --bg-2: #0f220f;
+  --border: #123a12; --border-strong: #1f6b1f;
+  --text: #b8ffb8; --text-dim: #8fe08f; --text-faint: #5fbf5f; --text-ghost: #3a7a3a;
+  --accent: #39ff14; --accent-hover: #7dff5e; --on-accent: #031003;
+  --ok: #39ff14; --warn: #ffd400; --danger: #ff4d4d; --info: #38d9ff; --orange: #ff9a3c;
+  --radius: 2px; --radius-btn: 2px;
+  --bg-term: #020402; --text-term: #8fe08f;
+  --font: ui-monospace, 'SF Mono', Menlo, monospace;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: dark;
+}
+
+:root[data-skin='signal'] {
+  --bg: #07080a; --bg-rail: #0e0f12; --bg-elev: #15161a; --bg-2: #1b1c21;
+  --border: #1f2026; --border-strong: #2b2c33;
+  --text: #ececee; --text-dim: #c8c9cf; --text-faint: #8c8e98; --text-ghost: #5f616b;
+  --accent: #ff6363; --accent-hover: #ff7f7f; --on-accent: #1a0a0a;
+  --ok: #59d499; --warn: #ff9217; --danger: #ff6363; --info: #7aa7ff; --orange: #ff9217;
+  --radius: 11px; --radius-btn: 8px;
+  --bg-term: #0a0b0e; --text-term: #c8c9cf;
+  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: dark;
+}
+
+:root[data-skin='paper'] {
+  --bg: #ffffff; --bg-rail: #f8fafd; --bg-elev: #f8fafd; --bg-2: #eef2f8;
+  --border: #d4dee9; --border-strong: #b9c5d6;
+  --text: #061b31; --text-dim: #273951; --text-faint: #50617a; --text-ghost: #7d8ba4;
+  --accent: #533afd; --accent-hover: #4032c8; --on-accent: #ffffff;
+  --ok: #00b261; --warn: #f9b900; --danger: #d8351e; --info: #0072f5; --orange: #ff6118;
+  --radius: 4px; --radius-btn: 4px;
+  --bg-term: #0d253d; --text-term: #c0cee6;
+  --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
+}
+
+:root[data-skin='blueprint'] {
+  --bg: #fafafa; --bg-rail: #ffffff; --bg-elev: #ffffff; --bg-2: #f0f0f0;
+  --border: #e5e5e5; --border-strong: #cfcfcf;
+  --text: #171717; --text-dim: #333333; --text-faint: #666666; --text-ghost: #999999;
+  --accent: #171717; --accent-hover: #000000; --on-accent: #ffffff;
+  --ok: #0a9d58; --warn: #c98a00; --danger: #e5484d; --info: #0072f5; --orange: #e5484d;
+  --radius: 6px; --radius-btn: 9999px;
+  --bg-term: #111111; --text-term: #e5e5e5;
+  --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  color-scheme: light;
+}
+
+body { font-family: var(--font); }
