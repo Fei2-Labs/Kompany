@@ -97,3 +97,11 @@ def test_four_surfaces_share_payload(monkeypatch):
     assert '"summary"' in res.output
     res2 = CliRunner().invoke(cli_app, ["doctor"])
     assert "Kompany doctor" in res2.output and "Backups" in res2.output
+
+
+def test_gate_failures_ignore_company_state_nodes():
+    from kompany.core.doctor import gate_failures
+    rep = node("kompany", "K", "ok", children=[
+        node("llm", "L", "fail"), node("health_events", "H", "fail", children=[node("health.runway_alert", "r", "fail")]),
+        node("souls", "S", "fail"), node("build", "B", "ok")])
+    assert gate_failures(rep) == ["souls"]

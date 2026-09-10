@@ -241,11 +241,18 @@ def test_verify_after_restart_done_and_rollback(engine, monkeypatch):
     out = pipeline.verify_after_restart(engine, restart=lambda: restarted.append(True))
     assert out["phase"] == "rolled_back" and "ledger" in out["error"] and restarted == [True]
     assert (Path(engine.settings.data_dir) / "releases" / "current").resolve().name == "0.1.5"
-    # after the rollback restart: still failing → failed, no second rollback
+    # the rollback is terminal: the boot on the previous release does not re-verify
     monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.5", None))
-    st = load_state(engine.settings.data_dir); st.target_version = "0.1.5"; save_state(engine.settings.data_dir, st)
+    assert pipeline.verify_after_restart(engine) is None
+    assert load_state(engine.settings.data_dir).phase == "rolled_back"
+    # open watchdog alarms are NOT release defects: no rollback on health_events
+    st = load_state(engine.settings.data_dir); st.verify_pending, st.rollback_attempted, st.target_version, st.previous_version, st.phase = True, False, "0.1.5", "0.1.6", "restarting"; save_state(engine.settings.data_dir, st)
+    def alarm_doctor():
+        rep = real(); rep["children"].append({"id": "health_events", "label": "W", "status": "fail", "detail": "3 open", "fix": None,
+                                              "children": [{"id": "health.retry_exhausted", "label": "r", "status": "fail", "detail": "", "fix": None, "children": []}]}); return rep
+    monkeypatch.setattr(engine, "doctor", alarm_doctor)
     out = pipeline.verify_after_restart(engine, restart=lambda: restarted.append(True))
-    assert out["phase"] == "failed" and "still failing after rollback" in out["error"] and restarted == [True]
+    assert out["phase"] == "done" and restarted == [True]
     # version mismatch after restart → explicit hint
     st = load_state(engine.settings.data_dir); st.verify_pending, st.target_version = True, "0.1.6"; save_state(engine.settings.data_dir, st)
     out = pipeline.verify_after_restart(engine)

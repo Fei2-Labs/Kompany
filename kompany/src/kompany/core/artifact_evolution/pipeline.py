@@ -115,8 +115,10 @@ def propose_artifact_evolution(engine: Any, kind: str, target: str, instruction:
     store.update(pid, commit_sha=sha, diff_stat=diff_stat, flags=flags)
 
     # --- 4. doctor gate → auto-revert ---
+    from kompany.core.doctor import gate_failures
+
     report = engine.doctor()
-    failing = [n["id"] for n in _flatten(report) if n["status"] == "fail" and n["id"] not in ("kompany", "llm")]
+    failing = gate_failures(report)
     if failing:
         revert_sha = ws.revert(sha, reason=f"doctor failed: {', '.join(failing)}")
         row = store.update(pid, status="reverted", revert_sha=revert_sha, doctor_status="fail",

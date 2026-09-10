@@ -298,6 +298,18 @@ def run_doctor(engine: Any, *, persist: bool = True) -> dict[str, Any]:
     return root
 
 
+# Nodes that report the COMPANY's state, not the installed code: an open
+# watchdog alarm or a missing LLM key must never fail a release gate or file a
+# second doctor_failed event on top of itself.
+GATE_IGNORED_NODES: frozenset[str] = frozenset({"kompany", "llm", "health_events"})
+
+
+def gate_failures(root: dict[str, Any]) -> list[str]:
+    """Ids of failing nodes that indicate broken code/config (release gate)."""
+    return [n["id"] for n in _flatten(root)
+            if n["status"] == "fail" and n["id"] not in GATE_IGNORED_NODES and not n["id"].startswith("health.")]
+
+
 def persist_report(engine: Any, root: dict[str, Any]) -> None:
     """Write last.json + history.jsonl; keep exactly one open doctor_failed event while failing."""
     import json
@@ -322,7 +334,8 @@ def persist_report(engine: Any, root: dict[str, Any]) -> None:
         if he is None:
             return
         open_ = he.list(status="open", kind=KIND_DOCTOR_FAILED, limit=10)
-        failing = [n for n in _flatten(root)[1:] if n["status"] == "fail" and n["id"] != "llm"]
+        ids = set(gate_failures(root))
+        failing = [n for n in _flatten(root)[1:] if n["id"] in ids]
         if failing and not open_:
             he.record(kind=KIND_DOCTOR_FAILED, detail={
                 "nodes": [{"id": n["id"], "label": n["label"], "detail": n["detail"], "fix": n.get("fix")} for n in failing[:10]],
@@ -362,4 +375,4 @@ def render_tree(root: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["CHECKS", "KIND_DOCTOR_FAILED", "node", "persist_report", "render_tree", "run_doctor"]
+__all__ = ["CHECKS", "GATE_IGNORED_NODES", "KIND_DOCTOR_FAILED", "gate_failures", "node", "persist_report", "render_tree", "run_doctor"]

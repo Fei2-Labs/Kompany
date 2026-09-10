@@ -4,6 +4,11 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-09-10
+
+### Fixed
+- **Update gate ignores watchdog alarms.** The first button press on the production server rolled 0.1.11 back because the doctor's `health_events` node was red from pre-existing open alarms. Release gates (updater verify, artifact evolution, incubation) and the `doctor_failed` event now use `gate_failures()`, which excludes `health_events`/`health.*` and `llm` — company state, not broken code. A rollback is now the terminal outcome of an update (no misleading "still running old version" after the rollback restart). Closes #71.
+
 ## [0.1.11] - 2026-09-10
 
 Ships Studio stage 1 (see Unreleased → Added: Studio) and:
