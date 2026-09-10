@@ -271,10 +271,13 @@ def verify_after_restart(engine: Any, *, restart: Callable[[], None] | None = No
         _set(engine, state, "failed", "verify", state.error)
         engine.audit.record("update.failed", state.error, detail={"target": state.target_version})
         return status(engine, state)
+    from kompany.core.doctor import gate_failures
+
     report = engine.doctor()
-    failing = [n["id"] for n in _flatten(report) if n["status"] == "fail" and n["id"] not in ("kompany", "llm")]
+    failing = gate_failures(report)  # watchdog alarms and a missing LLM key are not release defects
     if failing and state.previous_version and not state.rollback_attempted:
         state.rollback_attempted = True
+        state.verify_pending = False  # the rollback is the terminal outcome of this update
         try:
             install.switch_current(data_dir, state.previous_version)
         except Exception as exc:  # noqa: BLE001

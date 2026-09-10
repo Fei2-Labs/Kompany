@@ -127,8 +127,10 @@ def incubate_plugin(engine: Any, pid: str, target: str, instruction: str) -> dic
         engine.audit.record(f"{ACTION_TYPE}.reverted", f"Plugin incubation {pid} reverted — install refused: {exc}",
                             detail={"proposal_id": pid, "target": ext_id, "commit": sha, "revert": revert_sha})
         return store.update(pid, status="reverted", revert_sha=revert_sha, error=f"extension install refused: {exc}") or {}
+    from kompany.core.doctor import gate_failures
+
     report = engine.doctor()
-    failing = [n["id"] for n in _flatten(report) if n["status"] == "fail" and n["id"] not in ("kompany", "llm")]
+    failing = gate_failures(report)
     if failing:
         revert_sha = ws.revert(sha, reason=f"doctor failed: {', '.join(failing)}")
         engine.extension_remove(ext_id)
