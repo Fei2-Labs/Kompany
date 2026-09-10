@@ -670,6 +670,10 @@ What happens on `propose`: one economy-tier LLM call returns the complete new YA
 
 Child CLIs get a minimal environment — their own auth variables only, no engine keys or vault key, and none of the nested-harness markers (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …) that made a child `claude` behave as a nested session. The spawn timeout is 120 s by default; when it trips, the error carries the child's last output. Raise it with `KOMPANY_CLI_TIMEOUT_SECONDS` only if your calls are legitimately slow. `kompany-mcp` now exits on its own when the Claude Code session that launched it is gone, so bridge processes no longer pile up across sessions.
 
+### Studio — watch the team work
+
+The desktop app opens on **Studio** (`/`): the team on the left (who is working, on what), the selected agent's live session in the middle — every turn, tool call and dollar as it happens, with `↓ follow live` when you scroll up — and what needs you on the right. Click **company** to see everyone's stream interleaved. Opening Studio late is fine: the session pane backfills the last 200 lines from `GET /activity/{role}` (also `kompany activity <role>`, MCP `kompany_activity_recent`, SDK `activity_recent`) and then follows the live feed. Settings → **Appearance** switches the skin (Indigo Night default, Cyberpunk, Signal, Paper Blurple, Blueprint — colours measured from real products); the terminal keeps its own theme. The kanban board moved to `/#/board`.
+
 ### Which page opens at launch
 
 Settings → **Start page** (in the board and in the terminal's Settings page) picks what the desktop app shows once the engine is healthy: Board (default), Terminal (`/ui/`), Talk to the CEO, Needs You, Live, Activity or Projects. It is a UI preference stored in the company database (`start_page` on `GET/PATCH /preferences`); the shell asks `GET /start` at launch and only falls back to probing `/` when the engine cannot answer. Takes effect on the next launch. On an engine without the built board bundle every board page degrades to the terminal.

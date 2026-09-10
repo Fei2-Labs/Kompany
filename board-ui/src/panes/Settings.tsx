@@ -8,6 +8,7 @@
 import { ModelCard } from './settings/ModelCard';
 import { DesktopConnectionCard } from './settings/DesktopConnectionCard';
 import { StartPageCard } from './settings/StartPageCard';
+import { AppearanceCard } from './settings/AppearanceCard';
 import { UpdateCard } from './settings/UpdateCard';
 import { ModelSourceCard } from './settings/ModelSourceCard';
 import { ResendCard } from './settings/ResendCard';
@@ -34,6 +35,7 @@ export function Settings() {
       <div className="settings">
         <DesktopConnectionCard />
         <StartPageCard />
+        <AppearanceCard />
         <UpdateCard />
         <ModelCard />
         <ModelSourceCard />

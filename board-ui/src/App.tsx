@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { CommandPalette } from './components/CommandPalette';
 import { Placeholder } from './panes/Placeholder';
 import { Board } from './panes/Board';
+import { Studio } from './studio/Studio';
 import { Agents } from './panes/Agents';
 import { Usage } from './panes/Usage';
 import { Projects } from './panes/Projects';
@@ -46,7 +47,8 @@ export function App() {
       <Sidebar onOpenPalette={openPalette} />
       <main className="content">
         <Routes>
-          <Route path="/" element={<Board />} />
+          <Route path="/" element={<Studio />} />
+          <Route path="/board" element={<Board />} />
           <Route
             path="/talk"
             element={<TalkToCeo channel={channel} focusSignal={ceoFocus} />}

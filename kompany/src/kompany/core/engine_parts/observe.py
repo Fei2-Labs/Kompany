@@ -173,6 +173,12 @@ class ObservabilityMixin:
             "blockers": blockers,
         }
 
+    def activity_recent(self, role: str, limit: int = 200) -> dict:
+        """Replay of one role's recent stream (Studio session backfill, GAP-1)."""
+        from kompany.core.activity_replay import recent_activity
+
+        return recent_activity(self, role, limit)
+
     def trace_run(self, run_id: str) -> dict:
         """Return all state writes tagged with ``run_id``, time-ordered.
 

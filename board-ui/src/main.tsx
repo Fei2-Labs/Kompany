@@ -7,6 +7,10 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import { App } from './App';
 import './index.css';
+import './studio/skins.css';
+import { bootSkin } from './studio/useSkin';
+
+bootSkin();
 
 const container = document.getElementById('root');
 if (!container) {
