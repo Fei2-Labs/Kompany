@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { retryTask } from '../api/client';
 import { ApprovalActions } from '../board/ApprovalActions';
 import type { UseChannel } from '../channel/useChannel';
 import { KIND_LABEL, type NeedsItem } from './needsYou';
@@ -21,7 +22,24 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
   const [open, setOpen] = useState(!compact);
   const navigate = useNavigate();
   const [hidden, setHidden] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   if (hidden) return null;
+
+  const retry = async () => {
+    if (!item.taskId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await retryTask(item.taskId, 'retried from Needs You');
+      setHidden(true);
+      onResolved(item.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'retry failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const meta = [item.agent, item.projectName, item.severity !== 'medium' ? item.severity : null]
     .filter(Boolean)
@@ -34,6 +52,8 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
         <span className="ny-card__title">{item.title}</span>
       </header>
       {meta && <div className="ny-card__meta">{meta}</div>}
+      {open && item.reason && <div className="ny-card__reason">{item.reason}</div>}
+      {error && <div className="approve__error">{error}</div>}
       {open && item.approval && (
         <>
           {!compact && Object.keys(item.approval.payload).length > 0 && (
@@ -62,6 +82,11 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
       )}
       {open && item.escalation && (
         <div className="ny-card__actions">
+          {item.taskId && (
+            <button type="button" className="btn btn--sm" disabled={busy} onClick={() => void retry()}>
+              {busy ? 'Retrying…' : 'Retry'}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--primary btn--sm"

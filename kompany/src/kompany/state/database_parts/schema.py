@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     budget_cap_usd REAL,
     max_turns INTEGER,
     harness_session_id TEXT,
-    harness_vehicle TEXT
+    harness_vehicle TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    block_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS delegations (

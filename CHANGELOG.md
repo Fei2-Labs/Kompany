@@ -4,6 +4,14 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-11
+
+### Changed
+- **A dead run is the runtime's problem, not the founder's.** The watchdog now puts a stranded task (process died, LLM unavailable after retries, orphaned at boot) back in the queue up to `task_max_stranded_retries` times (default 2) and closes its own alarm; only when the budget is spent does the task become `blocked` with a `retry_exhausted` reason and reach NEEDS YOU as a decision. Rows an older watchdog left blocked with no outcome and no reason are recovered once at boot. Tasks carry `block_reason` and `retry_count` (schema migration, additive).
+
+### Added
+- `kompany task-retry <id>` / `POST /tasks/{id}/retry` / MCP `kompany_task_retry` / `k.task_retry()`: requeue a blocked or failed task with a fresh retry budget. NEEDS YOU decision cards for blocked tasks show the reason and a Retry button next to Ask the CEO.
+
 ## [0.1.14] - 2026-09-10
 
 ### Added

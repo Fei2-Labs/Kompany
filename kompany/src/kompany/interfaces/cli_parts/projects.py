@@ -359,3 +359,22 @@ def project(
             console.print(ptable)
 
 
+
+
+@app.command("task-retry")
+def task_retry(
+    task_id: str = typer.Argument(..., help="Task ID (see `kompany project <id>`)"),
+    reason: str = typer.Option("", "--reason", help="Why it is being retried"),
+    config: str = typer.Option(None, "--config", "-c"),
+    as_json: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+):
+    """Put a blocked or failed task back in the queue (fresh retry budget)."""
+    try:
+        out = _get_engine(config).task_retry(task_id, reason=reason)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+    if as_json:
+        _emit_json(out)
+        return
+    console.print(f"[green]✓[/green] task {task_id} → pending (was {out['previous_status']}); the daemon runs it on its next tick")

@@ -44,6 +44,15 @@ describe('three-kind classifier', () => {
     expect(items[1]!.escalation).toContain('blocked');
   });
 
+  it('blocked task carries its reason and a retry handle', () => {
+    const items = buildNeedsYou([], [project([
+      { id: 't9', title: 'Publish', agent: 'builder', status: 'blocked', block_reason: 'retry_exhausted: run died 3 times', retry_count: 2 },
+    ])], []);
+    expect(items[0]!.taskId).toBe('t9');
+    expect(items[0]!.reason).toBe('retry_exhausted: run died 3 times');
+    expect(items[0]!.escalation).toContain('retry_exhausted');
+  });
+
   it('never renders founder labor: delivered / completed tasks and resolved approvals are dropped', () => {
     const items = buildNeedsYou(
       [approval({ id: 'done', status: 'approved' }), approval({ id: 'snz', status: 'snoozed' })],

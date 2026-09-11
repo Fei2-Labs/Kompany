@@ -43,6 +43,10 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
         ("max_turns", "INTEGER"),
         ("harness_session_id", "TEXT"),
         ("harness_vehicle", "TEXT"),
+        # Stranded-task auto-requeue (09-11): how many times the watchdog
+        # has put this task back in the queue, and why it is blocked.
+        ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("block_reason", "TEXT"),
     ]:
         try:
             conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {defn}")

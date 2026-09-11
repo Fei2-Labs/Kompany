@@ -54,6 +54,18 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="kompany_task_retry",
+        description="Put a blocked or failed task back in the queue with a fresh watchdog retry budget; the daemon runs it on its next tick.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "Task ID to retry"},
+                "reason": {"type": "string", "description": "Why it is being retried"},
+            },
+            "required": ["task_id"],
+        },
+    ),
+    Tool(
         name="kompany_project_abandon",
         description=(
             "Abandon a plan (#10): cancel the project, stop its unfinished "

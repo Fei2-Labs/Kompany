@@ -211,6 +211,17 @@ class HealthEvents:
         self.db.commit()
         return cur.rowcount or 0
 
+    def close_open_for_task(self, kind: str, task_id: str, resolved_by: str = "system") -> int:
+        """Resolve every ``open`` event of ``kind`` for one task, whatever run wrote it."""
+        cur = self.db.execute(
+            """UPDATE health_events
+                   SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now')
+               WHERE kind = ? AND status = 'open' AND task_id = ?""",
+            (resolved_by, kind, task_id),
+        )
+        self.db.commit()
+        return cur.rowcount or 0
+
     # ------------------------------------------------------------------
     # Reads
     # ------------------------------------------------------------------

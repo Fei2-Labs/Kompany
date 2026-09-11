@@ -57,6 +57,39 @@ class ScanningMixin:
     # Startup reconciliation (Stage A deployment plan: session-persistence)
     # ------------------------------------------------------------------
 
+    def recover_stranded(self, task: Any, why: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Decide what happens to a task whose run is provably dead.
+
+        Under the retry budget: back to ``pending`` (the ticker re-runs it) and a
+        ``stranded_in_progress`` event that is closed immediately — nothing for
+        the founder here. Budget spent: ``blocked`` with a ``retry_exhausted``
+        reason and an open ``retry_exhausted`` event — this one IS a decision.
+        """
+        retries = int(getattr(task, "retry_count", 0) or 0)
+        maximum = int(getattr(self, "max_stranded_retries", 2))
+        base = {"title": task.title, "assigned_agent": task.assigned_agent, "reason": why, **(detail or {})}
+        if retries < maximum:
+            self.projects.requeue_task(
+                task.id, reason=f"stranded ({why}); auto-retry {retries + 1}/{maximum}"
+            )
+            event = self.record_stranded_in_progress(  # type: ignore[attr-defined]
+                task_id=task.id, project_id=task.project_id,
+                detail={**base, "requeued": True, "retry": retries + 1, "max_retries": maximum},
+            )
+            # Self-healed: keep the rows for the timeline, but not as open alarms
+            # (this one and the first-pass stranded row for the same task).
+            self.health_events.close_open_for_task(KIND_STRANDED_IN_PROGRESS, task.id, resolved_by="watchdog")
+            event["status"] = "resolved"
+            return event
+        reason = f"retry_exhausted: run died {retries + 1} times ({why}) — needs your decision"
+        self.projects.update_task_status_raw(task_id=task.id, status="blocked", reason=reason)
+        # One alarm per task: the retry_exhausted row supersedes the stranded one.
+        self.health_events.close_open_for_task(KIND_STRANDED_IN_PROGRESS, task.id, resolved_by="watchdog")
+        return self.record_retry_exhausted(  # type: ignore[attr-defined]
+            task_id=task.id, project_id=task.project_id,
+            detail={**base, "retries": retries, "max_retries": maximum},
+        )
+
     def reconcile_on_startup(self) -> dict[str, Any]:
         """One-shot reconciliation for a fresh process boot.
 
@@ -75,7 +108,11 @@ class ScanningMixin:
         genuinely active work.
         """
         stranded: list[dict[str, Any]] = []
-        for task in self.projects.list_active_tasks():
+        orphaned = list(self.projects.list_active_tasks())
+        # Rows an older watchdog left ``blocked`` with no outcome and no
+        # reason were stranded too; give them the same recovery once.
+        orphaned += [t for t in self.projects.list_legacy_stranded() if t.id not in {o.id for o in orphaned}]
+        for task in orphaned:
             existing = self.health_events.find_active_snoozed(
                 kind=KIND_STRANDED_IN_PROGRESS,
                 task_id=task.id,
@@ -83,26 +120,14 @@ class ScanningMixin:
             if existing is not None:
                 continue
             try:
-                self.projects.update_task_status_raw(
-                    task_id=task.id,
-                    status=KIND_STRANDED_IN_PROGRESS,
-                )
+                event = self.recover_stranded(task, "startup_reconciliation")
             except Exception as exc:  # defensive — db errors don't kill boot
                 log.warning(
-                    "watchdog startup reconciliation: failed to mark task %s stranded: %s",
+                    "watchdog startup reconciliation: failed to recover task %s: %s",
                     task.id,
                     exc,
                 )
                 continue
-            event = self.record_stranded_in_progress(  # type: ignore[attr-defined]
-                task_id=task.id,
-                project_id=task.project_id,
-                detail={
-                    "title": task.title,
-                    "assigned_agent": task.assigned_agent,
-                    "reason": "startup_reconciliation",
-                },
-            )
             stranded.append(event)
 
         reset_agents: list[dict[str, Any]] = []
@@ -179,6 +204,15 @@ class ScanningMixin:
                 },
             )
             emitted.append(event)
+        # Second pass: a task still stranded one full threshold later was not
+        # a slow run that finished — its process is gone. Requeue or exhaust.
+        for task in self.projects.list_stale_stranded(self.stale_threshold_seconds):
+            if self.health_events.find_active_snoozed(kind=KIND_STRANDED_IN_PROGRESS, task_id=task.id) is not None:
+                continue
+            try:
+                emitted.append(self.recover_stranded(task, "stale_in_progress"))
+            except Exception as exc:  # defensive — db errors don't kill scanner
+                log.warning("watchdog: failed to recover stranded task %s: %s", task.id, exc)
         return emitted
 
     def _scan_snoozed_approvals(self) -> list[dict[str, Any]]:

@@ -256,6 +256,12 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
         result = engine.execute_project(arguments["project_id"])
         return result
 
+    if name == "kompany_task_retry":
+        try:
+            return engine.task_retry(str(arguments["task_id"]), reason=str(arguments.get("reason") or ""))
+        except ValueError as exc:
+            return {"error": str(exc)}
+
     if name == "kompany_project_abandon":
         try:
             return engine.abandon_project(

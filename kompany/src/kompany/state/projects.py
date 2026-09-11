@@ -38,6 +38,9 @@ def _coerce_project_type(raw) -> str:
     return _LEGACY_PROJECT_TYPE_MAP.get(val, "operational")
 
 
+_TASK_STATUS_VALUES = frozenset(m.value for m in TaskStatus)
+
+
 class Projects:
     """Project store backed by SQLite."""
 
@@ -196,6 +199,7 @@ class Projects:
         task_id: str,
         status: str,
         result: dict | None = None,
+        reason: str | None = None,
     ) -> None:
         """Set a non-enum task status (e.g. ``stranded_in_progress``).
 
@@ -206,11 +210,55 @@ class Projects:
         result_json = json.dumps(result) if result else None
         self.db.execute(
             """UPDATE tasks SET status = ?, result = COALESCE(?, result),
+                   block_reason = COALESCE(?, block_reason),
                    updated_at = datetime('now')
                WHERE id = ?""",
-            (status, result_json, task_id),
+            (status, result_json, reason, task_id),
         )
         self.db.commit()
+
+    def requeue_task(self, task_id: str, reason: str, *, reset_retries: bool = False) -> Task | None:
+        """Put a task back in the queue (``pending``) so the ticker runs it again.
+
+        ``retry_count`` increments (or resets on a founder-initiated retry) and
+        ``block_reason`` records why the previous run ended. Returns the task or
+        ``None`` when it does not exist.
+        """
+        self.db.execute(
+            """UPDATE tasks SET status = 'pending', block_reason = ?,
+                   retry_count = CASE WHEN ? THEN 0 ELSE retry_count + 1 END,
+                   completed_at = NULL, updated_at = datetime('now')
+               WHERE id = ?""",
+            (reason, 1 if reset_retries else 0, task_id),
+        )
+        self.db.commit()
+        return self.get_task(task_id)
+
+    def list_stale_stranded(self, stale_seconds: int) -> list[Task]:
+        """Tasks the scanner already marked stranded and that nobody touched since.
+
+        A live run that merely took long overwrites the transient status when it
+        finishes; a row still stranded one full threshold later is truly dead.
+        """
+        if stale_seconds <= 0:
+            return []
+        rows = self.db.execute(
+            """SELECT * FROM tasks
+               WHERE status = 'stranded_in_progress'
+                 AND updated_at <= datetime('now', ?)""",
+            (f"-{int(stale_seconds)} seconds",),
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
+    def list_legacy_stranded(self) -> list[Task]:
+        """Blocked rows with neither an outcome nor a reason: stranded by an
+        older watchdog that had no requeue. Recovered once at boot."""
+        rows = self.db.execute(
+            """SELECT * FROM tasks
+               WHERE status IN ('blocked', 'stranded_in_progress')
+                 AND result IS NULL AND block_reason IS NULL"""
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def set_task_harness_session(
         self, task_id: str, session_id: str, vehicle: str
@@ -274,11 +322,22 @@ class Projects:
         return [self._row_to_task(r) for r in rows]
 
     def _row_to_task(self, row) -> Task:
+        keys = row.keys()
+        status = row["status"]
+        block_reason = row["block_reason"] if "block_reason" in keys else None
+        if status not in _TASK_STATUS_VALUES:
+            # Transient watchdog states (``stranded_in_progress``) are not
+            # enum members; surface them as BLOCKED with the reason so every
+            # reader keeps working and NEEDS YOU can explain the card.
+            block_reason = block_reason or f"stranded ({status})"
+            status = TaskStatus.BLOCKED.value
         return Task(
             id=row["id"],
             project_id=row["project_id"],
             title=row["title"],
-            status=row["status"],
+            status=status,
+            retry_count=int(row["retry_count"] or 0) if "retry_count" in keys else 0,
+            block_reason=block_reason,
             assigned_agent=row["assigned_agent"],
             result=json.loads(row["result"]) if row["result"] else None,
             parent_task_id=row["parent_task_id"],

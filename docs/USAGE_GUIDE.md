@@ -632,6 +632,8 @@ kompany doctor --json   # same tree for scripts
 
 Offline and read-only: SQLite `quick_check`, runtime state, LLM provider configured, open watchdog events, blocked tasks and pending approvals, integration connections, backup freshness, API access mode, build info. Every red or yellow node carries a one-line fix. Same payload on `GET /doctor`, MCP `kompany_doctor`, `k.doctor()`, and the **Doctor** card on the Settings page.
 
+**Stranded tasks heal themselves.** When a task's run dies (process restart, LLM unavailable after the retry, an `active` row nobody touched for `task_stale_threshold_seconds`), the watchdog puts it back in the queue — up to `task_max_stranded_retries` times (default 2) — and closes its own alarm. Only when that budget is spent does the task become `blocked` with a `retry_exhausted` reason and appear in NEEDS YOU as a decision. Retry any blocked or failed task yourself with `kompany task-retry <task-id>` (also `POST /tasks/{id}/retry`, MCP `kompany_task_retry`, `k.task_retry()`); the daemon runs it on its next tick.
+
 It is also the engine's **self-test gate**: every soul and workflow (builtin, Pro, your workspace) must load, plugin discovery must be clean, the ledger's running balance must equal its entries, and the artifact workspace must have no uncommitted changes. Each run is written to `<data_dir>/doctor/last.json` (and appended to `history.jsonl`), the daemon runs it on every boot and after each extension install, and a failing node becomes one `doctor_failed` health event in NEEDS YOU that clears itself on the next clean run. The LLM-key check is reported but never raises the event on its own.
 
 ### Skills and their scope

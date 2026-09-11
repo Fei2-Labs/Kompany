@@ -209,6 +209,10 @@ class KompanyCoreOps:
         """Execute an approved decision-chain packet under governance."""
         return self._engine.execute_decision_packet(approval_id)
 
+    def task_retry(self, task_id: str, reason: str = "") -> dict[str, Any]:
+        """Requeue a blocked/failed task with a fresh watchdog retry budget."""
+        return self._engine.task_retry(task_id, reason=reason)
+
     def activity_recent(self, role: str, limit: int = 200) -> dict[str, Any]:
         """Recent stream lines for one agent role (Studio backfill)."""
         return self._engine.activity_recent(role, limit)

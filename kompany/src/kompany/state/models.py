@@ -469,6 +469,11 @@ class Task(BaseModel):
     max_turns: int | None = None
     harness_session_id: str | None = None
     harness_vehicle: str | None = None
+    # Stranded-task auto-requeue: the watchdog puts a task whose run died
+    # back in the queue up to ``max_stranded_retries`` times; only then does
+    # it become BLOCKED with a ``block_reason`` and reach NEEDS YOU.
+    retry_count: int = 0
+    block_reason: str | None = None
 
 
 class DelegationStatus(str, Enum):
