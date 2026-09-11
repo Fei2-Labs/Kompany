@@ -390,12 +390,17 @@ def test_reconcile_on_startup_strands_fresh_active_task(tmp_path):
 
     result = w["watchdog"].reconcile_on_startup()
 
+    # Orphaned at boot → back in the queue (the runtime's problem, not the
+    # founder's); the stranded event is recorded but closed immediately.
     assert len(result["stranded_tasks"]) == 1
     assert result["stranded_tasks"][0]["task_id"] == "t1"
+    assert result["stranded_tasks"][0]["detail"]["requeued"] is True
     row = w["db"].execute(
-        "SELECT status FROM tasks WHERE id = ?", ("t1",)
+        "SELECT status, retry_count, block_reason FROM tasks WHERE id = ?", ("t1",)
     ).fetchone()
-    assert row["status"] == "stranded_in_progress"
+    assert row["status"] == "pending" and row["retry_count"] == 1
+    assert "auto-retry 1/2" in row["block_reason"]
+    assert w["watchdog"].list_open() == []
 
 
 def test_reconcile_on_startup_skips_snoozed_task(tmp_path):
@@ -471,3 +476,71 @@ def test_list_active_tasks_ignores_updated_at(tmp_path):
     ))
     active = projects.list_active_tasks()
     assert [t.id for t in active] == ["t1"]
+
+
+# ----------------------------------------------------------------------
+# Stranded-task recovery: requeue under budget, block with reason after
+# ----------------------------------------------------------------------
+
+
+def _strand_and_age(w, task_id, age_seconds=10):
+    """Run the first scanner pass (active → stranded) and age the row."""
+    first = w["watchdog"].scan_once()
+    assert [e["kind"] for e in first] == ["stranded_in_progress"]
+    w["db"].execute(
+        "UPDATE tasks SET updated_at = datetime('now', ?) WHERE id = ?",
+        (f"-{age_seconds} seconds", task_id),
+    )
+    w["db"].commit()
+
+
+def test_scan_requeues_stranded_task_then_exhausts_into_blocked(tmp_path):
+    w = _make_world(tmp_path, stale_seconds=5)
+    _seed_active_task(w, task_id="t1", project_id="p1", age_seconds=10)
+    wd = w["watchdog"]
+    assert wd.max_stranded_retries == 2
+
+    # pass 1: stale active → stranded (transient, gives a slow run time to finish)
+    _strand_and_age(w, "t1")
+    # pass 2: still stranded a threshold later → requeued (retry 1/2)
+    second = wd.scan_once()
+    assert len(second) == 1 and second[0]["detail"]["requeued"] is True
+    row = w["db"].execute("SELECT status, retry_count FROM tasks WHERE id = 't1'").fetchone()
+    assert (row["status"], row["retry_count"]) == ("pending", 1)
+    assert wd.list_open() == []  # self-healed: no open alarm
+
+    # the run dies again twice → retry 2/2, then exhausted
+    for expected_retry in (2,):
+        w["db"].execute("UPDATE tasks SET status='active', updated_at=datetime('now','-10 seconds') WHERE id='t1'"); w["db"].commit()
+        _strand_and_age(w, "t1")
+        ev = wd.scan_once()
+        assert ev[0]["detail"]["retry"] == expected_retry
+    w["db"].execute("UPDATE tasks SET status='active', updated_at=datetime('now','-10 seconds') WHERE id='t1'"); w["db"].commit()
+    _strand_and_age(w, "t1")
+    final = wd.scan_once()
+    assert [e["kind"] for e in final] == ["retry_exhausted"]
+    task = w["projects"].get_task("t1")
+    assert task.status == TaskStatus.BLOCKED and task.retry_count == 2
+    assert task.block_reason.startswith("retry_exhausted") and "needs your decision" in task.block_reason
+    assert [e["kind"] for e in wd.list_open()] == ["retry_exhausted"]  # this one IS a founder decision
+
+
+def test_reconcile_recovers_legacy_blocked_rows_without_reason(tmp_path):
+    """Rows an old watchdog left ``blocked`` with no outcome/reason get one recovery."""
+    w = _make_world_with_agent_status(tmp_path, stale_seconds=600)
+    _seed_fresh_active_task(w)
+    w["db"].execute("UPDATE tasks SET status='blocked', result=NULL WHERE id='t1'"); w["db"].commit()
+    result = w["watchdog"].reconcile_on_startup()
+    assert [e["task_id"] for e in result["stranded_tasks"]] == ["t1"]
+    assert w["projects"].get_task("t1").status == TaskStatus.PENDING
+    # a genuinely blocked task (runner outcome with founder_action) is left alone
+    w["db"].execute("UPDATE tasks SET status='blocked', result='{\"founder_action\": \"connect Stripe\"}' WHERE id='t1'"); w["db"].commit()
+    assert w["watchdog"].reconcile_on_startup()["stranded_tasks"] == []
+
+
+def test_row_to_task_coerces_transient_status_to_blocked_with_reason(tmp_path):
+    w = _make_world(tmp_path)
+    _seed_active_task(w, task_id="t1", project_id="p1")
+    w["db"].execute("UPDATE tasks SET status='stranded_in_progress' WHERE id='t1'"); w["db"].commit()
+    t = w["projects"].get_task("t1")
+    assert t.status == TaskStatus.BLOCKED and t.block_reason == "stranded (stranded_in_progress)"

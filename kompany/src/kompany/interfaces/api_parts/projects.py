@@ -139,10 +139,27 @@ def get_project(project_id: str) -> dict[str, Any]:
                 "result": t.result,
                 "agent": t.assigned_agent,
                 "status": t.status.value,
+                # Why a task is blocked (watchdog retry_exhausted, LLM
+                # unavailable, …) and how many times the runtime requeued it.
+                "block_reason": t.block_reason,
+                "retry_count": t.retry_count,
             }
             for t in tasks
         ],
     }
+
+
+class TaskRetryRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/tasks/{task_id}/retry")
+def retry_task(task_id: str, req: TaskRetryRequest | None = None) -> dict[str, Any]:
+    """Put a blocked/failed task back in the queue with a fresh retry budget."""
+    try:
+        return get_engine().task_retry(task_id, reason=(req.reason if req else "") or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "not found" in str(exc) else 409, detail=str(exc)) from exc
 
 
 @router.get("/ledger")

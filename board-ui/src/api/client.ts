@@ -592,6 +592,11 @@ export interface IntegrationInfo {
   tools: string[];
 }
 
+/** `POST /tasks/{id}/retry` — requeue a blocked/failed task with a fresh retry budget. */
+export function retryTask(taskId: string, reason = ''): Promise<{ task_id: string; status: string }> {
+  return postJson<{ task_id: string; status: string }>(`/tasks/${encodeURIComponent(taskId)}/retry`, { reason });
+}
+
 /** `GET /integrations` — every registered integration + connection state. */
 export function getIntegrations(
   signal?: AbortSignal,

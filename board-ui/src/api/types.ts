@@ -54,6 +54,12 @@ export interface ProjectTask {
   title: string;
   agent: string;
   status: string;
+  /** Runner outcome (`founder_action` names the connection to make). */
+  result?: { founder_action?: string; outcome?: string } | null;
+  /** Why the task is blocked (watchdog `retry_exhausted`, …). */
+  block_reason?: string | null;
+  /** Times the runtime requeued it before giving up. */
+  retry_count?: number;
 }
 
 /** `GET /projects/{id}` — the six list fields plus the detail block. */

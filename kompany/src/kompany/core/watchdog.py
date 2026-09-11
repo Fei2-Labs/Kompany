@@ -78,6 +78,7 @@ class Watchdog(RecordingMixin, ScanningMixin):
         approvals: ApprovalRequests | None = None,
         runway_provider: Callable[[], dict[str, Any] | None] | None = None,
         agent_status: AgentStatusStore | None = None,
+        max_stranded_retries: int = 2,
     ):
         self.health_events = health_events
         self.projects = projects
@@ -99,6 +100,10 @@ class Watchdog(RecordingMixin, ScanningMixin):
         self.runway_provider = runway_provider
         self.scan_interval_seconds = max(1, int(scan_interval_seconds))
         self.stale_threshold_seconds = max(1, int(stale_threshold_seconds))
+        # A run that died is the runtime's problem, not the founder's: the
+        # task goes back in the queue this many times before it becomes a
+        # BLOCKED card with a ``retry_exhausted`` reason.
+        self.max_stranded_retries = max(0, int(max_stranded_retries))
         # ``clock`` is only used by tests that want to run scans without
         # waiting on the asyncio sleep. Production keeps it None and the
         # background task uses ``asyncio.sleep``.

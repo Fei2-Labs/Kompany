@@ -107,18 +107,34 @@ class EngineOpsMixin:
         project_id: str | None,
         reason: str,
     ) -> dict[str, Any]:
-        try:
-            self.projects.update_task_status_raw(
-                task_id=task_id,
-                status="stranded_in_progress",
+        task = self.projects.get_task(task_id)
+        if task is None:
+            return self.watchdog.record_stranded_in_progress(
+                task_id=task_id, project_id=project_id, detail={"reason": reason},
             )
-        except Exception:
-            pass
-        return self.watchdog.record_stranded_in_progress(
-            task_id=task_id,
-            project_id=project_id,
-            detail={"reason": reason},
+        # The run is over (LLM unavailable after the retry budget): requeue
+        # under the watchdog's budget, or block with a reason once spent.
+        return self.watchdog.recover_stranded(task, reason)
+
+    def task_retry(self, task_id: str, reason: str = "") -> dict[str, Any]:
+        """Founder/CEO retry of a blocked or failed task: back to ``pending``
+        with a fresh watchdog retry budget. The ticker runs it on its next
+        pass. Raises ``ValueError`` for an unknown or non-retryable task."""
+        task = self.projects.get_task(task_id)
+        if task is None:
+            raise ValueError(f"Task '{task_id}' not found")
+        status = task.status.value if hasattr(task.status, "value") else str(task.status)
+        if status not in ("blocked", "failed", "stranded_in_progress"):
+            raise ValueError(f"Task '{task_id}' is {status}; only blocked or failed tasks can be retried")
+        why = f"retry requested{': ' + reason if reason else ''}"
+        updated = self.projects.requeue_task(task_id, reason=why, reset_retries=True)
+        self.audit.record(
+            "task.retry", f"Task requeued: {task.title}",
+            detail={"task_id": task_id, "previous_status": status, "previous_reason": task.block_reason, "reason": reason},
+            project_id=task.project_id,
         )
+        get_event_hub().publish("task.retry", {"task_id": task_id, "project_id": task.project_id})
+        return {"task_id": task_id, "status": "pending", "previous_status": status, "block_reason": updated.block_reason if updated else why}
 
     # ------------------------------------------------------------------
     # Company templates (ready-to-play scenarios)

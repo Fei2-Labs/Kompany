@@ -307,6 +307,7 @@ class KompanyEngine(
             # tick — see ``Watchdog._scan_runway`` for the contract.
             runway_provider=self._runway_snapshot,
             agent_status=self.agent_status,
+            max_stranded_retries=self._get_int_config("task_max_stranded_retries", default=2),
         )
 
         # Daemon tick loop (06-12-daemon-tick-loop PR1): the autonomous

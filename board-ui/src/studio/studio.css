@@ -62,3 +62,4 @@
 .ny-groups { display: grid; gap: 12px; max-width: 760px; }
 .ny-group { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .ny-group .studio__head { text-transform: none; letter-spacing: 0; font: 12px/1 var(--font); color: var(--text-dim); }
+.ny-card__reason { margin-top: 6px; padding: 6px 8px; border-radius: 4px; background: var(--bg-rail); color: var(--text-dim); font-size: 12px; line-height: 1.4; }

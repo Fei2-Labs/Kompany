@@ -28,6 +28,10 @@ export interface NeedsItem {
   integration?: Pick<IntegrationInfo, 'integration_id' | 'display_name'>;
   /** kind==='decision' from a blocked task: text prefilled for the CEO. */
   escalation?: string;
+  /** Blocked task: the task to requeue with "Retry". */
+  taskId?: string;
+  /** Why it is here — block_reason from the watchdog or the runner's founder_action. */
+  reason?: string;
 }
 
 export const KIND_LABEL: Record<NeedsKind, string> = {
@@ -109,6 +113,7 @@ export function buildNeedsYou(
           integration: { integration_id: integ.integration_id, display_name: integ.display_name },
         });
       } else {
+        const reason = t.block_reason || t.result?.founder_action || undefined;
         items.push({
           id: `task:${t.id}`,
           kind: 'decision',
@@ -117,7 +122,12 @@ export function buildNeedsYou(
           agent: t.agent,
           projectId: p.id,
           projectName: p.name,
-          escalation: `Task "${t.title}" (${t.agent}, project ${p.name}) is blocked. What should the team do?`,
+          taskId: t.id,
+          reason,
+          escalation:
+            `Task "${t.title}" (${t.agent}, project ${p.name}) is blocked` +
+            (reason ? ` — ${reason}` : '') +
+            `. What should the team do?`,
         });
       }
     }
