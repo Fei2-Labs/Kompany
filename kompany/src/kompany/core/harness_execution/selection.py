@@ -23,9 +23,14 @@ from kompany.core.harness import (
 from kompany.core.run_context import current_run_id
 
 # PRD D3 defaults applied when the CEO omits per-task caps at
-# decomposition time: small/routine tasks default to $0.50; the CEO may
+# decomposition time: small/routine tasks default to $2.00; the CEO may
 # assign up to $5 for genuinely complex work — never more.
-DEFAULT_BUDGET_CAP_USD = 0.50
+#
+# Raised from the original $0.50 after live runs showed ordinary agentic
+# tasks (a soul cycle, a target-list build) overshooting the cap by a
+# cent or two and parking for founder approval — the pause cost more
+# founder attention than the spend it guarded.
+DEFAULT_BUDGET_CAP_USD = 2.00
 MAX_BUDGET_CAP_USD = 5.0
 DEFAULT_MAX_TURNS = 30
 
