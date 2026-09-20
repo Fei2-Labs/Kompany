@@ -524,6 +524,7 @@ You can override the default pairing — e.g. run a `claude_subscription` source
 At project decomposition the CEO assigns each task a budget cap and a turn cap:
 
 - Default: **$2.00** per task. The CEO may assign up to the **$5.00** ceiling for genuinely complex work — never more (clamped when the task is written). Default turn cap: 30.
+- **Research tasks floor at $5.00.** A task assigned to the `researcher` agent is written with at least that cap, whatever the CEO proposed — research fans out across many sources, and in practice these were the tasks that parked for approval over a few cents. The floor only ever raises a cap, and never lifts one past the $5.00 ceiling.
 - A founder-approved budget increase (see below) can raise a task's cap **past the CEO ceiling** — your approval is authoritative and is never re-clamped at execution time.
 - The project's budget envelope is the hard outer cap: a task never spends more than the envelope's remaining balance, and an exhausted envelope parks tasks instead of running them.
 

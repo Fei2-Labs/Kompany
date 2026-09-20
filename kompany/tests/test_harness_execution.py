@@ -27,6 +27,8 @@ from kompany.core.harness_execution import (
     ACTION_ENVELOPE_TOPUP,
     DEFAULT_BUDGET_CAP_USD,
     DEFAULT_MAX_TURNS,
+    MAX_BUDGET_CAP_USD,
+    ROLE_MIN_BUDGET_CAP_USD,
     EventMonitor,
     classify_harness_outcome,
     execute_harness_task,
@@ -263,6 +265,29 @@ def test_resolve_caps_defaults_and_bounds():
     assert resolve_caps(50.0, 10) == (5.0, 10)
     # Zero/negative junk falls back to defaults.
     assert resolve_caps(0.0, 0) == (DEFAULT_BUDGET_CAP_USD, DEFAULT_MAX_TURNS)
+
+
+def test_role_floor_raises_a_research_cap_but_never_lowers_one():
+    """A researcher task gets the role floor; other roles are untouched."""
+    floor = ROLE_MIN_BUDGET_CAP_USD["researcher"]
+    # No cap assigned by the CEO -> floor, not the default.
+    assert resolve_caps(None, None, "researcher")[0] == floor
+    # CEO assigned less than the floor -> raised to it.
+    assert resolve_caps(0.50, None, "researcher")[0] == floor
+    # Case and stray whitespace in the role still match.
+    assert resolve_caps(None, None, " Researcher ")[0] == floor
+    # A role with no floor keeps the ordinary default.
+    assert resolve_caps(None, None, "writer")[0] == DEFAULT_BUDGET_CAP_USD
+    # No role at all behaves exactly as before.
+    assert resolve_caps(None, None, None)[0] == DEFAULT_BUDGET_CAP_USD
+    # The floor never lifts a cap past the CEO ceiling.
+    assert resolve_caps(50.0, None, "researcher")[0] == MAX_BUDGET_CAP_USD
+
+
+def test_role_floor_does_not_apply_at_execution_time():
+    """Execution reads the stored row; the floor must not re-raise a cap
+    the founder has since decided on."""
+    assert execution_caps(0.50, None) == (0.50, DEFAULT_MAX_TURNS)
 
 
 def test_execution_caps_apply_defaults_but_never_the_ceiling():

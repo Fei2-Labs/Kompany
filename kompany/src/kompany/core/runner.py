@@ -174,7 +174,9 @@ class ProjectRunner:
         if self._engine.projects.list_tasks(project.id):
             return
         for spec in self._decompose(project):
-            cap, turns = resolve_caps(spec.budget_cap_usd, spec.max_turns)
+            cap, turns = resolve_caps(
+                spec.budget_cap_usd, spec.max_turns, spec.assigned_agent
+            )
             self._engine.projects.create_task(
                 Task(
                     project_id=project.id,
