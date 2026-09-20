@@ -34,6 +34,20 @@ DEFAULT_BUDGET_CAP_USD = 2.00
 MAX_BUDGET_CAP_USD = 5.0
 DEFAULT_MAX_TURNS = 30
 
+# Per-role minimum caps, applied at decomposition write time only. The
+# CEO prompt asks for a higher cap on research work, but a prompt is
+# advisory: in production the CEO assigned no cap at all to "Phase 0:
+# build target list — 30 active AI-founder accounts", it fell back to
+# the default, spent $2.09, and parked for founder approval. A research
+# task fans out across many sources, so its floor is set here in code
+# where the outcome does not depend on the model complying.
+#
+# The floor raises a cap, never lowers one, and is still subject to the
+# MAX_BUDGET_CAP_USD ceiling below.
+ROLE_MIN_BUDGET_CAP_USD: dict[str, float] = {
+    "researcher": 5.00,
+}
+
 # Vehicle → PATH binary, for the graceful-degrade check (PRD acceptance:
 # "Missing CLI for chosen source → health event + degrade, no crash").
 # "native" has no entry on purpose: the Kompany-owned loop needs no CLI
@@ -108,16 +122,30 @@ def execution_caps(
 
 
 def resolve_caps(
-    budget_cap_usd: float | None, max_turns: int | None
+    budget_cap_usd: float | None,
+    max_turns: int | None,
+    role: str | None = None,
 ) -> tuple[float, int]:
-    """Decomposition-time caps: PRD D3 defaults + the CEO ceiling clamp.
+    """Decomposition-time caps: PRD D3 defaults, role floor, CEO ceiling.
 
     Call this ONLY when writing CEO-assigned caps onto new task rows
     (``ProjectRunner`` decomposition). Reading a stored row back for
     execution must use :func:`execution_caps` instead, or a
     founder-approved cap above the ceiling would be silently re-clamped.
+
+    ``role`` is the task's assigned agent. A role listed in
+    ``ROLE_MIN_BUDGET_CAP_USD`` gets that value as a floor: the cap is
+    raised to it when the CEO assigned less (or nothing), and left alone
+    when the CEO already assigned more. The floor deliberately lives
+    here and not in :func:`execution_caps` — it shapes what gets written
+    onto a new task row, and must never re-raise a cap the founder has
+    since decided on.
     """
     cap, turns = execution_caps(budget_cap_usd, max_turns)
+    if role:
+        floor = ROLE_MIN_BUDGET_CAP_USD.get(role.strip().lower())
+        if floor is not None:
+            cap = max(cap, floor)
     return min(cap, MAX_BUDGET_CAP_USD), turns
 
 
@@ -232,6 +260,7 @@ __all__ = [
     "DEFAULT_BUDGET_CAP_USD",
     "DEFAULT_MAX_TURNS",
     "MAX_BUDGET_CAP_USD",
+    "ROLE_MIN_BUDGET_CAP_USD",
     "VEHICLE_BINARIES",
     "execution_caps",
     "harness_model",

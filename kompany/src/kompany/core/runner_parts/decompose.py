@@ -126,9 +126,12 @@ def decompose_unfiltered(
         f"- builder: code, configurations, integrations\n"
         f"- procurement: sourcing, vendor evaluation\n\n"
         f"For each task also assign budget_cap_usd (AI spend cap for "
-        f"that task, within this project's budget envelope: 0.50 for "
+        f"that task, within this project's budget envelope: 2.00 for "
         f"a small/routine task, up to 5.00 only for genuinely complex "
         f"work) and max_turns (agentic loop turns, default 30).\n"
+        f"Research and discovery work — building a target list, sweeping "
+        f"competitors, scanning many sources — fans out across far more "
+        f"material than a single write-up, so assign it 5.00.\n"
     )
     # Founder hard rules (#6): excluded capabilities go into the
     # prompt so no tokens are wasted planning them; the deterministic
