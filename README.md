@@ -851,6 +851,30 @@ app — launched from Finder/Explorer — doesn't inherit your shell
 environment, so for it, place a `.env` in the data directory
 (`<data_dir>/.env`).
 
+### Custom API connection in Settings
+
+In **Settings → Model Source**, choose **Custom API key** to show the
+**Base URL** and **API key** fields. Click **Save API connection** to update
+the current engine; subsequent calls use the new connection. Calls already
+running retain their existing connection. Other engine processes pick up the
+change when restarted. Saving the connection does not change billing source
+or select a model; those controls remain separate.
+
+The saved key is never returned to the browser. Leave the key field blank to
+keep it; enter it again when changing the URL. Local HTTP endpoints are supported.
+Saving reads the endpoint's model list without generating a paid completion.
+A warning means discovery failed, returned no models, or did not list the active
+model; it does not mean the connection failed to save or inference was tested.
+
+`GET /settings/custom-llm` returns `base_url` and `api_key_configured`.
+`PUT /settings/custom-llm` accepts `{ "base_url": "…", "api_key": "…" }`
+and returns that status plus `warning`. These routes use dashboard authentication.
+
+The connection is saved in the active YAML config with owner-only file permissions.
+Explicit `custom_llm.api_key` and `custom_llm.base_url` values override
+`CUSTOM_LLM_API_KEY` and `CUSTOM_LLM_BASE_URL`; omitted fields still use the
+environment. Keep this file out of version control.
+
 ### Company Config (YAML)
 
 ```yaml

@@ -65,6 +65,37 @@ class ModelSettingResponse(BaseModel):
     error: str = ""
 
 
+class CustomLLMRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_url: str
+    api_key: str = Field(default="", repr=False)
+
+
+@router.get("/settings/custom-llm")
+def get_custom_llm_setting() -> dict[str, Any]:
+    from kompany.core.custom_llm_settings import connection_status
+
+    return connection_status(get_engine())
+
+
+@router.put("/settings/custom-llm")
+def set_custom_llm_setting(payload: Any = Body(...)) -> dict[str, Any]:
+    from pydantic import ValidationError
+
+    from kompany.core.custom_llm_settings import save_connection
+
+    # FastAPI's default validation response includes the rejected input.
+    # Parse here so even malformed credential payloads are never echoed.
+    try:
+        req = CustomLLMRequest.model_validate(payload)
+    except ValidationError:
+        raise HTTPException(422, "Expected a base URL and optional API key.") from None
+    try:
+        return save_connection(get_engine(), req.base_url, req.api_key)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 class SetModelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str = Field(..., min_length=1)
@@ -82,7 +113,9 @@ def get_model_setting() -> ModelSettingResponse:
     engine = get_engine()
     s = engine.settings
     current = getattr(s, "model_primary", "") or ""
-    base_url = getattr(s, "custom_base_url", "") or ""
+    from kompany.core.custom_llm_settings import connection_status
+
+    base_url = connection_status(engine)["base_url"]
     available: list[str] = []
     err = ""
     provider = "custom" if base_url else "default"
@@ -92,8 +125,8 @@ def get_model_setting() -> ModelSettingResponse:
             available = list_openai_compatible_models(
                 base_url, getattr(s, "custom_api_key", "") or ""
             )
-        except Exception as exc:  # noqa: BLE001
-            err = f"{type(exc).__name__}: {exc}"
+        except Exception:  # noqa: BLE001 — provider errors can contain credentials
+            err = "Model discovery failed. Check the endpoint and API key."
     return ModelSettingResponse(
         current_model=current, provider=provider, base_url=base_url,
         available_models=available, error=err,

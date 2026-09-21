@@ -1694,6 +1694,15 @@ body {
   border-radius: 3px;
   border: 1px solid var(--border);
 }
+.settings__api-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 0;
+  border: 0;
+}
 .settings__field {
   display: flex;
   flex-direction: column;

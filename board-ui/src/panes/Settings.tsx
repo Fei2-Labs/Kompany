@@ -5,6 +5,7 @@
 // this is also why the founder previously only saw the Telegram card:
 // it was the only one ported here. Order mirrors the legacy page.
 
+import { useState } from 'react';
 import { ModelCard } from './settings/ModelCard';
 import { DesktopConnectionCard } from './settings/DesktopConnectionCard';
 import { StartPageCard } from './settings/StartPageCard';
@@ -22,6 +23,7 @@ import { CredentialsCard } from './settings/CredentialsCard';
 import { WorkspacesCard } from './settings/WorkspacesCard';
 
 export function Settings() {
+  const [connectionRevision, setConnectionRevision] = useState(0);
   return (
     <section className="pane">
       <header className="pane__header">
@@ -37,8 +39,8 @@ export function Settings() {
         <StartPageCard />
         <AppearanceCard />
         <UpdateCard />
-        <ModelCard />
-        <ModelSourceCard />
+        <ModelCard key={connectionRevision} />
+        <ModelSourceCard onConnectionSaved={() => setConnectionRevision((value) => value + 1)} />
         <ResendCard />
         <EmailSmtpCard />
         <TelegramCard />

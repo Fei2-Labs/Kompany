@@ -348,12 +348,13 @@ class KompanySettings(BaseSettings):
                 overrides["model_primary"] = models["primary"]
             if "economy" in models:
                 overrides["model_economy"] = models["economy"]
-            # Custom LLM endpoint from YAML
+            # Explicit YAML values override env; use aliases so Pydantic
+            # does not silently discard these constructor overrides.
             custom = data.get("custom_llm", {})
             if "api_key" in custom:
-                overrides["custom_api_key"] = custom["api_key"]
+                overrides["CUSTOM_LLM_API_KEY"] = custom["api_key"]
             if "base_url" in custom:
-                overrides["custom_base_url"] = custom["base_url"]
+                overrides["CUSTOM_LLM_BASE_URL"] = custom["base_url"]
             # Active model source from YAML (kind, billing_mode,
             # monthly_fee_usd, price_overrides). Validation errors
             # surface at load time — a misconfigured source must not
