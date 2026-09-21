@@ -11,6 +11,7 @@ import {
   type ModelSource,
 } from '../../api/client';
 import { useAsync } from '../useAsync';
+import { CustomAPIFields } from './CustomAPIFields';
 
 const sourceLoader = (signal?: AbortSignal) => getModelSource(signal);
 const clisLoader = (signal?: AbortSignal) => detectAgentClis(signal);
@@ -36,7 +37,7 @@ function clisSummary(clis: Record<string, DetectedCli> | null): string {
   return parts.length ? 'detected: ' + parts.join(' · ') : '';
 }
 
-export function ModelSourceCard() {
+export function ModelSourceCard({ onConnectionSaved }: { onConnectionSaved: () => void }) {
   const source = useAsync<ModelSource | null>(sourceLoader);
   const clis = useAsync<Record<string, DetectedCli>>(clisLoader);
 
@@ -157,6 +158,8 @@ export function ModelSourceCard() {
         </label>
       )}
 
+      {(kind === 'custom_api' || !kind) && <CustomAPIFields onSaved={onConnectionSaved} />}
+
       <p className="settings__meta">{SUMMARIES[kind] ?? ''}</p>
 
       <div className="settings__actions">
@@ -165,7 +168,7 @@ export function ModelSourceCard() {
             ? 'Saving…'
             : !kind && confirmClear
               ? 'Confirm — back to per-token billing'
-              : 'Save'}
+              : 'Save model source'}
         </button>
         {result && (
           <span

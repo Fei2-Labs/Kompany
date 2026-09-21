@@ -419,6 +419,23 @@ export function setModelSetting(model: string): Promise<ModelSetting> {
   return postJson<ModelSetting>('/settings/model', { model });
 }
 
+export interface CustomLLMSetting {
+  base_url: string;
+  api_key_configured: boolean;
+  warning?: string;
+}
+
+export function getCustomLLMSetting(signal?: AbortSignal): Promise<CustomLLMSetting> {
+  return getJson<CustomLLMSetting>('/settings/custom-llm', signal);
+}
+
+export function setCustomLLMSetting(body: {
+  base_url: string;
+  api_key: string;
+}): Promise<CustomLLMSetting> {
+  return putJson<CustomLLMSetting>('/settings/custom-llm', body);
+}
+
 // ---- Model source (subscription vs custom API key) ------------------------
 
 export interface ModelSource {
