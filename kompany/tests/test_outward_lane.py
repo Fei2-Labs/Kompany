@@ -359,3 +359,86 @@ def test_spend_side_effect_is_always_gated(tmp_path, monkeypatch):
     actions = OutwardLane(engine, engine.lane_registry).dispatch_once()
     assert actions == [f"outward_parked:{row['id']}"]
     assert executor.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Idempotency: a re-enqueue of a live action never queues a second send
+# ---------------------------------------------------------------------------
+
+
+def _all_rows(engine):
+    return OutboxStore(engine.db).list(limit=100)
+
+
+def test_identical_enqueue_returns_existing_row_no_duplicate(tmp_path):
+    engine = FakeEngine(tmp_path)
+    first = _enqueue(engine, text="ship it")
+    second = _enqueue(engine, text="ship it")
+
+    assert second["id"] == first["id"]
+    assert len(_all_rows(engine)) == 1
+
+
+def test_different_text_enqueues_separately_without_explicit_key(tmp_path):
+    """The auto key is conservative: two distinct actions both go out."""
+    engine = FakeEngine(tmp_path)
+    first = _enqueue(engine, text="comment on post A")
+    second = _enqueue(engine, text="comment on post B")
+
+    assert second["id"] != first["id"]
+    assert len(_all_rows(engine)) == 2
+
+
+def test_explicit_key_suppresses_reworded_duplicate(tmp_path):
+    engine = FakeEngine(tmp_path)
+    first = enqueue_outward(
+        engine, channel="x", text="Launched v1!",
+        action_class="ai_voice_post", idempotency_key="campaign:launch:x",
+    )
+    second = enqueue_outward(
+        engine, channel="x", text="We have launched version 1!",
+        action_class="ai_voice_post", idempotency_key="campaign:launch:x",
+    )
+
+    assert second["id"] == first["id"]
+    assert second["text"] == "Launched v1!"  # the original wins, not the retry
+    assert len(_all_rows(engine)) == 1
+
+
+def test_resolved_row_releases_its_key(tmp_path):
+    """A sent action must not block a later action reusing the same key."""
+    engine = FakeEngine(tmp_path)
+    store = OutboxStore(engine.db)
+    first = enqueue_outward(
+        engine, channel="x", text="daily post",
+        action_class="ai_voice_post", idempotency_key="daily:2026-09-22",
+    )
+    store.set_status(first["id"], "sent")
+
+    second = enqueue_outward(
+        engine, channel="x", text="daily post",
+        action_class="ai_voice_post", idempotency_key="daily:2026-09-22",
+    )
+    assert second["id"] != first["id"]
+    assert len(_all_rows(engine)) == 2
+
+
+def test_parked_row_still_holds_its_key(tmp_path):
+    """Awaiting founder approval is LIVE — do not queue a parallel send."""
+    engine = FakeEngine(tmp_path)
+    store = OutboxStore(engine.db)
+    first = _enqueue(engine, text="hold me")
+    store.set_status(first["id"], "parked")
+
+    second = _enqueue(engine, text="hold me")
+    assert second["id"] == first["id"]
+    assert len(_all_rows(engine)) == 1
+
+
+def test_duplicate_suppression_is_audited(tmp_path):
+    engine = FakeEngine(tmp_path)
+    _enqueue(engine, text="ship it")
+    _enqueue(engine, text="ship it")
+
+    events = [r["event_type"] for r in engine.audit.recent(limit=20)]
+    assert "outward_queue.duplicate_suppressed" in events
