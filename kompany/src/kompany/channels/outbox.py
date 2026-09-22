@@ -11,6 +11,8 @@ integration task, not here.
 
 from __future__ import annotations
 
+import hashlib
+import sqlite3
 import uuid
 from typing import Any
 
@@ -38,6 +40,11 @@ OUTBOX_STATUSES = (
 # Statuses the outward lane treats as "waiting to be drained".
 OUTWARD_QUEUED_STATUSES = ("draft", "queued")
 
+# Statuses in which an outward action is still LIVE (not yet resolved), and so
+# still holds its idempotency key. Must match the partial unique index in
+# state/database_parts/migrations_extra.py.
+OUTWARD_LIVE_STATUSES = ("draft", "queued", "parked")
+
 # Max chars of a diary entry carried into an outbox draft.
 DIARY_EXCERPT_CHARS = 400
 
@@ -64,6 +71,7 @@ class OutboxStore:
         deliverable_class: str = "",
         side_effect: str = "",
         estimated_cost_usd: float = 0.0,
+        idempotency_key: str = "",
     ) -> dict[str, Any]:
         if status not in OUTBOX_STATUSES:
             raise ValueError(f"invalid outbox status {status!r}")
@@ -71,8 +79,9 @@ class OutboxStore:
         self.db.execute(
             """INSERT INTO channel_outbox
                    (id, channel, text, source, status, action_class,
-                    deliverable_class, side_effect, estimated_cost_usd)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    deliverable_class, side_effect, estimated_cost_usd,
+                    idempotency_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 channel,
@@ -83,10 +92,29 @@ class OutboxStore:
                 deliverable_class,
                 side_effect,
                 float(estimated_cost_usd or 0.0),
+                idempotency_key,
             ),
         )
         self.db.commit()
         return self.get(row_id)  # type: ignore[return-value]
+
+    def find_live_by_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        """The unresolved row holding ``idempotency_key``, if any.
+
+        A resolved row (sent / failed / discarded / approved) releases its
+        key, so a later action may legitimately reuse it.
+        """
+        if not idempotency_key:
+            return None
+        placeholders = ", ".join("?" for _ in OUTWARD_LIVE_STATUSES)
+        row = self.db.execute(
+            f"""SELECT * FROM channel_outbox
+                WHERE idempotency_key = ?
+                  AND status IN ({placeholders})
+                ORDER BY created_at ASC, rowid ASC LIMIT 1""",
+            (idempotency_key, *OUTWARD_LIVE_STATUSES),
+        ).fetchone()
+        return dict(row) if row else None
 
     def get(self, row_id: str) -> dict[str, Any] | None:
         row = self.db.execute(
@@ -188,6 +216,24 @@ def create_draft(
     return {**row, "approval_id": request.id}
 
 
+def derive_idempotency_key(
+    *, channel: str, action_class: str, source: str, text: str
+) -> str:
+    """Conservative fallback key for a caller that supplies none.
+
+    Includes ``text``, so it suppresses only an EXACT re-enqueue (crash
+    retry, double approval effect). Two genuinely different actions sharing
+    a class and source — say comments on two different posts in one cycle —
+    keep distinct keys and both go out. Collapsing re-worded duplicates of
+    one logical action needs an explicit caller key; the engine cannot infer
+    that intent from the text.
+    """
+    digest = hashlib.sha256(
+        "\x1f".join((channel, action_class, source, text)).encode("utf-8")
+    ).hexdigest()
+    return f"auto:{digest[:32]}"
+
+
 def enqueue_outward(
     engine: Any,
     channel: str,
@@ -198,6 +244,7 @@ def enqueue_outward(
     side_effect: str = "",
     estimated_cost_usd: float = 0.0,
     source: str = "",
+    idempotency_key: str = "",
 ) -> dict[str, Any]:
     """Enqueue an outward action for the outward lane to drain (ADR-0008).
 
@@ -206,18 +253,50 @@ def enqueue_outward(
     via a project ``OutwardExecutor`` or PARKS it for ``kompany approve``.
     Unlike :func:`create_draft`, this files NO approval card up front — the
     lane decides whether one is needed.
+
+    ``idempotency_key`` makes re-enqueue safe: while an action with the same
+    key is still live, this returns that row instead of queueing a second
+    send. Callers that know their action's identity should pass an explicit
+    key (``"campaign:spring:x"``, ``"linkedin:comment:<post_urn>"``); see
+    :func:`derive_idempotency_key` for the conservative default.
     """
     store = OutboxStore(engine.db)
-    row = store.add(
-        channel=channel,
-        text=text,
-        source=source,
-        status="queued",
-        action_class=action_class,
-        deliverable_class=deliverable_class,
-        side_effect=side_effect,
-        estimated_cost_usd=estimated_cost_usd,
+    key = idempotency_key or derive_idempotency_key(
+        channel=channel, action_class=action_class, source=source, text=text
     )
+    existing = store.find_live_by_key(key)
+    if existing is not None:
+        engine.audit.record(
+            "outward_queue.duplicate_suppressed",
+            f"Duplicate outward action suppressed for {channel}",
+            detail={
+                "outbox_id": existing["id"],
+                "channel": channel,
+                "action_class": action_class,
+                "idempotency_key": key,
+                "existing_status": existing["status"],
+            },
+        )
+        return existing
+    try:
+        row = store.add(
+            channel=channel,
+            text=text,
+            source=source,
+            status="queued",
+            action_class=action_class,
+            deliverable_class=deliverable_class,
+            side_effect=side_effect,
+            estimated_cost_usd=estimated_cost_usd,
+            idempotency_key=key,
+        )
+    except sqlite3.IntegrityError:
+        # Lost the race to a concurrent lane; the partial unique index is the
+        # real guard. Return the row that won rather than raising.
+        winner = store.find_live_by_key(key)
+        if winner is None:
+            raise
+        return winner
     engine.audit.record(
         "outward_queue.enqueued",
         f"Outward action queued for {channel}",
@@ -332,11 +411,13 @@ __all__ = [
     "ACTION_CHANNEL_POST",
     "APPROVE_COMMENT",
     "OUTBOX_STATUSES",
+    "OUTWARD_LIVE_STATUSES",
     "OUTWARD_QUEUED_STATUSES",
     "OutboxStore",
     "approve_channel_post",
     "approve_outward_park",
     "create_draft",
+    "derive_idempotency_key",
     "diary_outbox_hook",
     "enqueue_outward",
     "reject_channel_post",

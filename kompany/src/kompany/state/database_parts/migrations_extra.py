@@ -155,6 +155,7 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
         ("side_effect", "TEXT NOT NULL DEFAULT ''"),
         ("estimated_cost_usd", "REAL NOT NULL DEFAULT 0"),
         ("external_ref", "TEXT"),
+        ("idempotency_key", "TEXT NOT NULL DEFAULT ''"),
     ]:
         try:
             conn.execute(f"ALTER TABLE channel_outbox ADD COLUMN {col} {defn}")
@@ -163,6 +164,16 @@ def run_migrations_part2(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_channel_outbox_status "
         "ON channel_outbox(status, created_at)"
+    )
+    # One live outward action per idempotency key. Scoped to the non-terminal
+    # statuses so a resolved row (sent/failed/discarded/approved) never blocks
+    # a legitimate later action reusing the same key. The legacy '' key is
+    # excluded so pre-migration rows and unkeyed drafts stay unconstrained.
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_outbox_idem_live
+           ON channel_outbox(idempotency_key)
+           WHERE idempotency_key <> ''
+             AND status IN ('draft', 'queued', 'parked')"""
     )
 
     # Concurrent resilient runtime — lanes on top of the daemon (ADR-0005).
