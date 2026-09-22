@@ -4,6 +4,12 @@ All notable changes to Kompany are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **A Pro-only release can now actually be installed.** `update check` counted a newer Pro release as an available update, but `update apply` decided "is there an update?" on Core alone and returned a no-op — so Pro could never move without a Core release beside it. Apply now resolves Pro before that test and treats either side being behind as an update. A Pro-only update installs into `releases/<core>+pro<pro>` rather than rebuilding the release venv the running process lives in.
+
+### Added
+- **The Pro release token is checked for being an entitlement token.** `update check` reads the scopes and expiry GitHub reports for `github_release_token` and warns when it carries classic write scopes, never expires, or is valid for more than 90 days. The wanted shape is a fine-grained token scoped to `Fei2-Labs/kompany-pro` with Contents: Read-only and an expiry. Advisory only — a broad token still works, it just says so.
+
 ## [0.1.15] - 2026-09-11
 
 ### Changed

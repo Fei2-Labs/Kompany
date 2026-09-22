@@ -81,9 +81,14 @@ def check_for_update(engine: Any, *, fetch: Callable[..., Any] | None = None) ->
         try:
             pro = feed.latest_release("kompany-pro", token=token, fetch=fetch)
             latest["kompany-pro"] = pro.as_dict()
+            if pro.token_warning:
+                # Not an error — the update still runs. The founder just needs
+                # to know the entitlement token is broader than it should be.
+                errors.append(f"{PRO_TOKEN_CREDENTIAL}: {pro.token_warning}")
         except Exception as exc:  # noqa: BLE001
             hint = ("" if token else f" — the Pro repo is private: `kompany credentials set {PRO_TOKEN_CREDENTIAL}` "
-                    "with a read-only GitHub token")
+                    "with a fine-grained GitHub token scoped to Fei2-Labs/kompany-pro, Contents: Read-only, "
+                    "with an expiry date")
             errors.append(f"kompany-pro: {exc}{hint}")
     state.latest = latest
     state.last_check_at = _now()
@@ -162,11 +167,6 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
         core = feed.latest_release("kompany", fetch=fetch)
         if version and feed.parse_version(version) != feed.parse_version(core.version):
             raise feed.FeedError(f"requested {version} but the latest release is {core.version}; only the latest release can be installed")
-        if feed.parse_version(core.version) <= feed.parse_version(state.installed_version) and not version:
-            state.target_version = core.version
-            _set(engine, state, "done", "noop", f"already on {state.installed_version}")
-            state.finished_at = _now(); save_state(data_dir, state)
-            return status(engine, state)
         state.target_version = core.version
         pro: feed.ReleaseInfo | None = None
         pro_feed_error: str | None = None
@@ -178,7 +178,27 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
             except Exception as exc:  # noqa: BLE001
                 pro_feed_error = f"{exc}" + ("" if _pro_token(engine) else
                                              f" (no {PRO_TOKEN_CREDENTIAL} in the vault — Pro will be carried over, not updated)")
-        release_dir = install.releases_dir(data_dir) / core.version
+        # Either side being behind is an update. Resolving Pro BEFORE this test
+        # is what makes a Pro-only release installable: judging on Core alone
+        # made `check` report an update that `apply` then refused as a no-op,
+        # so a Pro release could never land without a Core release beside it.
+        core_newer = feed.parse_version(core.version) > feed.parse_version(state.installed_version)
+        pro_newer = bool(pro and state.installed_pro_version
+                         and feed.parse_version(pro.version) > feed.parse_version(state.installed_pro_version))
+        if not core_newer and not pro_newer and not version:
+            detail = f"already on {state.installed_version}"
+            if state.installed_pro_version:
+                detail += f" / Pro {state.installed_pro_version}"
+            _set(engine, state, "done", "noop", detail)
+            state.finished_at = _now(); save_state(data_dir, state)
+            return status(engine, state)
+        # One release dir per Core version — but a Pro-only update leaves Core
+        # unchanged, and that dir is the venv this process is running from.
+        # Rebuilding it under ourselves would corrupt the live release, so the
+        # Pro-only case gets its own name. `parse_version` splits on '+', so
+        # `0.1.18+pro0.1.6` still compares equal to Core 0.1.18 at verify time.
+        release_name = core.version if core_newer else f"{core.version}+pro{pro.version}"  # type: ignore[union-attr]
+        release_dir = install.releases_dir(data_dir) / release_name
         dl_dir = data_dir / "update" / "downloads" / core.version
 
         # --- backup first ---------------------------------------------------
@@ -222,17 +242,20 @@ def _apply(engine: Any, version: str | None, *, fetch, run, restart) -> dict[str
             _set(engine, state, "installing", "pro_carried_over", f"kompany-pro {carried} copied from release {lay['current']}")
 
         # --- switch + restart -------------------------------------------------
-        _set(engine, state, "switching", "switch", f"releases/current → {core.version}")
-        state.previous_version = install.switch_current(data_dir, core.version)
+        _set(engine, state, "switching", "switch", f"releases/current → {release_name}")
+        state.previous_version = install.switch_current(data_dir, release_name)
         state.verify_pending = True
         sup = install.supervised()
         state.restart_required = sup is None
         _set(engine, state, "restarting", "restart",
              f"exiting for {sup} to restart the new release" if sup else "not supervised — restart the daemon by hand")
-        engine.audit.record("update.switched", f"Update {state.installed_version} → {core.version} installed; restarting",
-                            detail={"previous": state.previous_version, "target": core.version, "backup_id": state.backup_id,
+        moved = (f"{state.installed_version} → {core.version}" if core_newer
+                 else f"Pro {state.installed_pro_version} → {pro.version}")  # type: ignore[union-attr]
+        engine.audit.record("update.switched", f"Update {moved} installed; restarting",
+                            detail={"previous": state.previous_version, "target": core.version, "release": release_name,
+                                    "pro_target": pro.version if pro else None, "backup_id": state.backup_id,
                                     "attestation": att, "supervised": sup})
-        _notify(engine, f"Kompany updating {state.installed_version} → {core.version}; the engine restarts now", "info")
+        _notify(engine, f"Kompany updating {moved}; the engine restarts now", "info")
         if sup:
             (restart or _exit_soon)()
         return status(engine, state)

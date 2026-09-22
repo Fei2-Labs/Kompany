@@ -128,6 +128,12 @@ export function UpdateCard() {
           {(st.phase === 'failed' || st.phase === 'rolled_back') && st.error && (
             <p className="settings__result settings__result--err">✗ {st.error}</p>
           )}
+          {/* A check can succeed and still have something to say — an
+              unreachable Pro feed, or a Pro token broader than an
+              entitlement token needs to be. Neither fails the update. */}
+          {st.phase !== 'failed' && st.phase !== 'rolled_back' && st.error && (
+            <p className="settings__meta">⚠ {st.error}</p>
+          )}
           {st.attestation?.status && <p className="settings__meta">provenance: {st.attestation.status}</p>}
           <div className="settings__actions">
             <button className="btn btn--sm" onClick={() => void run('/update/check')} disabled={busy || inFlight}>

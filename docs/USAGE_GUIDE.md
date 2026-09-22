@@ -728,7 +728,9 @@ kompany update rollback        # back to the previous release
 kompany update mode automatic_when_idle   # or: manual (default — report only)
 ```
 
-REST `GET /update`, `POST /update/check|apply|rollback|mode`; MCP `kompany_update_*`; SDK `k.update_*()`. In `automatic_when_idle` mode the daemon checks every `update_check_interval_hours` (6) and installs when no agent is working. The private Pro wheel needs a read-only GitHub token in the vault: `kompany credentials set github_release_token`. Core needs no credential.
+REST `GET /update`, `POST /update/check|apply|rollback|mode`; MCP `kompany_update_*`; SDK `k.update_*()`. In `automatic_when_idle` mode the daemon checks every `update_check_interval_hours` (6) and installs when no agent is working. The private Pro wheel needs a GitHub token in the vault: `kompany credentials set github_release_token`. Core needs no credential.
+
+That token is an **entitlement token**, not a general GitHub credential. Create it as a *fine-grained* personal access token, resource owner `Fei2-Labs`, repository access limited to `Fei2-Labs/kompany-pro`, permission **Contents: Read-only**, with an expiry (90 days or less). It can then do exactly one thing — download a Pro release asset. `kompany update check` inspects what GitHub reports back about the token and reports it if it carries classic write scopes, never expires, or is valid for more than 90 days; the update still runs, but the message is a standing reminder to replace it. When the token expires, Core keeps updating and the installed Pro is carried over into the new release venv unchanged.
 
 **First time only** — a server that still runs from a git checkout or a hand-made venv has no `releases/current`; migrate it once with the bootstrap script (it backs up, installs the release, writes the hardened systemd unit pointing at `releases/current`, restarts and runs the doctor):
 
