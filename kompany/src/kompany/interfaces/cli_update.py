@@ -43,7 +43,10 @@ def _panel(st: dict, title: str) -> Panel:
     for step in (st.get("steps") or [])[-4:]:
         lines.append(f"  {step['at'][11:19]} {step['step']}: {step['detail']}")
     if st.get("error"):
-        lines.append(f"[red]{st['error']}[/red]")
+        # A check can succeed and still report something — an unreachable Pro
+        # feed, or a Pro token broader than an entitlement token needs to be.
+        colour = "red" if st.get("phase") in ("failed", "rolled_back") else "yellow"
+        lines.append(f"[{colour}]{st['error']}[/{colour}]")
     return Panel("\n".join(lines), title=title)
 
 

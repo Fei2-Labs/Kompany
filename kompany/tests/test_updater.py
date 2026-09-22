@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,11 +22,18 @@ CORE_REPO = "Fei2-Labs/Kompany"
 class FakeGitHub:
     """httpx.get-compatible fake for api.github.com + asset downloads."""
 
-    def __init__(self, core_version="0.1.6", pro_version=None, tamper=False):
+    # Default Pro-token response headers: a fine-grained PAT (no OAuth scopes)
+    # that expires inside the window — the shape the entitlement contract wants,
+    # so it raises no warning.
+    CLEAN_TOKEN_HEADERS = {"X-OAuth-Scopes": "",
+                           "github-authentication-token-expiration": "2026-10-15 12:00:00 UTC"}
+
+    def __init__(self, core_version="0.1.6", pro_version=None, tamper=False, pro_headers=None):
         self.calls: list[str] = []
         self.wheel = b"PK\x03\x04 fake core wheel " + core_version.encode()
         self.pro_wheel = b"PK\x03\x04 fake pro wheel"
         self.core_version, self.pro_version, self.tamper = core_version, pro_version, tamper
+        self.pro_headers = dict(self.CLEAN_TOKEN_HEADERS if pro_headers is None else pro_headers)
 
     def _manifest(self, name, blob):
         return {"schema": 2, "version": self.core_version, "commit": "abc" * 13, "release_digest": "d" * 64,
@@ -40,6 +48,7 @@ class FakeGitHub:
                                          {"name": "release-manifest.json", "url": "https://api.github.com/assets/2"}]}
         elif url.endswith("/repos/Fei2-Labs/kompany-pro/releases/latest"):
             assert kw["headers"].get("Authorization", "").startswith("Bearer ")
+            r.headers = self.pro_headers
             r.json = lambda: {"tag_name": f"v{self.pro_version}", "html_url": "", "published_at": None,
                               "assets": [{"name": f"kompany_pro-{self.pro_version}-py3-none-any.whl", "url": "https://api.github.com/assets/3"},
                                          {"name": "release-manifest.json", "url": "https://api.github.com/assets/4"}]}
@@ -180,6 +189,69 @@ def test_apply_end_to_end_switches_and_requests_restart(engine, monkeypatch):
     assert st2["phase"] == "restarting" and restarted == [True] and st2["restart_required"] is False
     kinds = [e["event_type"] for e in engine.audit.recent(limit=20)] if hasattr(engine.audit, "recent") else ["update.switched"]
     assert "update.switched" in kinds
+
+
+def test_token_warning_accepts_a_fine_grained_read_only_token():
+    assert feed.token_warning(FakeGitHub.CLEAN_TOKEN_HEADERS) is None
+
+
+def test_token_warning_flags_classic_write_scopes_and_no_expiry():
+    warn = feed.token_warning({"X-OAuth-Scopes": "repo, workflow, read:user"})
+    assert warn and "repo, workflow" in warn and "never expires" in warn
+    # read-only scopes on their own are not the problem — the missing expiry is
+    warn = feed.token_warning({"X-OAuth-Scopes": "read:packages"})
+    assert warn and "write scopes" not in warn and "never expires" in warn
+
+
+def test_token_warning_flags_a_long_lived_token():
+    far = (datetime.now(UTC) + timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S UTC")
+    warn = feed.token_warning({"X-OAuth-Scopes": "", "github-authentication-token-expiration": far})
+    assert warn and "valid for another" in warn
+
+
+def test_check_surfaces_a_broad_pro_token_without_failing(engine, monkeypatch):
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", "0.1.5"))
+    engine.credentials.set(pipeline.PRO_TOKEN_CREDENTIAL, "ghp_test")
+    gh = FakeGitHub(core_version="0.1.6", pro_version="0.1.5", pro_headers={"X-OAuth-Scopes": "repo"})
+    st = pipeline.check_for_update(engine, fetch=gh)
+    # advisory: the feed still resolved, so Pro is still updatable
+    assert st["latest"]["kompany-pro"]["version"] == "0.1.5"
+    assert "read-only Contents access" in (st["error"] or "")
+
+
+def test_pro_only_release_installs_without_a_core_release(engine, monkeypatch):
+    """A Pro release with Core already current must still install.
+
+    Judging "is there an update" on Core alone made ``check`` advertise an
+    update that ``apply`` then refused as a no-op, so Pro could never move
+    without a Core release beside it.
+    """
+    _release_layout(engine, monkeypatch, "0.1.6")
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", "0.1.4"))
+    engine.credentials.set(pipeline.PRO_TOKEN_CREDENTIAL, "ghp_test")
+    gh = FakeGitHub(core_version="0.1.6", pro_version="0.1.5")
+    assert pipeline.check_for_update(engine, fetch=gh)["update_available"] is True
+
+    monkeypatch.setattr(feed.shutil, "which", lambda name: None)
+    st = pipeline.apply_update(engine, fetch=gh, run=fake_run_factory("0.1.6")[0])
+    assert st["phase"] == "restarting", st
+    data = Path(engine.settings.data_dir)
+    # Core is unchanged, so the new release gets its own name — rebuilding the
+    # 0.1.6 dir would be rebuilding the venv this process runs from.
+    assert (data / "releases" / "current").resolve().name == "0.1.6+pro0.1.5"
+    assert st["previous_version"] == "0.1.6"
+    assert (data / "releases" / "0.1.6" / "venv" / "bin" / "python").exists()
+    assert (data / "update" / "downloads" / "0.1.6" / "kompany_pro-0.1.5-py3-none-any.whl").is_file()
+
+
+def test_both_current_is_still_a_noop(engine, monkeypatch):
+    _release_layout(engine, monkeypatch, "0.1.6")
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.6", "0.1.5"))
+    engine.credentials.set(pipeline.PRO_TOKEN_CREDENTIAL, "ghp_test")
+    st = pipeline.apply_update(engine, fetch=FakeGitHub(core_version="0.1.6", pro_version="0.1.5"),
+                               run=fake_run_factory("0.1.6")[0])
+    assert st["phase"] == "done" and st["steps"][-1]["step"] == "noop"
+    assert "Pro 0.1.5" in st["steps"][-1]["detail"]
 
 
 def test_apply_refusals_leave_current_untouched(engine, monkeypatch):
