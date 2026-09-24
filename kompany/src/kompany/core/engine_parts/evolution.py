@@ -33,7 +33,8 @@ class ArtifactEvolutionMixin:
         return revert_artifact_proposal(self, proposal_id, reason)
 
     def evolution_status(self) -> dict[str, Any]:
-        """Workspace state + lane budget for the founder audit view."""
+        """Workspace state + lane budget + R7 flip-rates for the founder audit view."""
+        from kompany.core.artifact_evolution.flip_stats import flip_rates
         from kompany.core.artifact_evolution.workspace import ArtifactWorkspace
 
         ws = ArtifactWorkspace(self.settings.data_dir)
@@ -45,6 +46,7 @@ class ArtifactEvolutionMixin:
             "model_tier": str(getattr(self.settings, "artifact_evolution_model_tier", "economy")),
             "workspace": ws.status(), "recent_commits": ws.log(10) if ws.exists() else [],
             "proposals": self.artifact_proposals.list(limit=10),
+            "flip_rates": flip_rates(self),
         }
 
 

@@ -127,4 +127,24 @@ def check_artifact_workspace(engine: Any) -> dict[str, Any]:
     return node("artifacts", "Artifact workspace", "ok", detail)
 
 
-__all__ = ["check_artifact_workspace", "check_ledger", "check_plugins", "check_souls", "check_workflows"]
+def check_evolution_flip(engine: Any) -> dict[str, Any]:
+    """R7 flip-rate: a gate that never says no is a rubber stamp, not a gate."""
+    from kompany.core.artifact_evolution.flip_stats import flip_rates
+
+    rates = flip_rates(engine)
+    c = rates["code_lane"]
+    a = rates["artifact_lane"]
+    detail = (f"code {c['rejected']}/{c['decisions']} rejected "
+              f"({rates['window_days']}d window, sample >= {rates['min_sample']}); "
+              f"artifacts {a['doctor_reverts']}/{a['auto_applies']} doctor-reverted")
+    if rates["rubber_stamp"]:
+        lanes = [name for name, r in (("code", c), ("artifacts", a)) if r["rubber_stamp"]]
+        return node("evolution_flip", "Evolution flip-rate", "warn", detail + f"; {', '.join(lanes)} at 0",
+                    "A gate that never flips means nobody is reviewing proposals or the doctor has no teeth. "
+                    "See `kompany evolve status` for the lane and tighten the gate.")
+    if not c["decisions"] and not a["auto_applies"]:
+        return node("evolution_flip", "Evolution flip-rate", "info", detail)
+    return node("evolution_flip", "Evolution flip-rate", "ok", detail)
+
+
+__all__ = ["check_artifact_workspace", "check_evolution_flip", "check_ledger", "check_plugins", "check_souls", "check_workflows"]
