@@ -227,6 +227,7 @@ def _evo_checks() -> tuple[tuple[str, str, Callable[[Any], dict[str, Any]]], ...
         ("plugins", "Plugins", dc.check_plugins),
         ("ledger", "Ledger", dc.check_ledger),
         ("artifacts", "Artifact workspace", dc.check_artifact_workspace),
+        ("evolution_flip", "Evolution flip-rate", dc.check_evolution_flip),
     )
 
 
@@ -345,6 +346,13 @@ def persist_report(engine: Any, root: dict[str, Any]) -> None:
             for ev in open_:
                 he.resolve(ev["id"], "continue", resolved_by="system")
     except Exception:  # noqa: BLE001
+        pass
+    try:
+        # R7 flip-rate watchdog: one open evolution_rubber_stamp event while
+        # either lane sits at 0; resolved automatically when it recovers.
+        from kompany.core.artifact_evolution.flip_stats import reconcile_rubber_stamp
+        reconcile_rubber_stamp(engine)
+    except Exception:  # noqa: BLE001 — advisory, like doctor_failed
         pass
 
 

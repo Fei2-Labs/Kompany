@@ -59,6 +59,13 @@ HEALTH_KINDS: frozenset[str] = frozenset({
     # (other than the LLM-key check). One open event while failing;
     # resolved automatically by the next clean doctor run.
     "doctor_failed",
+    # 08-29 self-evolution R7: either evolution lane's flip-rate sits at 0
+    # over the rolling window (founder never rejects in the code lane, the
+    # doctor never reverts in the artifact lane) — the gate is a rubber
+    # stamp. Mirrors doctor_failed: one open event while it holds, resolved
+    # automatically by the next doctor run. See
+    # ``core/artifact_evolution/flip_stats.py``.
+    "evolution_rubber_stamp",
 })
 
 HEALTH_STATUSES: frozenset[str] = frozenset({
