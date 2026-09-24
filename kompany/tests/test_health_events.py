@@ -211,6 +211,9 @@ def test_constants_match_prd():
         "extension_incompatible",
         # 08-29 self-evolution R1: doctor self-test gate failed.
         "doctor_failed",
+        # 08-29 self-evolution R7: no evolution decisions flipped in the
+        # minimum sample window, so the gate may be rubber-stamping.
+        "evolution_rubber_stamp",
     })
     assert HEALTH_STATUSES == frozenset({
         "open", "resolved", "snoozed", "dismissed",
