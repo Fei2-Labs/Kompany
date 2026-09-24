@@ -1,6 +1,6 @@
 # Plugin Contract
 
-Status: v1.2.0 (1.0.0 decided 2026-05-22; 1.1.0 additive bump 2026-09-04, see §"1.1.0 additions"; 1.2.0 additive bump 2026-09-07, see §"1.2.0 additions"). See [ADR-0002](../adr/0002-plugin-contract-design.md) for the trade-off record.
+Status: v1.3.0 (1.0.0 decided 2026-05-22; 1.1.0 additive bump 2026-09-04, see §"1.1.0 additions"; 1.2.0 additive bump 2026-09-07, see §"1.2.0 additions"; 1.3.0 additive bump 2026-09-25, see §"1.3.0 additions"). See [ADR-0002](../adr/0002-plugin-contract-design.md) for the trade-off record.
 
 The plugin contract is the stable Core↔Pro integration surface, defined in `kompany.plugins.*`. Pro / community packages register contributions via Python entry points and pin a Core version range in their `pyproject.toml`.
 
@@ -26,6 +26,9 @@ saas-pro-starter = "my_pro_pack.templates:saas_pro_starter"
 
 [project.entry-points."kompany.tools"]
 stripe.create_invoice = "my_pro_pack.tools.stripe:create_invoice"
+
+[project.entry-points."kompany.judgment"]
+myvendor-judgment = "my_pro_pack.judgment:provider"
 ```
 
 Core discovers all installed plugins via `kompany.plugins.loader.discover()` on engine init. One-shot — restart Core to pick up newly installed plugins. No hot-reload (MVP; revisit for Cloud).
@@ -38,6 +41,7 @@ Failures in a single plugin are caught and surfaced in `discover()["_errors"]` s
 |---|---|---|
 | `Tool` | A callable action (e.g. `stripe.create_invoice`) | Thick: declares `side_effect` + `autonomy_tier` + `estimate_cost` so the engine wires cost ledger, AutonomyGate, audit automatically |
 | `AgentSoul` | A new role (12th C-level / 6th subagent / etc.) | YAML default via `SoulAgent`; Python subclass escape hatch. Pro souls **add** new roles — never replace Core's 11 + 5 |
+| `JudgmentProvider` (1.3.0) | A source of typed, calibrated verdicts | Inert by default: Core ships an abstaining provider, and off-machine providers stay behind `external_judgment_enabled`. See §"1.3.0 additions" |
 | `Integration` | Connector to an external service (Stripe, Polar, Notion) | Pure tool source + credentials. Declares required creds; exposes Tools |
 | `Workflow` | Multi-step business recipe (e.g. `14-day-saas-launch`) | Hybrid: top-level YAML steps for engine introspection (cost preview, AutonomyGate); Python escape for complex steps |
 | `Template` | Pre-bundled company starter (e.g. `saas-pro-starter`) | Extends Core's `manifest.json` schema; references workflows / souls / integrations by ID (not embedded) |
@@ -90,6 +94,21 @@ Reference consumer: the branding department plugin in kompany-pro (`kompany_pro/
 | Workflow YAML step `skills:` | `true` / `false` / `{scopes: [builtin\|company\|agent], limit: N, query: "<template>"}` | Selective skill injection per step (08-29 R3): trigger-word-retrieved skills of the declared scopes are prepended to the rendered prompt. Absent = no injection, so every existing workflow is byte-identical. |
 | `ExecutorContext.skills` | the company `SkillStore` (or `None`) | What the step executor reads for `skills:`. `None` when a bare runner is driven without the engine. |
 | `SkillStore` scopes | `scope` column: `agent` (private to the role that learned it — the default and prior behaviour), `company` (every role may retrieve it), `builtin` | Widening is an explicit act: `kompany skills scope <role> <name> company`, REST `POST /skills/{role}/{name}/scope`, MCP `kompany_skill_set_scope`, SDK; the `save_skill` chat tool accepts `scope`. A shared skill keeps its origin role and is labelled `(shared by <role>)` when injected elsewhere. |
+
+## 1.3.0 additions (additive, 2026-09-25)
+
+| Surface | Addition | Purpose |
+|---|---|---|
+| `JudgmentProvider` ABC + entry-point group `kompany.judgment` | A replaceable source of typed, calibrated verdicts: `ChoiceQuestion` / `BooleanQuestion` / `ScoreQuestion` in, `Judgment` (value + distribution + `confidence` + `abstained`) out. Defined in `kompany.core.judgment`, re-exported from `kompany.plugins`. | Kompany's existing decision layers (hard gates → heuristic gates → economy LLM judges) stay exactly as they are; this is the seam a better judgment source plugs into. See [ADR-0010](../adr/0010-judgment-provider-seam.md). |
+| `external_judgment_enabled` setting (default **OFF**) | Consent gate for off-machine judgment. | A judgment call carries directives, outward copy and financial context. A provider declaring `is_external = True` is **skipped** — not an error — until the founder opts in. `is_external` defaults to `True`, so an author who forgets to declare fails closed. A local provider is unaffected. |
+
+Three rules a provider author must know:
+
+- **Core is complete without you.** The shipped `AbstainingJudgmentProvider` answers every question with `abstained=True`, and every caller must then use the verdict it would have produced anyway. A stock install discovers `[]` and loses nothing.
+- **Failure abstains, never raises.** `judge()` catches a provider that raises, returns a non-mapping, answers the wrong kind, or omits a key, and substitutes abstentions. Judgment is an *upgrade* to a decision that already has an answer — it can never block the engine by going offline.
+- **A judgment observes; it never acts.** Implementations must be side-effect free with respect to company state, and should answer all questions in one round trip (questions in one call are independent and cannot see each other's answers).
+
+As of 2026-09-25 **no Core decision path consumes the seam** — it was landed ahead of any provider so the surface is public API before the OSS announcement. Wiring one into a gate is a separate, founder-signed decision, and a test (`test_no_core_decision_path_consumes_the_seam_yet`) enforces the current state.
 
 ## Workspace artifacts — the evolution lane (2026-09-07)
 
@@ -237,8 +256,8 @@ Deferred (additive bumps when needed):
 
 ## Cross-references
 
-- ABCs: `kompany/src/kompany/plugins/contract.py`
+- ABCs: `kompany/src/kompany/plugins/contract.py`; judgment seam in `kompany/src/kompany/core/judgment.py`
 - Loader: `kompany/src/kompany/plugins/loader.py`
-- Tests: `kompany/tests/test_plugins_contract.py`, `kompany/tests/test_engine_workflows.py`, `kompany/tests/test_documents_store.py`, `kompany/tests/test_artifacts_store.py`, `kompany/tests/test_extensions.py`
-- Decision: [ADR-0002](../adr/0002-plugin-contract-design.md)
+- Tests: `kompany/tests/test_plugins_contract.py`, `kompany/tests/test_engine_workflows.py`, `kompany/tests/test_documents_store.py`, `kompany/tests/test_artifacts_store.py`, `kompany/tests/test_extensions.py`, `kompany/tests/test_judgment_seam.py`
+- Decisions: [ADR-0002](../adr/0002-plugin-contract-design.md), [ADR-0010](../adr/0010-judgment-provider-seam.md)
 - Boundary: the README "Open Core — Core / Pro / Cloud" section

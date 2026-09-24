@@ -30,11 +30,12 @@ from kompany.plugins import (
 
 
 def test_contract_version_pinned():
-    assert __contract_version__ == "1.2.0"
+    assert __contract_version__ == "1.3.0"
 
 
 def test_entry_point_groups_are_the_plugin_kinds():
-    # ADR-0008 added the outward-executor kind alongside the original five.
+    # ADR-0008 added the outward-executor kind alongside the original
+    # five; ADR-0010 added the judgment provider.
     assert ENTRY_POINT_GROUPS == (
         "kompany.workflows",
         "kompany.souls",
@@ -42,6 +43,7 @@ def test_entry_point_groups_are_the_plugin_kinds():
         "kompany.templates",
         "kompany.tools",
         "kompany.outward",
+        "kompany.judgment",
     )
 
 

@@ -16,6 +16,20 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from pydantic import BaseModel
 
+# Contract 1.3.0: the judgment seam. The ABC and its value objects live in
+# ``kompany.core.judgment`` (Core consumes them there); they are re-exported
+# here because a plugin-implementable ABC belongs to the contract surface
+# and follows ``__contract_version__``. Core names no judgment vendor —
+# see the module docstring for the consent and fail-open rules.
+from kompany.core.judgment import (  # noqa: F401 — contract re-export
+    BooleanQuestion,
+    ChoiceQuestion,
+    Judgment,
+    JudgmentProvider,
+    Question,
+    ScoreQuestion,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 

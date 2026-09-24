@@ -3,9 +3,10 @@
 Stable surface for Pro / community packages to extend Core via Python entry
 points. Pinned by semantic versioning — see ``__contract_version__`` below.
 
-Five plugin kinds: ``Workflow``, ``AgentSoul``, ``Integration``, ``Template``,
-``Tool``. Each has a corresponding ABC in :mod:`kompany.plugins.contract` and
-an entry-point group declared in plugin ``pyproject.toml``:
+Plugin kinds: ``Workflow``, ``AgentSoul``, ``Integration``, ``Template``,
+``Tool``, ``OutwardExecutor`` (ADR-0008) and ``JudgmentProvider``
+(ADR-0010). Each has a corresponding ABC in :mod:`kompany.plugins.contract`
+and an entry-point group declared in plugin ``pyproject.toml``:
 
     [project.entry-points."kompany.workflows"]
     14-day-saas-launch = "my_pro_pack.workflows:fourteen_day_launch"
@@ -22,6 +23,9 @@ an entry-point group declared in plugin ``pyproject.toml``:
     [project.entry-points."kompany.tools"]
     stripe.create_invoice = "my_pro_pack.tools.stripe:create_invoice"
 
+    [project.entry-points."kompany.judgment"]
+    myvendor-judgment = "my_pro_pack.judgment:provider"
+
 Plugin packages MUST pin a compatible Core range in their ``pyproject.toml``::
 
     dependencies = ["kompany>=0.2,<0.3"]
@@ -35,9 +39,15 @@ from __future__ import annotations
 from kompany.plugins.contract import (
     AgentSoul,
     AutonomyTier,
+    BooleanQuestion,
+    ChoiceQuestion,
     CostEstimate,
     Integration,
+    Judgment,
+    JudgmentProvider,
     OutwardExecutor,
+    Question,
+    ScoreQuestion,
     SideEffect,
     Template,
     Tool,
@@ -46,7 +56,7 @@ from kompany.plugins.contract import (
 )
 from kompany.plugins.loader import discover, registered
 
-__contract_version__ = "1.2.0"
+__contract_version__ = "1.3.0"
 
 ENTRY_POINT_GROUPS = (
     "kompany.workflows",
@@ -55,6 +65,7 @@ ENTRY_POINT_GROUPS = (
     "kompany.templates",
     "kompany.tools",
     "kompany.outward",
+    "kompany.judgment",
 )
 
 __all__ = [
@@ -62,9 +73,15 @@ __all__ = [
     "ENTRY_POINT_GROUPS",
     "AgentSoul",
     "AutonomyTier",
+    "BooleanQuestion",
+    "ChoiceQuestion",
     "CostEstimate",
     "Integration",
+    "Judgment",
+    "JudgmentProvider",
     "OutwardExecutor",
+    "Question",
+    "ScoreQuestion",
     "SideEffect",
     "Template",
     "Tool",
