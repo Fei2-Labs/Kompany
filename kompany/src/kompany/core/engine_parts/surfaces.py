@@ -564,6 +564,12 @@ class FounderSurfacesMixin:
         me click approve". Never eligible for SPEND tools or any
         non-zero estimated/failed cost estimate, matching
         ``AutonomyGate.check_tool``'s hard no-auto-pay invariant.
+
+        ADR-0011: once the policy allows it, a judgment provider (if
+        one is installed and, when external, opted in) gets one more
+        say — it can turn this into a hold, never grant eligibility the
+        policy itself withheld. With no provider installed this is a
+        no-op: the policy's own answer stands unchanged.
         """
         from kompany.plugins.contract import SideEffect
 
@@ -574,4 +580,21 @@ class FounderSurfacesMixin:
         if float(payload.get("estimated_cost_usd") or 0.0) > 0.0:
             return False
         policy = self.tool_authorization.get(requested_by, tool.name)
-        return bool(policy and policy.allowed and not policy.requires_approval)
+        policy_ok = bool(
+            policy and policy.allowed and not policy.requires_approval
+        )
+        if not policy_ok:
+            return False
+
+        from kompany.core.approval_judgment import (
+            judgment_confirms_auto_approve,
+        )
+
+        return judgment_confirms_auto_approve(
+            self,
+            tool_name=tool.name,
+            tool_description=tool.description,
+            side_effect=tool.side_effect.value,
+            estimated_cost_usd=float(payload.get("estimated_cost_usd") or 0.0),
+            requested_by=requested_by,
+        )
