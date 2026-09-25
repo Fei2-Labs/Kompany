@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from kompany.plugins.contract import (
         AgentSoul,
         Integration,
+        JudgmentProvider,
         OutwardExecutor,
         Template,
         Tool,
@@ -49,6 +50,12 @@ _GROUP_TO_KIND = {
     # so an engine with no plugin installed discovers [] — the outward lane
     # then parks every action with reason "no executor".
     "kompany.outward": "outward_executor",
+    # ADR-0010: judgment providers. Core ships the abstaining default in
+    # ``core/judgment.py``, not as a discovered plugin, so an engine with
+    # nothing installed discovers [] and every caller keeps its own
+    # deterministic verdict. An ``is_external`` provider stays inert until
+    # the founder sets ``external_judgment_enabled``.
+    "kompany.judgment": "judgment",
 }
 
 

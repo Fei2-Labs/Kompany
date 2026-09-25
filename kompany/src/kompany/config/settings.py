@@ -220,6 +220,17 @@ class KompanySettings(BaseSettings):
     artifact_evolution_daily_cap_usd: float = 2.0
     artifact_evolution_model_tier: str = "economy"
 
+    # Off-machine judgment consent (ADR-0010). The judgment seam in
+    # ``core/judgment.py`` resolves a plugin-supplied provider only when
+    # the founder has opted in here; an ``is_external`` provider found
+    # while this is OFF is skipped, and every caller keeps the verdict it
+    # would have produced anyway. Default OFF is deliberate: a judgment
+    # call carries company state (directives, outward copy, financial
+    # context) to a third party, and a self-hosted install must not do
+    # that without the founder saying so. A local provider
+    # (``is_external = False``) is unaffected by this flag.
+    external_judgment_enabled: bool = False
+
     # One-button update (Stage C step 9). ``manual`` only reports that a
     # release exists; ``automatic_when_idle`` lets the ticker apply it when no
     # agent is working. The founder's choice made in Settings is persisted
