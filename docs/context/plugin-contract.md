@@ -108,7 +108,7 @@ Three rules a provider author must know:
 - **Failure abstains, never raises.** `judge()` catches a provider that raises, returns a non-mapping, answers the wrong kind, or omits a key, and substitutes abstentions. Judgment is an *upgrade* to a decision that already has an answer — it can never block the engine by going offline.
 - **A judgment observes; it never acts.** Implementations must be side-effect free with respect to company state, and should answer all questions in one round trip (questions in one call are independent and cannot see each other's answers).
 
-As of 2026-09-25 **no Core decision path consumes the seam** — it was landed ahead of any provider so the surface is public API before the OSS announcement. Wiring one into a gate is a separate, founder-signed decision, and a test (`test_no_core_decision_path_consumes_the_seam_yet`) enforces the current state.
+The seam was landed ahead of any provider so the surface is public API before the OSS announcement, and initially had no consumer. As of 2026-09-25 it has exactly one: the founder-tunable auto-approve check (`core/engine_parts/surfaces.py::_auto_approve_eligible`, via `core/approval_judgment.py`) consults it to (only) turn an already-eligible auto-approve into a hold — see [ADR-0011](../adr/0011-approval-routing-first-judgment-consumer.md). A test (`test_only_the_signed_off_consumer_imports_the_seam`) allow-lists that one consumer by name; wiring a second is a separate, founder-signed decision the same way this one was.
 
 ## Workspace artifacts — the evolution lane (2026-09-07)
 

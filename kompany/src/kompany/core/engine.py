@@ -337,6 +337,19 @@ class KompanyEngine(
             self.outward_executors = _registered("outward_executor")
         except Exception:  # noqa: BLE001 — a broken plugin scan must not block boot
             self.outward_executors = []
+        # Judgment providers (ADR-0010/0011): cached at boot for the same
+        # reason as the executors above — ``_auto_approve_eligible`` runs on
+        # every proposed action and must not pay an entry-point scan each
+        # time. Core ships none, so this is [] until a plugin is installed.
+        try:
+            from kompany.plugins.loader import registered as _registered
+
+            # Kind literal, like the neighbours above — importing
+            # ``JUDGMENT_PLUGIN_KIND`` here would make engine.py a consumer
+            # of the seam, which the ADR-0010 guard test deliberately blocks.
+            self.judgment_providers = _registered("judgment")
+        except Exception:  # noqa: BLE001 — broken scan must not block boot
+            self.judgment_providers = []
         self.outward_lane = OutwardLane(
             engine=self, registry=self.lane_registry
         )

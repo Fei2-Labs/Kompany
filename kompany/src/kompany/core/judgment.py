@@ -30,10 +30,16 @@ abstentions, so the existing deterministic verdict stands. Judgment is an
 *upgrade* to a decision that already has an answer — never the only thing
 standing between the engine and an action.
 
-NOTE (2026-09-25): no Core gate consumes this seam yet. It is landed
-ahead of any provider so the surface is public API before the OSS
-announcement. Wiring a concrete provider into a decision path is a
-separate, founder-signed decision.
+NOTE (2026-09-25): no Core gate consumed this seam at first landing. It
+was landed ahead of any provider so the surface is public API before
+the OSS announcement.
+
+NOTE (2026-09-25, ADR-0011): the founder-tunable auto-approve check
+(``core/engine_parts/surfaces.py._auto_approve_eligible``, via
+``core/approval_judgment.py``) is now the seam's first consumer. It can
+only turn an already-eligible auto-approve into a hold, never grant
+eligibility a deterministic policy withheld — with no provider
+installed it remains a no-op. See ADR-0011 before wiring a second one.
 """
 
 from __future__ import annotations

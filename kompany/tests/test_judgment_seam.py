@@ -247,15 +247,15 @@ def test_provider_answering_correctly_is_usable():
     assert answers["x"].confidence == 0.9
 
 
-# --- the seam stays unwired ------------------------------------------------
+# --- the seam is wired only where the founder signed off --------------------
 
 
-def test_no_core_decision_path_consumes_the_seam_yet():
-    """ADR-0010 landed the seam only; wiring needs founder sign-off.
+def test_only_the_signed_off_consumer_imports_the_seam():
+    """ADR-0010 landed the seam only; ADR-0011 wired its first consumer.
 
-    If this fails, someone connected a gate to the judgment seam. That is
-    a deliberate decision — update this test along with the ADR, do not
-    delete it.
+    If this fails, someone connected another gate to the judgment seam.
+    That is a deliberate, founder-signed decision — update this test
+    along with a new ADR, do not delete it.
     """
     import subprocess
     from pathlib import Path
@@ -275,7 +275,9 @@ def test_no_core_decision_path_consumes_the_seam_yet():
     importers = {
         Path(line).name for line in out.stdout.split() if line.strip()
     }
-    assert importers <= {"contract.py"}, (
+    # contract.py re-exports the ABC; approval_judgment.py is ADR-0011's
+    # sole consumer, consulted from surfaces.py's auto-approve check.
+    assert importers <= {"contract.py", "approval_judgment.py"}, (
         f"unexpected consumers of the judgment seam: {sorted(importers)}"
     )
 
