@@ -231,6 +231,20 @@ class KompanySettings(BaseSettings):
     # (``is_external = False``) is unaffected by this flag.
     external_judgment_enabled: bool = False
 
+    founder_report_cadence: str = "daily_plus_weekly"
+    founder_report_delivery: str = "auto"
+    heartbeat_push_on_change: bool = True
+    distill_auto_enabled: bool = True
+    distill_min_new_episodes: int = 10
+    distill_max_gap_days: int = 7
+    auto_evolution_enabled: bool = True
+    auto_evolution_failure_threshold: int = 2
+    auto_evolution_health_threshold: int = 3
+    evolution_probation_enabled: bool = True
+    evolution_probation_trials: int = 5
+    evolution_probation_window_days: int = 14
+    evolution_probation_max_days: int = 30
+
     # One-button update (Stage C step 9). ``manual`` only reports that a
     # release exists; ``automatic_when_idle`` lets the ticker apply it when no
     # agent is working. The founder's choice made in Settings is persisted
@@ -326,6 +340,7 @@ class KompanySettings(BaseSettings):
         # still applies after (issue #21 ordering unchanged):
         # env > YAML data_dir > active workspace > ~/.kompany default.
         from kompany.config import workspaces as _workspaces
+        from kompany.config.settings_autopilot import apply_overrides as _apply_autopilot_overrides
 
         overrides: dict[str, Any] = {}
         ws_dir = _workspaces.active_data_dir()
@@ -422,14 +437,6 @@ class KompanySettings(BaseSettings):
                 # explicitly: KOMPANY_DATA_DIR remains the strongest
                 # override (the daemon plist and all interfaces rely on it).
                 overrides["data_dir"] = Path(str(data["data_dir"])).expanduser()
-            # Self-update pipeline knobs (06-12-self-update-pipeline).
-            for key in (
-                "self_update_budget_cap_usd",
-                "self_update_max_turns",
-                "self_update_test_cmd",
-            ):
-                if key in data:
-                    overrides[key] = data[key]
             # Self-update pipeline settings (06-12-self-update-pipeline).
             if "self_update_budget_cap_usd" in data:
                 overrides["self_update_budget_cap_usd"] = float(
@@ -457,6 +464,8 @@ class KompanySettings(BaseSettings):
                 overrides["artifact_evolution_daily_cap_usd"] = float(data["artifact_evolution_daily_cap_usd"])
             if "artifact_evolution_model_tier" in data:
                 overrides["artifact_evolution_model_tier"] = str(data["artifact_evolution_model_tier"])
+            # Autopilot keys + external_judgment_enabled (ADR-0010) from YAML.
+            _apply_autopilot_overrides(data, overrides)
             if "update_mode" in data:
                 overrides["update_mode"] = str(data["update_mode"])
             if "update_check_interval_hours" in data:

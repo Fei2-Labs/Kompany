@@ -11,10 +11,14 @@ import type {
   CompanyStatus,
   DirectiveResult,
   EpisodeRow,
+  EvolutionProposal,
+  FounderReport,
+  HealthEvent,
   LlmSpendSummary,
   ObservabilitySnapshot,
   ProjectDetail,
   ProjectListItem,
+  ReportPeriod,
   RunCost,
   RuntimeState,
 } from './types';
@@ -692,4 +696,55 @@ export function createWorkspace(
     name,
     label,
   });
+}
+
+// ---- Founder reports + health / evolution audit (Reports pane) -------------
+
+/** `GET /reports?period=&limit=` — stored reports, newest first. */
+export function getReports(
+  period?: ReportPeriod,
+  limit = 30,
+  signal?: AbortSignal,
+): Promise<FounderReport[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (period) qs.set('period', period);
+  return getJson<FounderReport[]>(`/reports?${qs.toString()}`, signal);
+}
+
+/** `GET /reports/latest?period=` — newest report of one period (404 → ApiError). */
+export function getLatestReport(
+  period: ReportPeriod = 'daily',
+  signal?: AbortSignal,
+): Promise<FounderReport> {
+  return getJson<FounderReport>(
+    `/reports/latest?period=${encodeURIComponent(period)}`,
+    signal,
+  );
+}
+
+/** `POST /reports/generate` — `{ period, deliver }`. One economy LLM call. */
+export function generateReport(
+  period: ReportPeriod = 'manual',
+  deliver = false,
+): Promise<FounderReport> {
+  return postJson<FounderReport>('/reports/generate', { period, deliver });
+}
+
+/** `GET /health/events?status=` — watchdog events, newest first. */
+export function getHealthEvents(
+  status?: string,
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<HealthEvent[]> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (status) qs.set('status', status);
+  return getJson<HealthEvent[]>(`/health/events?${qs.toString()}`, signal);
+}
+
+/** `GET /evolution/proposals?limit=` — artifact-lane proposals, newest first. */
+export function getEvolutionProposals(
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<EvolutionProposal[]> {
+  return getJson<EvolutionProposal[]>(`/evolution/proposals?limit=${limit}`, signal);
 }

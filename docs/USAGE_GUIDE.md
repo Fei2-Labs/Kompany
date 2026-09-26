@@ -697,6 +697,7 @@ Every `tick_interval_seconds` (default 300 — every 5 minutes) the engine wakes
 1. **Heartbeat** — checks pending approvals and active projects, books the monthly subscription fee (at most once per calendar month), and prepares notifications.
 2. **Advance work** — runs at most **one** pending task of one active project, under every existing safety rail: per-task budget caps, the project's budget envelope, and the approval inbox. A project waiting on a pending budget top-up or budget-increase approval is skipped (the team never grinds against a closed gate), and failed tasks are never auto-retried — re-running those stays your decision. Set `daemon_auto_execute: false` (top-level YAML key) to keep ticking without autonomous task execution.
 3. **Housekeeping** — prunes tick history (the last 500 ticks are kept) and trims old episodes.
+4. **Autopilot** — the steps that used to need a human to start them (see [Autopilot: reports and self-learning](#autopilot-reports-and-self-learning)): automatic distillation, automatic evolution proposals, and the daily / weekly founder report. The heartbeat also pushes a note to your Telegram when the set of pending approvals or the runtime state changes — once per change, never per tick.
 
 Spend stays bounded with nobody watching: one task slice per tick × per-task caps × envelope hard caps, and anything gated waits in your INBOX.
 
@@ -878,6 +879,9 @@ The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8
 | `POST` | `/projects/{project_id}/execute` | Execute a project's tasks |
 | `GET` | `/workflows` | Workflow catalog: inputs, steps, tiers, cost estimate |
 | `POST` | `/workflows/{workflow_id}/run` | Run a workflow (`inputs`, `project_id`, `dry_run`); 422 with the missing inputs before any spend |
+| `GET` | `/reports?period=daily&limit=30` | Founder reports, newest first (`daily` / `weekly` / `manual`) |
+| `GET` | `/reports/latest?period=daily` | Newest report of one period (404 before the first one) |
+| `POST` | `/reports/generate` | Fresh report now (`period`, `deliver`) — one economy LLM call |
 
 A `/channel/send` (or `/directive`) response carries a `status` that may be `completed`, `clarify` (the CEO asks back — re-POST with the returned `session_id`), `gated` (spend gate — call `/go` or `/abandon`), `answered`, `abandoned`, `suspended`, or `failed`, plus `session_id` and `run_id`.
 
@@ -939,6 +943,7 @@ python -m kompany.interfaces.mcp_server
 | `kompany_execute` | `project_id`\* | Execute a project's tasks |
 | `kompany_workflows_list` | *(none)* | Workflow catalog with declared inputs, steps and cost estimate |
 | `kompany_workflow_run` | `workflow_id`\*, `inputs`, `project_id`, `dry_run` | Run a workflow; `dry_run` previews prompts with zero spend; missing inputs return an error before any spend |
+| `kompany_reports` | `period`, `limit`, `generate` | Founder reports, newest first; `generate=true` writes a fresh 24h report now |
 
 ### Claude Code Configuration
 
@@ -1138,6 +1143,28 @@ kompany anima diary    # recent entries, newest first
 ```
 
 The same operations exist on every interface: REST `GET /anima/state` + `GET /anima/diary`, MCP `kompany_anima_state` / `kompany_anima_diary`, SDK `k.anima_state()` / `k.anima_diary()`. Config flags: `anima_enabled` (whole layer) and `anima_diary_enabled` (just the daily LLM call), in YAML or `KOMPANY_ANIMA_ENABLED` / `KOMPANY_ANIMA_DIARY_ENABLED`.
+
+---
+
+## Autopilot: Reports and Self-Learning
+
+With the daemon running, nothing in the learning loop waits for you to start it. Three ticker steps run on their own (all date-gated, all skippable by config):
+
+- **Founder report.** A short **daily** report after the day's first tick and a deeper **weekly** report after Monday's first tick. Numbers (tasks, projects, ledger, AI spend, health events, approvals waiting, evolution proposals, debates, distillations) come straight from the database; one economy-tier call turns them into plain language, and if that call fails the report still ships as a plain fact list. Reports are stored in `founder_reports` and pushed through Telegram when `telegram_bot_token` + `telegram_chat_id` are set (otherwise stored only). `founder_report_cadence`: `daily_plus_weekly` (default) / `daily` / `weekly` / `none`; `founder_report_delivery`: `auto` (default) / `none`.
+- **Distillation.** Checked once a day; runs when at least `distill_min_new_episodes` (default 10) episodes changed since the last run, or any changed and `distill_max_gap_days` (default 7) have passed. `distill_auto_enabled: false` turns it off.
+- **Evolution proposals.** Checked once a day. One agent role failing >= `auto_evolution_failure_threshold` (default 2) tasks in 7 days proposes a soul evolution for that role; one health-event kind opening >= `auto_evolution_health_threshold` (default 3) times in 7 days proposes a Chief of Staff soul evolution. Each cause yields at most one proposal per 7 days, and every proposal still goes through the artifact lane's own gates (daily cap, doctor-gated auto-revert). Code self-update proposals are **not** created here — those stay approval-gated and human-initiated. `auto_evolution_enabled: false` turns it off.
+- **Probation for evolved souls.** The doctor only proves an evolved soul *loads*. Every applied soul proposal therefore goes on probation: the role's next `evolution_probation_trials` (default 5) finished tasks are compared with its failure rate over the `evolution_probation_window_days` (default 14) before the change. Worse than baseline with at least two trial failures → automatic git revert of that proposal, audited and pushed like a doctor revert. Not worse → `passed`. Fewer than the trial count after `evolution_probation_max_days` (default 30) → `inconclusive`, soul stays. `kompany evolve status` lists probations; the daily report counts them. `evolution_probation_enabled: false` turns it off.
+
+Ask for a report any time:
+
+```bash
+kompany report              # latest daily report
+kompany report -p weekly    # latest weekly report
+kompany report --now        # fresh report of the last 24h (one economy LLM call)
+kompany report list         # recent reports, newest first
+```
+
+On Telegram, send `/report` (or `报告`) to the bot for a fresh 24h report without spending a CEO turn; any other message still goes to the CEO. The same rows are on REST (`GET /reports`, `GET /reports/latest?period=daily`, `POST /reports/generate`), MCP (`kompany_reports`), the remote command `report`, and the board's **Reports** pane (which also lists open health events and recent evolution proposals).
 
 ---
 

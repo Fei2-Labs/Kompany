@@ -182,9 +182,22 @@ class Ticker:
     # ------------------------------------------------------------------
 
     def _action_heartbeat(self) -> list[str]:
-        """Existing engine heartbeat: approvals, projects, monthly fee."""
-        self._engine.heartbeat_once()
-        return ["heartbeat"]
+        """Existing engine heartbeat: approvals, projects, monthly fee.
+
+        09-26-autopilot-reports: the payload is handed to
+        ``core/heartbeat_push.py`` which pushes it to the founder only when
+        the pending-approval set or runtime state changed since last push.
+        """
+        payload = self._engine.heartbeat_once()
+        actions = ["heartbeat"]
+        try:
+            from kompany.core.heartbeat_push import heartbeat_push
+
+            actions.extend(heartbeat_push(self._engine, payload or {}))
+        except Exception:  # noqa: BLE001 — push is advisory; the heartbeat stands
+            log.exception("heartbeat push failed")
+            actions.append("heartbeat_push:error")
+        return actions
 
     def _action_advance(self) -> list[str]:
         """Advance AT MOST one pending task of the oldest eligible project.

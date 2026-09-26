@@ -668,3 +668,21 @@ def test_engine_without_token_has_no_worker():
 
     engine = KompanyEngine()
     assert engine.telegram_worker is None
+
+
+def test_report_word_returns_report_without_directive(tmp_path, monkeypatch):
+    """09-26-autopilot-reports: ``/report`` is answered from the report
+    module — no CEO turn, no session."""
+    engine = FakeEngine(tmp_path)
+    monkeypatch.setattr(
+        "kompany.core.founder_report.generate_report",
+        lambda eng, period, deliver=True: {"id": "rpt-1", "narrative": "All calm."},
+    )
+    transport = FakeTransport([[_update(1, 111, "/report")]])
+    worker = TelegramWorker(engine, transport=transport)
+
+    outcomes = worker.poll_once()
+
+    assert engine.directive_calls == []
+    assert outcomes[0]["status"] == "report"
+    assert "All calm." in transport.sent[0]["text"]

@@ -51,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { path: '/activity', label: 'Activity', glyph: '≣' },
       { path: '/projects', label: 'Projects', glyph: '◧' },
       { path: '/autopilot', label: 'Autopilot', glyph: '◆' },
+      { path: '/reports', label: 'Reports', glyph: '▤' },
       { path: '/agents', label: 'Agents', glyph: '☷' },
       { path: '/usage', label: 'Usage', glyph: '∑' },
     ],

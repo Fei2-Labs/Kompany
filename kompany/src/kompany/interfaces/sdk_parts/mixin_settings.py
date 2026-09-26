@@ -235,6 +235,19 @@ class KompanySettingsOps:
         """Recent Anima diary entries, newest first (REST ``GET /anima/diary``)."""
         return self._engine.anima_diary_list(limit=limit)
 
+    def reports(self, period: str | None = None, limit: int = 30) -> list[dict[str, Any]]:
+        """Founder reports, newest first (REST ``GET /reports``, MCP
+        ``kompany_reports``). 09-26-autopilot-reports."""
+        from kompany.core import founder_report as _fr
+
+        return _fr.reports_list(self._engine, period=period, limit=limit)
+
+    def report_now(self, deliver: bool = False) -> dict[str, Any]:
+        """Generate a fresh 24h founder report now (``POST /reports/generate``)."""
+        from kompany.core import founder_report as _fr
+
+        return _fr.generate_report(self._engine, "manual", deliver=deliver)
+
     def channels_status(self) -> dict[str, Any]:
         """Channel adapter health + outbox counts (06-12-channels PRD D5).
 

@@ -122,6 +122,7 @@ from kompany.interfaces.api_parts import (  # noqa: E402
     settings as _settings,
     system as _system,
     update as _update,
+    reports as _reports,
 )
 
 _API_PART_MODULES = (
@@ -141,6 +142,7 @@ _API_PART_MODULES = (
     _extensions,
     _evolution,
     _update,
+    _reports,
 )
 
 for _part in _API_PART_MODULES:

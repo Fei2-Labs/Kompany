@@ -44,6 +44,7 @@ REPLAY_SOURCE = "telegram_chat"
 _CONTINUE_STATUSES = {"clarify", "gated", "proposed", "awaiting_approval"}
 
 GATED_HINT = "\n\nReply GO to proceed, or ABANDON to drop it."
+REPORT_WORDS = frozenset({"report", "报告", "日报"})
 
 
 def build_urllib_transport(bot_token: str) -> Callable[[str, dict], dict]:
@@ -275,6 +276,16 @@ class TelegramWorker:
         context: DirectiveContext,
     ) -> dict[str, Any]:
         """Adapter contract (D1): translate, never reason."""
+        # 09-26-autopilot-reports: "/report" is a fixed command, not a
+        # directive — the founder gets a fresh report of the last 24h
+        # without spending a CEO turn. Anything else still goes to the CEO.
+        if text.strip().lower().lstrip("/") in REPORT_WORDS:
+            from kompany.core import founder_report as _fr
+
+            report = _fr.generate_report(self._engine, "manual", deliver=False)
+            reply = f"Report · last 24h\n\n{report['narrative']}"
+            self._send(chat_id, reply, thread_id=context.thread_id)
+            return {"status": "report", "session_id": None, "reply": reply}
         session_key = context.session_key
         session_id = self._session_for(
             session_key,

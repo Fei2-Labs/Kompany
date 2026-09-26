@@ -47,6 +47,8 @@ class ArtifactEvolutionMixin:
             "workspace": ws.status(), "recent_commits": ws.log(10) if ws.exists() else [],
             "proposals": self.artifact_proposals.list(limit=10),
             "flip_rates": flip_rates(self),
+            "probations": getattr(self, "artifact_probations").list(limit=10)
+            if hasattr(self, "artifact_probations") else [],
         }
 
 

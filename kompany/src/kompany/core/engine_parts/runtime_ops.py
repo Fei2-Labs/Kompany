@@ -218,9 +218,9 @@ class RuntimeOpsMixin:
                 source=source,
                 status="executed",
                 command="help",
-                message="Supported commands: status, approvals, approve <id>, reject <id> [reason], heartbeat, help",
+                message="Supported commands: status, approvals, approve <id>, reject <id> [reason], heartbeat, report, help",
                 result={
-                    "commands": ["status", "approvals", "approve", "reject", "heartbeat", "help"],
+                    "commands": ["status", "approvals", "approve", "reject", "heartbeat", "report", "help"],
                 },
             ).model_dump(mode="json")
         if command == "status":
@@ -239,6 +239,17 @@ class RuntimeOpsMixin:
                 command=command,
                 message=f"{len(approvals)} pending approval(s)",
                 result={"approvals": approvals},
+            ).model_dump(mode="json")
+        if command == "report":
+            from kompany.core import founder_report as _fr
+
+            report = _fr.generate_report(self, "manual", deliver=False)
+            return RemoteCommandResult(
+                source=source,
+                status="executed",
+                command=command,
+                message=report["narrative"],
+                result=report,
             ).model_dump(mode="json")
         if command == "heartbeat":
             return RemoteCommandResult(
