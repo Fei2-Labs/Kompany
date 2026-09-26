@@ -46,6 +46,7 @@ from kompany.interfaces.cli_parts import auth as _cli_auth  # noqa: E402,F401
 # Daemon sub-app (06-12-daemon-tick-loop PR2). Lives in cli_daemon.py —
 # cli.py is over the file-size cap, new command groups go in siblings.
 from kompany.interfaces.cli_anima import anima_app  # noqa: E402
+from kompany.interfaces.cli_reports import report_app  # noqa: E402
 from kompany.interfaces.cli_channels import channels_app  # noqa: E402
 from kompany.interfaces.cli_daemon import daemon_app  # noqa: E402
 from kompany.interfaces.cli_evolution import evolve_app  # noqa: E402
@@ -60,6 +61,7 @@ from kompany.interfaces.cli_update import update_app  # noqa: E402
 from kompany.interfaces.cli_workspace import workspace_app  # noqa: E402
 
 app.add_typer(anima_app, name="anima")
+app.add_typer(report_app, name="report")
 app.add_typer(channels_app, name="channels")
 app.add_typer(daemon_app, name="daemon")
 app.add_typer(evolve_app, name="evolve")

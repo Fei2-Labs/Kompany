@@ -97,7 +97,22 @@ class TelegramNotifier:
         return f"Kompany [{severity}] {event['summary']}"
 
 
+def auto_adapter(settings: Any) -> str:
+    """Pick the delivery adapter from what the founder configured.
+
+    Autopilot (09-26-autopilot-reports): scheduled pushes (reports,
+    heartbeat changes) use ``"telegram"`` when both a bot token and a
+    chat id exist, otherwise ``"dry-run"`` — so an install with no
+    channel configured is silent rather than erroring every tick.
+    """
+    token = str(getattr(settings, "telegram_bot_token", "") or "")
+    chat_id = str(getattr(settings, "telegram_chat_id", "") or "")
+    return "telegram" if token and chat_id else "dry-run"
+
+
 def build_notifier(settings: Any, adapter: str = "dry-run") -> Notifier:
+    if adapter == "auto":
+        adapter = auto_adapter(settings)
     if adapter == "telegram":
         return TelegramNotifier(
             bot_token=settings.telegram_bot_token,

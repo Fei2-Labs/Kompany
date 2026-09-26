@@ -49,6 +49,28 @@ TOOLS: list[Tool] = [
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
+        name="kompany_reports",
+        description=(
+            "Founder reports (daily / weekly / manual), newest first. Pass "
+            "generate=true for a fresh report of the last 24h right now."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "period": {
+                    "type": "string",
+                    "description": "Filter: daily, weekly or manual",
+                },
+                "limit": {"type": "integer", "default": 10},
+                "generate": {
+                    "type": "boolean",
+                    "description": "Generate a manual report now (one economy LLM call)",
+                    "default": False,
+                },
+            },
+        },
+    ),
+    Tool(
         name="kompany_anima_diary",
         description="Recent Anima diary entries, newest first.",
         inputSchema={

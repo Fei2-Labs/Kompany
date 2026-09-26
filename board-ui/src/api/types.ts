@@ -252,3 +252,86 @@ export interface CompanyStatus {
   virtual_days_remaining: number;
   ticker: TickerBlock;
 }
+
+// ---- Founder reports (`/reports*`, core/founder_report.py) ----------------
+
+export type ReportPeriod = 'daily' | 'weekly' | 'manual';
+
+/** One delivery attempt row inside `FounderReport.delivery`. */
+export interface ReportDelivery {
+  adapter: string;
+  status: string;
+  error?: string;
+}
+
+/** Per-lane flip-rate block (core/artifact_evolution/flip_stats.py). */
+export interface FlipLane {
+  rate: number;
+  rubber_stamp: boolean;
+  [k: string]: unknown;
+}
+
+export interface FlipRates {
+  window_days: number;
+  min_sample: number;
+  code_lane: FlipLane;
+  artifact_lane: FlipLane;
+  rubber_stamp: boolean;
+}
+
+/** The `data` snapshot the narrative was generated from. Every key is
+ *  best-effort on the engine side, so all are optional here. */
+export interface ReportData {
+  tasks?: Record<string, number>;
+  active_projects?: Array<{ id?: string; name: string; status: string }>;
+  balance?: number | null;
+  ai_spend_window?: number | null;
+  health_events_open?: number;
+  pending_approvals?: Array<{ id: string; summary?: string | null }>;
+  evolution_proposals?: Record<string, number>;
+  debates?: number;
+  distillations?: number;
+  flip_rates?: FlipRates | null;
+  [k: string]: unknown;
+}
+
+/** `GET /reports` row (state/founder_reports.py). */
+export interface FounderReport {
+  id: string;
+  period: ReportPeriod | string;
+  period_start: string;
+  period_end: string;
+  narrative: string;
+  data: ReportData;
+  delivery: ReportDelivery[];
+  cost: number;
+  generated_at: string;
+}
+
+/** `GET /health/events` row (state/health_events.py `_row_to_dict`). */
+export interface HealthEvent {
+  id: string;
+  kind: string;
+  status: string;
+  task_id: string | null;
+  project_id: string | null;
+  run_id?: string | null;
+  /** Parsed `detail_json` — the engine returns it already decoded. */
+  detail: Record<string, unknown>;
+  resolved_by?: string | null;
+  resolved_at?: string | null;
+  snoozed_until?: string | null;
+  created_at: string;
+}
+
+/** `GET /evolution/proposals` row (state/artifact_proposals.py). */
+export interface EvolutionProposal {
+  id: string;
+  kind: string;
+  target: string;
+  status: string;
+  summary?: string | null;
+  doctor_status?: string | null;
+  created_at: string;
+  [k: string]: unknown;
+}

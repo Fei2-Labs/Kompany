@@ -377,6 +377,11 @@ class KompanyEngine(
         from kompany.core.updater.pipeline import tick_action as _update_tick
 
         self.ticker.actions.append(("update", lambda: _update_tick(self)))
+        # Autopilot (09-26-autopilot-reports): auto distillation, auto
+        # evolution proposals, periodic founder reports. See core/autopilot.py.
+        from kompany.core.autopilot import install as _install_autopilot
+
+        _install_autopilot(self)
 
         # Anima persona layer (06-12-anima-persona): emotion + diary tick
         # intents appended to the ticker's actions list (PRD D4 — the

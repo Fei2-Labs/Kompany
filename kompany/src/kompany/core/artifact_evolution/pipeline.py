@@ -130,6 +130,12 @@ def propose_artifact_evolution(engine: Any, kind: str, target: str, instruction:
         engine.doctor()  # clear the doctor_failed event now that the revert restored the tree
         return row
     row = store.update(pid, status="applied", doctor_status="ok") or {}
+    try:  # 09-26-evolution-probation: the doctor proved it loads; now measure it
+        from kompany.core.artifact_evolution.probation import start_probation
+
+        start_probation(engine, row)
+    except Exception:  # noqa: BLE001 — probation is a gate on top, never a blocker
+        pass
     engine.audit.record(f"{ACTION_TYPE}.applied", f"Artifact proposal {pid} applied: {proposal.summary}",
                         detail={"proposal_id": pid, "kind": kind, "target": target, "commit": sha,
                                 "diff_stat": diff_stat, "flags": flags, "cost_usd": cost, "new": existing is None})
@@ -152,6 +158,10 @@ def revert_artifact_proposal(engine: Any, pid: str, reason: str = "founder rever
     ws = ArtifactWorkspace(engine.settings.data_dir)
     revert_sha = ws.revert(row["commit_sha"], reason=reason)
     row = store.update(pid, status="reverted", revert_sha=revert_sha, error=reason) or row
+    if not reason.startswith("probation failed"):
+        from kompany.core.artifact_evolution.probation import close_probation
+
+        close_probation(engine, pid, reason)
     if row.get("kind") == "plugin":
         try:
             t = str(row["target"])

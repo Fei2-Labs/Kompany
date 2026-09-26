@@ -213,6 +213,17 @@ def dispatch_tool(engine: KompanyEngine, name: str, arguments: dict) -> Any:
     if name == "kompany_anima_state":
         return engine.anima_state()
 
+    if name == "kompany_reports":
+        from kompany.core import founder_report as _fr
+
+        if bool(arguments.get("generate", False)):
+            return _fr.generate_report(engine, "manual", deliver=False)
+        return _fr.reports_list(
+            engine,
+            period=arguments.get("period") or None,
+            limit=int(arguments.get("limit", 10)),
+        )
+
     if name == "kompany_anima_diary":
         return engine.anima_diary_list(limit=int(arguments.get("limit", 30)))
 

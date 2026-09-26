@@ -71,3 +71,40 @@ def run_migrations_extensions(conn: sqlite3.Connection) -> None:
            )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_artifact_proposals_created ON artifact_proposals(created_at)")
+
+    # Founder reports (09-26-autopilot-reports): periodic daily / weekly
+    # reports written by the ticker. New table → additive, idempotent.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS founder_reports (
+               id TEXT PRIMARY KEY,
+               period TEXT NOT NULL,
+               period_start TEXT NOT NULL,
+               period_end TEXT NOT NULL,
+               narrative TEXT NOT NULL DEFAULT '',
+               data_json TEXT NOT NULL DEFAULT '{}',
+               delivery_json TEXT NOT NULL DEFAULT '[]',
+               cost REAL NOT NULL DEFAULT 0.0,
+               generated_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_founder_reports_period ON founder_reports(period, generated_at)"
+    )
+
+    # Evolution probation (09-26-evolution-probation): one row per applied
+    # soul proposal under trial. Additive, idempotent.
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS artifact_probations (
+               proposal_id TEXT PRIMARY KEY,
+               role TEXT NOT NULL,
+               baseline_failed INTEGER NOT NULL DEFAULT 0,
+               baseline_total INTEGER NOT NULL DEFAULT 0,
+               trial_target INTEGER NOT NULL DEFAULT 5,
+               trial_failed INTEGER NOT NULL DEFAULT 0,
+               trial_total INTEGER NOT NULL DEFAULT 0,
+               status TEXT NOT NULL DEFAULT 'probation',
+               note TEXT,
+               started_at TEXT NOT NULL DEFAULT (datetime('now')),
+               decided_at TEXT
+           )"""
+    )

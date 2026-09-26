@@ -9,6 +9,7 @@ import { Agents } from './panes/Agents';
 import { Usage } from './panes/Usage';
 import { Projects } from './panes/Projects';
 import { Autopilot } from './panes/Autopilot';
+import { Reports } from './panes/Reports';
 import { Runtimes } from './panes/Runtimes';
 import { Live } from './panes/Live';
 import { Settings } from './panes/Settings';
@@ -58,6 +59,7 @@ export function App() {
           <Route path="/activity" element={<ActivityTimeline variant="pane" />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/autopilot" element={<Autopilot />} />
+          <Route path="/reports" element={<Reports />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/usage" element={<Usage />} />
           <Route path="/runtimes" element={<Runtimes />} />
