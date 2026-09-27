@@ -17,7 +17,8 @@ class AutonomyGate:
         if approval_tier == "master":
             return False
         if approval_tier == "auto":
-            return True
+            cost = estimated_cost or 0
+            return cost <= self.thresholds["auto"]
         if approval_tier == "ceo":
             cost = estimated_cost or 0
             return cost <= self.thresholds["ceo"]
