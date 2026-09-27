@@ -80,20 +80,37 @@ degrade to their deterministic verdicts.
 It would make an optional upgrade able to halt the company by going offline, and it
 inverts the seam's premise that the deterministic answer is always sufficient.
 
-### 5. Providers arrive as plugins, via entry-point group `kompany.judgment`
+### 5. Every new judgment consumer starts in shadow mode
+
+A new judgment consumer MUST first run in **log-only shadow mode** against the
+existing deterministic path. It may record the provider's answer, distribution,
+confidence, abstention, the deterministic verdict, and the verdict it *would* have
+changed, but it MUST NOT change routing, approval, execution, or outward delivery.
+
+Promotion out of shadow mode requires observed outcomes, an explicit per-consumer
+threshold and risk decision, and tests that preserve the deterministic fallback.
+Provider failure, abstention, or disagreement in shadow mode has no runtime effect.
+Re-asking the same question over the same state is not shadow validation; each
+comparison must retain enough state to evaluate the later outcome.
+
+This rule applies to consumers added after this amendment. The approval-routing
+consumer in ADR-0011 predates it and remains a separately signed exception; no new
+consumer may copy that rollout path without shadow evidence and its own decision.
+
+### 6. Providers arrive as plugins, via entry-point group `kompany.judgment`
 
 Core ships none. `discover()["judgment"]` is `[]` on a stock install.
 
-### 6. Nothing in Core consumes the seam yet
+### 7. No additional Core consumer is wired here
 
-No gate is wired. `test_no_core_decision_path_consumes_the_seam_yet` enforces this by
-scanning for real imports of `kompany.core.judgment` outside the module itself and the
-contract re-export.
+No additional gate is wired by this ADR. The signed approval-routing consumer is
+specified in ADR-0011. The guard test `test_only_the_signed_off_consumer_imports_the_seam`
+scans for real imports of `kompany.core.judgment` and prevents an unrecorded consumer
+from being added.
 
-Wiring a concrete provider into a decision path is a **separate decision requiring
-founder sign-off**, and the ranked first candidate is approval routing (should this
-action proceed unattended, or park for the founder?) — the place where a calibrated
-confidence number is worth the most. That decision is deliberately not taken here.
+Wiring a concrete provider into another decision path is a **separate decision
+requiring founder sign-off**. The ranked candidates include outward pre-flight and
+debate; their order is deliberately not taken here.
 
 ## Consequences
 
