@@ -3,7 +3,17 @@
 // <details> for anyone who needs the exact payload.
 
 import type { ApprovalRequest } from '../api/types';
-import { summarizeApprovalPayload } from './approvalSummary';
+import { previewOf, summarizeApprovalPayload } from './approvalSummary';
+
+/** A value too long to show in full: preview first, full text on demand. */
+function LongText({ value }: { value: string }) {
+  return (
+    <details className="ny-summary__more">
+      <summary>{previewOf(value)}</summary>
+      <p className="ny-summary__text">{value}</p>
+    </details>
+  );
+}
 
 export function ApprovalSummary({ approval }: { approval: ApprovalRequest }) {
   const payload = approval.payload ?? {};
@@ -15,13 +25,13 @@ export function ApprovalSummary({ approval }: { approval: ApprovalRequest }) {
       {sections.map((s, i) => (
         <section className="ny-summary__section" key={i}>
           {s.title && <h4 className="ny-summary__title">{s.title}</h4>}
-          {s.text && <p className="ny-summary__text">{s.text}</p>}
+          {s.text && (s.long ? <LongText value={s.text} /> : <p className="ny-summary__text">{s.text}</p>)}
           {s.rows && s.rows.length > 0 && (
             <dl className="ny-summary__rows">
               {s.rows.map((r, j) => (
                 <div className="ny-summary__row" key={j} style={{ paddingLeft: `${r.depth * 12}px` }}>
                   <dt>{r.label}</dt>
-                  <dd>{r.value}</dd>
+                  <dd>{r.long ? <LongText value={r.value} /> : r.value}</dd>
                 </div>
               ))}
             </dl>

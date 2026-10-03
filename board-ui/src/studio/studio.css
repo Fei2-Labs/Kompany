@@ -74,6 +74,9 @@
 .ny-summary__badge--ok { color: var(--ok); }
 .ny-summary__details { margin: 2px 0 0; padding-left: 16px; }
 .ny-summary__raw summary { cursor: pointer; color: var(--text-faint); font-size: 11px; }
+.ny-summary__more > summary { cursor: pointer; color: var(--text); }
+.ny-summary__more[open] > summary { color: var(--text-faint); }
+.ny-summary__more > .ny-summary__text { margin: 4px 0 0; max-height: 320px; overflow-y: auto; }
 .ny-card__actions { margin-top: 8px; display: flex; gap: 8px; }
 .ny-card .approve { margin-top: 8px; }
 .ny-groups { display: grid; gap: 12px; max-width: 760px; }

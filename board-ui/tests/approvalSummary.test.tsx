@@ -3,8 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ApprovalRequest } from '../src/api/types';
 import {
+  LONG_VALUE_CHARS,
   formatScalar,
   humanizeKey,
+  previewOf,
   summarizeApprovalPayload,
   type SummarySection,
 } from '../src/studio/approvalSummary';
@@ -189,5 +191,65 @@ describe('<ApprovalSummary>', () => {
 
   it('renders nothing for an empty payload', () => {
     expect(renderToStaticMarkup(createElement(ApprovalSummary, { approval: approval('x', {}) }))).toBe('');
+  });
+});
+
+
+describe('long values', () => {
+  // A real self_update_proposal carried a 13k-character `instruction`;
+  // rendered in full it made one card 4,700px tall.
+  const long = `Fix the verified false negative in the gate.\n${'x'.repeat(13000)}`;
+
+  it('flags an oversized generic value and keeps it whole', () => {
+    const rows = summarizeApprovalPayload('self_update_proposal', {
+      branch: 'auto/fix-1',
+      instruction: long,
+    })[0]!.rows!;
+    expect(rows[0]).toEqual({ label: 'Branch', value: 'auto/fix-1', depth: 0 });
+    expect(rows[1]).toMatchObject({ label: 'Instruction', long: true });
+    expect(rows[1]!.value).toBe(long);
+  });
+
+  it('flags long section text and long known-shape rows', () => {
+    const s = summarizeApprovalPayload('target_feasibility', { ceo_proposal: long, cfo_view: long });
+    expect(s.find((x) => x.title === 'CEO proposal')).toMatchObject({ long: true });
+    expect(s.find((x) => x.title === 'Team views')!.rows![0]).toMatchObject({ long: true });
+  });
+
+  it('leaves values at or under the threshold alone', () => {
+    const rows = summarizeApprovalPayload('x', { note: 'y'.repeat(LONG_VALUE_CHARS) })[0]!.rows!;
+    expect(rows[0]!.long).toBeUndefined();
+  });
+
+  it('previews the first line and marks the cut', () => {
+    expect(previewOf('First line.\nSecond line.')).toBe('First line. …');
+    expect(previewOf('z'.repeat(500))).toBe(`${'z'.repeat(160)} …`);
+    expect(previewOf('short')).toBe('short');
+  });
+
+  it('renders a long value collapsed, with the full text present', () => {
+    const approval = {
+      id: 'a', action_type: 'self_update_proposal', payload: { instruction: long }, summary: '', status: 'pending',
+    } as unknown as ApprovalRequest;
+    const html = renderToStaticMarkup(createElement(ApprovalSummary, { approval }));
+    expect(html).toContain('<details class="ny-summary__more"><summary>Fix the verified false negative in the gate. …</summary>');
+    expect(html).not.toContain('ny-summary__more" open');
+    expect(html).toContain('x'.repeat(13000));
+  });
+});
+
+describe('reviewer role labels', () => {
+  const roles = (findings: unknown) =>
+    summarizeApprovalPayload('csuite_review', { findings })
+      .find((x) => x.title === 'Findings')!
+      .items!.map((i) => i.text);
+
+  it('uppercases C-suite acronyms, including ones not in the map', () => {
+    // A live payload carried `cpo`, which used to render as "Cpo".
+    expect(roles([{ role: 'cpo' }, { role: 'cto' }, { role: 'cos' }])).toEqual(['CPO', 'CTO', 'CoS']);
+  });
+
+  it('humanizes longer role names and survives a missing role', () => {
+    expect(roles([{ role: 'head_of_growth' }, {}])).toEqual(['Head of growth', 'Reviewer']);
   });
 });

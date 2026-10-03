@@ -12,6 +12,8 @@ export interface SummaryRow {
   value: string;
   /** Nesting level for the generic fallback; 0 for top-level facts. */
   depth: number;
+  /** Too long to show in full: the card collapses it behind a preview. */
+  long?: boolean;
 }
 
 export interface SummaryItem {
@@ -26,6 +28,25 @@ export interface SummarySection {
   text?: string;
   rows?: SummaryRow[];
   items?: SummaryItem[];
+  /** ``text`` is too long to show in full. */
+  long?: boolean;
+}
+
+/**
+ * Longest value shown in full. A payload can carry a whole self-update
+ * instruction (13k characters in the wild); rendered raw it buries the
+ * decision under one field, so anything longer collapses behind a preview.
+ */
+export const LONG_VALUE_CHARS = 320;
+
+const isLong = (s: string): boolean => s.length > LONG_VALUE_CHARS;
+
+/** First line / clause of a long value, for the collapsed preview. */
+export function previewOf(value: string, limit = 160): string {
+  const firstLine = value.trim().split('\n')[0] ?? '';
+  const head = firstLine.length > 0 ? firstLine : value.trim();
+  if (head.length <= limit) return head === value.trim() ? head : `${head} …`;
+  return `${head.slice(0, limit).trimEnd()} …`;
 }
 
 type Obj = Record<string, unknown>;
@@ -80,7 +101,7 @@ const MAX_DEPTH = 3;
 function genericRows(value: unknown, label: string, depth: number, out: SummaryRow[]): void {
   const scalar = formatScalar(value);
   if (scalar !== null) {
-    out.push({ label, value: scalar, depth });
+    out.push({ label, value: scalar, depth, ...(isLong(scalar) ? { long: true } : {}) });
     return;
   }
   if (Array.isArray(value)) {
@@ -142,6 +163,10 @@ function claimItems(claims: unknown): SummaryItem[] {
   return items;
 }
 
+function textSection(title: string, text: string): SummarySection {
+  return { title, text, ...(isLong(text) ? { long: true } : {}) };
+}
+
 const TARGET_FIELDS: [string, string][] = [
   ['revenue_target', 'Revenue'],
   ['customer_target', 'Customers'],
@@ -161,7 +186,7 @@ function targetValue(key: string, v: unknown): string {
 function feasibilitySections(p: Obj): SummarySection[] {
   const sections: SummarySection[] = [];
   const proposal = str(p.ceo_proposal);
-  if (proposal) sections.push({ title: 'CEO proposal', text: proposal });
+  if (proposal) sections.push(textSection('CEO proposal', proposal));
 
   const original = isObj(p.original_targets) ? p.original_targets : {};
   const recommended = isObj(p.recommended_targets) ? p.recommended_targets : {};
@@ -177,12 +202,12 @@ function feasibilitySections(p: Obj): SummarySection[] {
   const views: SummaryRow[] = [];
   for (const [key, label] of [['cfo_view', 'CFO'], ['cos_view', 'CoS']] as const) {
     const v = str(p[key]);
-    if (v) views.push({ label, value: v, depth: 0 });
+    if (v) views.push({ label, value: v, depth: 0, ...(isLong(v) ? { long: true } : {}) });
   }
   if (views.length) sections.push({ title: 'Team views', rows: views });
 
   const rationale = str(p.rationale);
-  if (rationale) sections.push({ title: 'Rationale', text: rationale });
+  if (rationale) sections.push(textSection('Rationale', rationale));
 
   for (const [key, title] of [
     ['ceo_claims', 'CEO claims'],
@@ -194,11 +219,19 @@ function feasibilitySections(p: Obj): SummarySection[] {
   }
 
   const hint = str(p.revision_hint);
-  if (hint) sections.push({ title: 'Your counter-proposal', text: hint });
+  if (hint) sections.push(textSection('Your counter-proposal', hint));
   return sections;
 }
 
 // --- csuite_review ----------------------------------------------------------
+
+/** C-suite roles display as acronyms: ``cpo`` -> CPO, ``cos`` -> CoS. */
+function roleLabel(role: string): string {
+  const key = role.trim().toLowerCase();
+  const known = ACRONYMS[key];
+  if (known) return known;
+  return /^[a-z]{2,4}$/.test(key) ? key.toUpperCase() : humanizeKey(role);
+}
 
 function csuiteSections(p: Obj): SummarySection[] {
   const sections: SummarySection[] = [];
@@ -206,7 +239,7 @@ function csuiteSections(p: Obj): SummarySection[] {
   const cls = str(p.deliverable_class);
   if (cls) rows.push({ label: 'Deliverable', value: humanizeKey(cls), depth: 0 });
   const reason = str(p.reason);
-  if (reason) rows.push({ label: 'Reason', value: reason, depth: 0 });
+  if (reason) rows.push({ label: 'Reason', value: reason, depth: 0, ...(isLong(reason) ? { long: true } : {}) });
   if (rows.length) sections.push({ rows });
 
   const items: SummaryItem[] = [];
@@ -223,7 +256,7 @@ function csuiteSections(p: Obj): SummarySection[] {
     const verdict = str(f.verdict).toUpperCase();
     const defects = arr(f.defects).map(str).filter(Boolean);
     items.push({
-      text: role ? (ACRONYMS[role.toLowerCase()] ?? humanizeKey(role)) : 'Reviewer',
+      text: role ? roleLabel(role) : 'Reviewer',
       badge: verdict || undefined,
       tone: verdict === 'HOLD' ? 'hold' : verdict === 'PASS' ? 'ok' : 'muted',
       details: defects.length ? defects : undefined,
