@@ -57,6 +57,23 @@
 .ny-card__title { color: var(--text); line-height: 1.35; }
 .ny-card__meta { margin-top: 2px; color: var(--text-faint); font: 11px/1.3 var(--mono); }
 .ny-card__payload { margin: 8px 0 0; padding: 8px; max-height: 180px; overflow: auto; font: 11px/1.4 var(--mono); color: var(--text-dim); background: var(--bg-rail); border-radius: 4px; }
+.ny-summary__raw .ny-card__payload { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+.ny-summary { margin-top: 8px; display: grid; gap: 8px; color: var(--text-dim); line-height: 1.45; overflow-wrap: anywhere; }
+.ny-summary__section { min-width: 0; }
+.ny-summary__title { margin: 0 0 3px; font: 600 11px/1.3 var(--font); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.ny-summary__text { margin: 0; color: var(--text); white-space: pre-wrap; }
+.ny-summary__rows { margin: 0; display: grid; gap: 2px; }
+.ny-summary__row { display: grid; grid-template-columns: minmax(80px, max-content) 1fr; gap: 8px; }
+.ny-summary__row dt { color: var(--text-faint); }
+.ny-summary__row dd { margin: 0; color: var(--text); min-width: 0; white-space: pre-wrap; }
+.ny-summary__items { margin: 0; padding-left: 16px; display: grid; gap: 3px; }
+.ny-summary__item-text { color: var(--text); }
+.ny-summary__badge { margin-left: 6px; padding: 0 5px; border-radius: 3px; font: 10.5px/1.6 var(--mono); background: var(--bg-rail); color: var(--text-faint); }
+.ny-summary__badge--hold { color: var(--danger); }
+.ny-summary__badge--warn { color: var(--warn); }
+.ny-summary__badge--ok { color: var(--ok); }
+.ny-summary__details { margin: 2px 0 0; padding-left: 16px; }
+.ny-summary__raw summary { cursor: pointer; color: var(--text-faint); font-size: 11px; }
 .ny-card__actions { margin-top: 8px; display: flex; gap: 8px; }
 .ny-card .approve { margin-top: 8px; }
 .ny-groups { display: grid; gap: 12px; max-width: 760px; }
