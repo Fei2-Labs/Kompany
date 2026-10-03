@@ -7,7 +7,6 @@
 
 import { useState } from 'react';
 import { ModelCard } from './settings/ModelCard';
-import { DesktopConnectionCard } from './settings/DesktopConnectionCard';
 import { StartPageCard } from './settings/StartPageCard';
 import { AppearanceCard } from './settings/AppearanceCard';
 import { UpdateCard } from './settings/UpdateCard';
@@ -35,7 +34,6 @@ export function Settings() {
       </header>
 
       <div className="settings">
-        <DesktopConnectionCard />
         <StartPageCard />
         <AppearanceCard />
         <UpdateCard />
