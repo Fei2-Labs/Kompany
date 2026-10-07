@@ -23,7 +23,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-api = ["fastapi>=0.115", "uvicorn>=0.30"]
+# python-multipart: FastAPI needs it for Form() routes (dashboard login).
+# Declared directly; it used to arrive only via `mcp`, so builds without
+# that extra (the desktop sidecar) crashed at startup.
+api = ["fastapi>=0.115", "uvicorn>=0.30", "python-multipart>=0.0.9"]
 mcp = ["mcp>=1.28.1,<2"]
 # CDP browser tools for the agentic loop (06-16 P4). Optional: the
 # browser tools degrade to a clear observation when Playwright is absent.
