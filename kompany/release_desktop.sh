@@ -59,7 +59,10 @@ cmd_build() {
   platform="$(platform_key "${triple}")"
   arch="${triple%%-*}"
 
-  "${SCRIPT_DIR}/build_desktop.sh"
+  # CI=true makes Tauri pass --skip-jenkins to bundle_dmg.sh, skipping the
+  # AppleScript that arranges the dmg window in Finder. That step needs a
+  # logged-in GUI session and fails over SSH; the dmg works the same.
+  CI="${CI:-true}" "${SCRIPT_DIR}/build_desktop.sh"
 
   bundle="${TAURI_DIR}/target/release/bundle"
   out="${TAURI_DIR}/target/desktop-release/${version}-${platform}"
