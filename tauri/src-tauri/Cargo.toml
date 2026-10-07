@@ -1,6 +1,6 @@
 [package]
 name = "kompany-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kompany — autonomous business OS, desktop shell."
 authors = ["Kompany"]
 edition = "2021"
@@ -14,12 +14,14 @@ path = "src/main.rs"
 tauri-build = { version = "2.0", features = [] }
 
 [dependencies]
-urlencoding = "2"
-tauri = { version = "2.0", features = [] }
+# `unstable` enables multi-webview windows (Window::add_child), used for
+# the shell bar plus one native child webview per connection target.
+tauri = { version = "2.0", features = ["unstable"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 log = "0.4"
+tauri-plugin-updater = "2"
 
 [features]
 default = ["custom-protocol"]

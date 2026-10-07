@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kompany</title>
+  <!-- Trusted desktop shell: the top target bar and the profile manager.
+       It is the only webview with IPC. Engines render in native child
+       webviews below the bar (see src/desktop.rs); this page never embeds
+       engine content and never receives a dashboard token back. -->
+  <style>
+    :root { color-scheme: dark; --bar-height: 44px; --bg: #0c0d10; --panel: #131418; --elev: #1a1c22; --border: #24262e; --text: #e7e9ee; --muted: #9aa0ac; --faint: #646a76; --accent: #5b8cff; --danger: #ff8f8f; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 13px ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    #bar { display: flex; align-items: center; gap: 10px; height: var(--bar-height); padding: 0 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    #brand { font-weight: 700; letter-spacing: .02em; }
+    #tabs { display: flex; gap: 4px; min-width: 0; overflow-x: auto; }
+    button { border: 1px solid var(--border); border-radius: 6px; background: var(--elev); color: var(--muted); padding: 5px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
+    button:hover { border-color: #34384a; color: var(--text); }
+    button:disabled { cursor: wait; opacity: .6; }
+    .tab[aria-current="true"] { border-color: var(--accent); color: var(--text); }
+    .dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--faint); vertical-align: middle; }
+    .dot.connected { background: #8fe6a4; }
+    .dot.connecting { background: #ffd479; }
+    .dot.error { background: var(--danger); }
+    #status { margin-left: auto; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #status.error { color: var(--danger); }
+    #manager { display: none; height: calc(100% - var(--bar-height)); overflow-y: auto; padding: 24px; }
+    body.expanded #manager { display: block; }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    h2 { margin: 0 0 6px; font-size: 16px; }
+    .hint { margin: 0 0 18px; color: var(--muted); line-height: 1.5; }
+    .row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+    .row-main { flex: 1; min-width: 0; }
+    .sub { color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .err { color: var(--danger); font-size: 12px; }
+    form { display: grid; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+    label { display: grid; gap: 4px; color: var(--muted); }
+    input { padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+    .actions { display: flex; gap: 8px; }
+    .primary { border-color: var(--accent); color: var(--text); }
+    .danger { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <header id="bar">
+    <span id="brand">Kompany</span>
+    <nav id="tabs" aria-label="Connection targets"></nav>
+    <span id="status" role="status"></span>
+    <button type="button" id="update" class="primary" hidden></button>
+    <button type="button" id="manage">Targets</button>
+  </header>
+  <main id="manager" aria-label="Manage connection targets">
+    <div class="wrap">
+      <h2>Connection targets</h2>
+      <p class="hint">Local and remote engines stay available side by side. Only the selected target fills the window; each keeps its own login and storage, and data is never merged.</p>
+      <div id="rows"></div>
+      <form id="form" autocomplete="off">
+        <strong id="form-title">Add remote profile</strong>
+        <label>Name <input id="f-name" required maxlength="80" placeholder="Production"></label>
+        <label>URL <input id="f-url" required placeholder="https://engine.example:55352"></label>
+        <label><span id="f-token-label">Dashboard token</span> <input id="f-token" type="password" autocomplete="new-password" placeholder="WEB_DASHBOARD_TOKEN"></label>
+        <div class="actions">
+          <button type="submit" class="primary" id="f-submit">Add profile</button>
+          <button type="button" id="f-cancel">Cancel edit</button>
+        </div>
+        <span class="err" id="f-error" role="alert"></span>
+      </form>
+    </div>
+  </main>
+  <script>
+    (() => {
+      // __TAURI_INTERNALS__ is injected by the runtime; withGlobalTauri stays
+      // off so engine pages never see a `window.__TAURI__` API surface.
+      const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+      const $ = (id) => document.getElementById(id);
+      const tabs = $('tabs'), status = $('status'), rows = $('rows');
+      const form = $('form'), fName = $('f-name'), fUrl = $('f-url'), fToken = $('f-token');
+      let list = { active_id: '', targets: [] };
+      let busy = false;
+      let editing = null;
+
+      const label = (t) => (t.kind === 'local' ? 'Local' : t.name);
+      const message = (e) => (e instanceof Error ? e.message : String(e));
+      function setStatus(text, isError) {
+        status.textContent = text || '';
+        status.classList.toggle('error', Boolean(isError));
+      }
+      function el(tag, props, children) {
+        const node = document.createElement(tag);
+        Object.assign(node, props || {});
+        for (const child of children || []) node.append(child);
+        return node;
+      }
+      function dot(state) { return el('span', { className: `dot ${state || ''}` }); }
+
+      function render() {
+        tabs.replaceChildren();
+        for (const t of list.targets) {
+          const tab = el('button', { type: 'button', className: 'tab', disabled: busy, title: t.error || t.url || 'This device' }, [dot(t.status), label(t)]);
+          tab.setAttribute('aria-current', String(t.id === list.active_id));
+          // Clicking the active tab reloads it (retry after an error).
+          tab.addEventListener('click', () => pick(t.id, t.id === list.active_id));
+          tabs.append(tab);
+        }
+        rows.replaceChildren();
+        for (const t of list.targets) {
+          const info = el('div', { className: 'row-main' }, [
+            el('div', {}, [dot(t.status), label(t), t.id === list.active_id ? ' · active' : '']),
+            el('div', { className: 'sub' }, [t.kind === 'local' ? 'This device' : t.url, t.has_token ? ' · token stored' : '', t.from_env ? ' · from KOMPANY_REMOTE_URL' : '']),
+          ]);
+          if (t.error) info.append(el('div', { className: 'err' }, [t.error]));
+          const actions = el('div', { className: 'actions' });
+          if (t.kind === 'remote' && !t.from_env) {
+            const edit = el('button', { type: 'button' }, ['Edit']);
+            edit.addEventListener('click', () => startEdit(t));
+            const remove = el('button', { type: 'button', className: 'danger', disabled: t.id === list.active_id }, ['Remove']);
+            remove.addEventListener('click', () => removeTarget(t));
+            actions.append(edit, remove);
+          }
+          rows.append(el('div', { className: 'row' }, [info, actions]));
+        }
+      }
+
+      async function refresh() {
+        list = await invoke('list_targets');
+        render();
+      }
+
+      async function pick(id, reload) {
+        if (busy) return;
+        busy = true;
+        render();
+        setStatus('Connecting…');
+        try {
+          list = await invoke('pick_target', { id, reload: Boolean(reload) });
+          setStatus('');
+        } catch (e) {
+          setStatus(message(e), true);
+          await refresh().catch(() => {});
+        } finally {
+          busy = false;
+          render();
+        }
+      }
+
+      async function setExpanded(expanded) {
+        document.body.classList.toggle('expanded', expanded);
+        $('manage').textContent = expanded ? 'Done' : 'Targets';
+        await invoke('set_shell_expanded', { expanded });
+      }
+
+      function resetForm() {
+        editing = null;
+        form.reset();
+        $('form-title').textContent = 'Add remote profile';
+        $('f-submit').textContent = 'Add profile';
+        $('f-token-label').textContent = 'Dashboard token';
+        $('f-cancel').style.display = 'none';
+        $('f-error').textContent = '';
+      }
+
+      function startEdit(t) {
+        editing = t;
+        fName.value = t.name;
+        fUrl.value = t.url;
+        fToken.value = '';
+        $('form-title').textContent = `Edit ${t.name}`;
+        $('f-submit').textContent = 'Save';
+        $('f-token-label').textContent = t.has_token ? 'Dashboard token (stored — leave blank to keep)' : 'Dashboard token';
+        $('f-cancel').style.display = '';
+        fName.focus();
+      }
+
+      async function removeTarget(t) {
+        try {
+          list = await invoke('remove_target', { id: t.id });
+          if (editing && editing.id === t.id) resetForm();
+          render();
+        } catch (e) {
+          $('f-error').textContent = message(e);
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const editedId = editing ? editing.id : null;
+        const token = fToken.value.trim();
+        try {
+          list = await invoke('save_target', { id: editedId, name: fName.value, url: fUrl.value, token: token || null });
+          fToken.value = '';
+          resetForm();
+          render();
+          // The active target's login or URL may have changed: reload it.
+          if (editedId && editedId === list.active_id) await pick(editedId, true);
+        } catch (e) {
+          $('f-error').textContent = message(e);
+        }
+      });
+      $('f-cancel').addEventListener('click', resetForm);
+      $('manage').addEventListener('click', () => setExpanded(!document.body.classList.contains('expanded')).catch((e) => setStatus(message(e), true)));
+
+      // A signed update is downloaded and installed in the background; it
+      // only takes effect when the founder chooses to restart.
+      const updateButton = $('update');
+      async function pollUpdate() {
+        try {
+          const s = await invoke('update_status');
+          updateButton.hidden = s.state !== 'ready';
+          if (s.state === 'ready') updateButton.textContent = `Restart to update (${s.ready_version})`;
+        } catch (e) {
+          updateButton.hidden = true;
+        }
+      }
+      updateButton.addEventListener('click', async () => {
+        updateButton.disabled = true;
+        updateButton.textContent = 'Restarting…';
+        try {
+          await invoke('restart_to_update');
+        } catch (e) {
+          updateButton.disabled = false;
+          setStatus(message(e), true);
+        }
+      });
+
+      resetForm();
+      if (!invoke) {
+        setStatus('Target switching requires Kompany Desktop.', true);
+        return;
+      }
+      refresh()
+        .then(() => pick(list.active_id))
+        .catch((e) => setStatus(message(e), true));
+      pollUpdate();
+      setInterval(pollUpdate, 5 * 60 * 1000);
+    })();
+  </script>
+</body>
+</html>

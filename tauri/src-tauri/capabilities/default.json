@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the Kompany desktop shell.",
-  "windows": ["main"],
+  "description": "IPC for the bundled top-bar shell only. Target webviews load engine origins and get no IPC: no window match, no remote URLs.",
+  "webviews": ["shell"],
   "permissions": [
     "core:default"
   ]
