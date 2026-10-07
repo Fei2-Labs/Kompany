@@ -1,6 +1,6 @@
 [package]
 name = "kompany-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Kompany — autonomous business OS, desktop shell."
 authors = ["Kompany"]
 edition = "2021"
@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 log = "0.4"
+tauri-plugin-updater = "2"
 
 [features]
 default = ["custom-protocol"]

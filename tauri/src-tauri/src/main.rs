@@ -14,7 +14,9 @@
 //      profiles (`target_registry.rs`), and the one-shot
 //      `KOMPANY_REMOTE_URL`. Switching shows a warm webview; data never
 //      mixes between targets.
-//   3. On window close: kill the sidecar we spawned (never an attached
+//   3. Self-update (`updates.rs`): signed builds are fetched from the
+//      update feed in the background and applied on "Restart to update".
+//   4. On window close: kill the sidecar we spawned (never an attached
 //      foreign server or a remote engine), exit the app.
 //
 // We intentionally keep all business logic in the Python side — the
@@ -35,6 +37,7 @@ use tauri::{AppHandle, Manager, RunEvent};
 
 mod desktop;
 mod target_registry;
+mod updates;
 
 /// Wrapper so we can stash the sidecar handle on Tauri's state manager
 /// and kill it from the window-close event.
@@ -283,13 +286,17 @@ fn dashboard_login_cookie(base_url: &str, token: &str, path: &str) -> Result<Str
 fn main() {
     tauri::Builder::default()
         .manage(SidecarHandle(Mutex::new(None)))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(desktop::TargetRuntime::default())
+        .manage(updates::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
             desktop::list_targets,
             desktop::pick_target,
             desktop::save_target,
             desktop::remove_target,
             desktop::set_shell_expanded,
+            updates::update_status,
+            updates::restart_to_update,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -387,6 +394,7 @@ fn main() {
                 stop_spawned_sidecar(&handle);
                 return Err(error.into());
             }
+            updates::spawn_background_checks(handle);
             Ok(())
         })
         .build(tauri::generate_context!())

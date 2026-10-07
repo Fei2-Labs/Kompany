@@ -47,6 +47,7 @@
     <span id="brand">Kompany</span>
     <nav id="tabs" aria-label="Connection targets"></nav>
     <span id="status" role="status"></span>
+    <button type="button" id="update" class="primary" hidden></button>
     <button type="button" id="manage">Targets</button>
   </header>
   <main id="manager" aria-label="Manage connection targets">
@@ -199,6 +200,29 @@
       $('f-cancel').addEventListener('click', resetForm);
       $('manage').addEventListener('click', () => setExpanded(!document.body.classList.contains('expanded')).catch((e) => setStatus(message(e), true)));
 
+      // A signed update is downloaded and installed in the background; it
+      // only takes effect when the founder chooses to restart.
+      const updateButton = $('update');
+      async function pollUpdate() {
+        try {
+          const s = await invoke('update_status');
+          updateButton.hidden = s.state !== 'ready';
+          if (s.state === 'ready') updateButton.textContent = `Restart to update (${s.ready_version})`;
+        } catch (e) {
+          updateButton.hidden = true;
+        }
+      }
+      updateButton.addEventListener('click', async () => {
+        updateButton.disabled = true;
+        updateButton.textContent = 'Restarting…';
+        try {
+          await invoke('restart_to_update');
+        } catch (e) {
+          updateButton.disabled = false;
+          setStatus(message(e), true);
+        }
+      });
+
       resetForm();
       if (!invoke) {
         setStatus('Target switching requires Kompany Desktop.', true);
@@ -207,6 +231,8 @@
       refresh()
         .then(() => pick(list.active_id))
         .catch((e) => setStatus(message(e), true));
+      pollUpdate();
+      setInterval(pollUpdate, 5 * 60 * 1000);
     })();
   </script>
 </body>
