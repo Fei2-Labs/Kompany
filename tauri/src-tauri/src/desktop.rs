@@ -21,6 +21,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use tauri::{
     AppHandle, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewBuilder, WebviewUrl,
     Window, WindowBuilder, WindowEvent,
@@ -31,8 +33,8 @@ use crate::target_registry::{self, TargetList};
 pub const WINDOW_LABEL: &str = "main";
 pub const SHELL_LABEL: &str = "shell";
 const TARGET_LABEL_PREFIX: &str = "target-";
-/// Height of the shell's top bar in logical pixels. Keep in sync with
-/// `--bar-height` in `dist/index.html`.
+/// Height of the shell's top bar in logical pixels. Injected into the shell
+/// page as `--bar-height` (the CSS value in `dist/index.html` is a fallback).
 pub const BAR_HEIGHT: f64 = 44.0;
 const SHELL_STORE_IDENTIFIER: [u8; 16] = *b"kompany-shell-01";
 /// A switch waits this long for `/health`; the user can retry or pick
@@ -168,11 +170,17 @@ pub fn apply_layout(app: &AppHandle) {
 /// target itself once loaded, so an unreachable remote never blocks launch.
 pub fn open_shell(app: &AppHandle) -> Result<(), String> {
     let title = format!("Kompany · tauri@{}", env!("KOMPANY_TAURI_COMMIT"));
-    let window = WindowBuilder::new(app, WINDOW_LABEL)
+    let builder = WindowBuilder::new(app, WINDOW_LABEL)
         .title(title)
         .inner_size(1200.0, 800.0)
         .min_inner_size(900.0, 600.0)
-        .resizable(true)
+        .resizable(true);
+    // Tauri's macOS default (`Visible`) extends the content view under the
+    // title bar, so child webviews at y=0 would hide behind it. `Transparent`
+    // keeps the content view below the title bar: y=0 is the top of the bar.
+    #[cfg(target_os = "macos")]
+    let builder = builder.title_bar_style(TitleBarStyle::Transparent);
+    let window = builder
         .build()
         .map_err(|error| format!("window build failed: {error}"))?;
     let shell = WebviewBuilder::new(SHELL_LABEL, WebviewUrl::App("index.html".into()))
@@ -181,7 +189,8 @@ pub fn open_shell(app: &AppHandle) -> Result<(), String> {
                 .join("desktop-webview")
                 .join(SHELL_LABEL),
         )
-        .data_store_identifier(SHELL_STORE_IDENTIFIER);
+        .data_store_identifier(SHELL_STORE_IDENTIFIER)
+        .initialization_script(format!("window.__KOMPANY_BAR_HEIGHT__ = {BAR_HEIGHT};"));
     let (bar, _) = window_layout(&window, false);
     window
         .add_child(

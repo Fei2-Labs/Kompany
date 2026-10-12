@@ -43,6 +43,10 @@
   </style>
 </head>
 <body>
+  <script>
+    // The native layout owns the bar height (BAR_HEIGHT in src/desktop.rs).
+    if (window.__KOMPANY_BAR_HEIGHT__) document.documentElement.style.setProperty('--bar-height', window.__KOMPANY_BAR_HEIGHT__ + 'px');
+  </script>
   <header id="bar">
     <span id="brand">Kompany</span>
     <nav id="tabs" aria-label="Connection targets"></nav>
