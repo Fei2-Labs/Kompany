@@ -122,7 +122,7 @@ def status(engine: Any, state: UpdateState | None = None) -> dict[str, Any]:
 
 def _can_apply(lay: dict[str, Any]) -> tuple[bool, str | None]:
     if lay["frozen"]:
-        return False, "This engine is the desktop app's bundled sidecar — update by reinstalling Kompany.app."
+        return False, "This engine is bundled with Kompany Desktop. Use Check for updates in the desktop top bar, then Restart to update. The engine updates with the app."
     if not lay["running_from_release"]:
         return False, ("This engine does not run from <data_dir>/releases/current — run ops/bootstrap_release.sh once "
                        "(it migrates a checkout install to the release layout); afterwards updates are one click.")

@@ -23,3 +23,11 @@ def test_api_extra_declares_form_parser() -> None:
     # without python-multipart: the sidecar crashed at startup when only
     # `mcp` pulled it in.
     assert "python-multipart" in _extra("api")
+
+
+def test_sidecar_includes_dynamically_loaded_hostname_codec() -> None:
+    script = (PYPROJECT.parent / "build_sidecar.sh").read_text()
+    for module in ("encodings.idna", "stringprep"):
+        assert f"--hidden-import {module}" in script
+    # urllib/socket load this codec by name, outside static import discovery.
+    assert "münich.example".encode("idna") == b"xn--mnich-kva.example"

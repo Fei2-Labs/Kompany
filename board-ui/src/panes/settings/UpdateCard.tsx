@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { pendingUpdates } from './updateVersions';
+import { UpdateProgress } from './UpdateProgress';
 
 interface ReleaseRow {
   version?: string;
@@ -107,9 +108,9 @@ export function UpdateCard() {
         <h2 className="settings__card-title">Update</h2>
       </header>
       <p className="settings__hint">
-        Updates come only from signed GitHub releases: verified wheels into a fresh release
-        directory, a database backup, then a restart. The first boot rolls back on its own if
-        the doctor fails.
+        {st?.layout.frozen
+          ? 'This local engine updates with Kompany Desktop. Use Check for updates in the desktop top bar; download progress and Restart to update appear there.'
+          : 'Updates come only from signed GitHub releases: verified wheels into a fresh release directory, a database backup, then a restart. The first boot rolls back on its own if the doctor fails.'}
       </p>
       {err && <p className="settings__meta">{err}</p>}
       {st && (
@@ -123,7 +124,8 @@ export function UpdateCard() {
             {st.last_check_at ? ` (checked ${st.last_check_at.slice(0, 16).replace('T', ' ')})` : ''}
           </p>
           {st.update_available && <p className="settings__meta">✦ update available: {pending || latest}</p>}
-          {!st.can_apply && <p className="settings__meta">{st.cannot_apply_reason}</p>}
+          {!st.can_apply && !st.layout.frozen && <p className="settings__meta">{st.cannot_apply_reason}</p>}
+          {(inFlight || busy) && <UpdateProgress phase={inFlight ? st.phase : 'checking'} />}
           {inFlight && (
             <p className="settings__meta">
               {st.phase}
@@ -143,35 +145,39 @@ export function UpdateCard() {
             <p className="settings__meta">⚠ {st.error}</p>
           )}
           {st.attestation?.status && <p className="settings__meta">provenance: {st.attestation.status}</p>}
-          <div className="settings__actions">
-            <button className="btn btn--sm" onClick={() => void run('/update/check')} disabled={busy || inFlight}>
-              Check now
-            </button>
-            <button
-              className="btn btn--primary btn--sm"
-              onClick={() => void run('/update/apply', {})}
-              disabled={busy || inFlight || !st.can_apply || !st.update_available}
-            >
-              {st.update_available && (pending || latest) ? `Update to ${pending || latest}` : 'Up to date'}
-            </button>
-            {st.previous_version && st.can_apply && (
-              <button className="btn btn--sm" onClick={() => void run('/update/rollback')} disabled={busy || inFlight}>
-                Roll back to {st.previous_version}
-              </button>
-            )}
-          </div>
-          <label className="settings__field">
-            <span className="settings__label">Mode</span>
-            <select
-              className="settings__select"
-              value={st.mode}
-              onChange={(e) => void run('/update/mode', { mode: e.target.value })}
-              disabled={busy || inFlight}
-            >
-              <option value="manual">manual — tell me, I click</option>
-              <option value="automatic_when_idle">automatic when idle — install when no agent is working</option>
-            </select>
-          </label>
+          {!st.layout.frozen && (
+            <>
+              <div className="settings__actions">
+                <button className="btn btn--sm" onClick={() => void run('/update/check')} disabled={busy || inFlight}>
+                  Check now
+                </button>
+                <button
+                  className="btn btn--primary btn--sm"
+                  onClick={() => void run('/update/apply', {})}
+                  disabled={busy || inFlight || !st.can_apply || !st.update_available}
+                >
+                  {st.update_available && (pending || latest) ? `Update to ${pending || latest}` : 'Up to date'}
+                </button>
+                {st.previous_version && st.can_apply && (
+                  <button className="btn btn--sm" onClick={() => void run('/update/rollback')} disabled={busy || inFlight}>
+                    Roll back to {st.previous_version}
+                  </button>
+                )}
+              </div>
+              <label className="settings__field">
+                <span className="settings__label">Mode</span>
+                <select
+                  className="settings__select"
+                  value={st.mode}
+                  onChange={(e) => void run('/update/mode', { mode: e.target.value })}
+                  disabled={busy || inFlight}
+                >
+                  <option value="manual">manual — tell me, I click</option>
+                  <option value="automatic_when_idle">automatic when idle — install when no agent is working</option>
+                </select>
+              </label>
+            </>
+          )}
         </>
       )}
     </section>

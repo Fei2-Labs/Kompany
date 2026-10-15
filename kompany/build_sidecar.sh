@@ -98,6 +98,8 @@ python -m PyInstaller \
   --hidden-import sqlite3 \
   --hidden-import anyio \
   --hidden-import h11 \
+  --hidden-import encodings.idna \
+  --hidden-import stringprep \
   sidecar_main.py
 
 echo "==> Sidecar bundle ready: ${DIST_ROOT}/${BINARY_NAME}/"

@@ -262,7 +262,8 @@ def test_apply_refusals_leave_current_untouched(engine, monkeypatch):
     # frozen bundle
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     st = pipeline.apply_update(engine, fetch=FakeGitHub(), run=fake_run_factory()[0])
-    assert "Kompany.app" in st["error"]
+    assert "Check for updates in the desktop top bar" in st["error"]
+    assert not st["can_apply"]
     monkeypatch.delattr(sys, "frozen", raising=False)
     # tampered wheel → failed before any venv/switch
     _release_layout(engine, monkeypatch, "0.1.5")
