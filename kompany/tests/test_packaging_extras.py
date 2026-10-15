@@ -38,4 +38,4 @@ def test_sidecar_ships_current_kompany_version_metadata() -> None:
     # reports 0.0.0+unknown, and a stale editable install reports an old version.
     script = (PYPROJECT.parent / "build_sidecar.sh").read_text()
     assert "--copy-metadata kompany" in script
-    assert script.index("pip install --quiet --no-deps --no-build-isolation -e .") < script.index("python -m PyInstaller")
+    assert script.index("pip install --quiet --no-deps") < script.index("python -m PyInstaller")

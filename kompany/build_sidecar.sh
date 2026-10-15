@@ -79,7 +79,12 @@ rm -rf "${DIST_ROOT}/${BINARY_NAME}" "${BUILD_ROOT}/${BINARY_NAME}"
 # kompany.__version__ reads package metadata. Refresh the (editable)
 # install so its dist-info carries the current pyproject version, then
 # --copy-metadata ships it; without both the bundle reports 0.0.0+unknown.
-python -m pip install --quiet --no-deps --no-build-isolation -e .
+if python -m pip --version >/dev/null 2>&1; then
+  python -m pip install --quiet --no-deps --no-build-isolation -e .
+else
+  # uv-created venvs ship without pip.
+  uv pip install --quiet --python "$(command -v python)" --no-deps -e .
+fi
 
 python -m PyInstaller \
   --noconfirm \
