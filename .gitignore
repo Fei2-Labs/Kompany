@@ -5,6 +5,8 @@ __pycache__/
 *.so
 *.egg-info/
 dist/
+!tauri/src-tauri/dist/
+!tauri/src-tauri/dist/index.html
 build/
 *.egg
 
