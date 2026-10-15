@@ -359,6 +359,8 @@ def tick_action(engine: Any) -> list[str]:
     """Ticker: periodic check; automatic_when_idle applies when no agent is working."""
     settings = engine.settings
     hours = float(getattr(settings, "update_check_interval_hours", 6))
+    if install.layout(engine.settings.data_dir)["frozen"]:
+        return []  # bundled with Kompany Desktop: the app's own updater owns this
     state = load_state(engine.settings.data_dir)
     if state.phase in ("downloading", "installing", "switching", "restarting", "backing_up", "verifying"):
         return []

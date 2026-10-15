@@ -31,3 +31,11 @@ def test_sidecar_includes_dynamically_loaded_hostname_codec() -> None:
         assert f"--hidden-import {module}" in script
     # urllib/socket load this codec by name, outside static import discovery.
     assert "münich.example".encode("idna") == b"xn--mnich-kva.example"
+
+
+def test_sidecar_ships_current_kompany_version_metadata() -> None:
+    # kompany.__version__ comes from package metadata; a bundle without it
+    # reports 0.0.0+unknown, and a stale editable install reports an old version.
+    script = (PYPROJECT.parent / "build_sidecar.sh").read_text()
+    assert "--copy-metadata kompany" in script
+    assert script.index("pip install --quiet --no-deps --no-build-isolation -e .") < script.index("python -m PyInstaller")

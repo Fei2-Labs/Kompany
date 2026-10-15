@@ -426,3 +426,11 @@ def test_core_update_carries_pro_over_when_pro_feed_is_unavailable(engine, monke
     assert (new_sp / "kompany_pro/__init__.py").read_text() == "x = 1\n" and (new_sp / "kompany_pro-0.1.4.dist-info/entry_points.txt").is_file()
     assert not any("kompany_pro" in " ".join(c) for c in calls if "pip" in c)  # pip installed Core only
     assert install.carry_over_package(data / "releases/0.1.5", data / "releases/0.1.6", dist_name="nothing") is None
+
+
+def test_tick_skips_bundled_desktop_engine(engine, monkeypatch):
+    # Kompany Desktop's own updater replaces the bundled engine; the engine
+    # must not check GitHub on its own and store a result nobody acts on.
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(pipeline, "check_for_update", lambda eng: pytest.fail("bundled engine checked for updates"))
+    assert pipeline.tick_action(engine) == []
