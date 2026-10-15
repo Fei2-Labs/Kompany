@@ -3,6 +3,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { pendingUpdates } from './updateVersions';
+
 interface ReleaseRow {
   version?: string;
   tag?: string;
@@ -91,6 +93,11 @@ export function UpdateCard() {
   );
 
   const latest = st?.latest?.kompany?.version;
+  const latestPro = st?.latest?.['kompany-pro']?.version;
+  // The engine reports one update_available flag for both packages, so name
+  // which one actually moves: a Pro-only release used to show "Update to
+  // <current core version>" and looked like a no-op.
+  const pending = pendingUpdates(st?.installed_version, latest, st?.installed_pro_version, latestPro);
   const inFlight = st ? BUSY.has(st.phase) || st.phase === 'restarting' : false;
   const lastStep = st?.steps?.length ? st.steps[st.steps.length - 1] : null;
 
@@ -112,9 +119,10 @@ export function UpdateCard() {
             {st.installed_pro_version ? ` · pro ${st.installed_pro_version}` : ''}
             {' — latest: '}
             {latest ? `kompany ${latest}` : 'not checked yet'}
+            {latest && st.installed_pro_version ? ` · pro ${latestPro ?? '?'}` : ''}
             {st.last_check_at ? ` (checked ${st.last_check_at.slice(0, 16).replace('T', ' ')})` : ''}
           </p>
-          {st.update_available && <p className="settings__meta">✦ update available: {latest}</p>}
+          {st.update_available && <p className="settings__meta">✦ update available: {pending || latest}</p>}
           {!st.can_apply && <p className="settings__meta">{st.cannot_apply_reason}</p>}
           {inFlight && (
             <p className="settings__meta">
@@ -144,7 +152,7 @@ export function UpdateCard() {
               onClick={() => void run('/update/apply', {})}
               disabled={busy || inFlight || !st.can_apply || !st.update_available}
             >
-              {latest && st.update_available ? `Update to ${latest}` : 'Up to date'}
+              {st.update_available && (pending || latest) ? `Update to ${pending || latest}` : 'Up to date'}
             </button>
             {st.previous_version && st.can_apply && (
               <button className="btn btn--sm" onClick={() => void run('/update/rollback')} disabled={busy || inFlight}>
