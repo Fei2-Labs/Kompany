@@ -112,9 +112,17 @@ def check_for_update(engine: Any, *, fetch: Callable[..., Any] | None = None) ->
 
 def status(engine: Any, state: UpdateState | None = None) -> dict[str, Any]:
     st = state or load_state(engine.settings.data_dir)
-    if st.installed_version is None:
-        st.installed_version, st.installed_pro_version = _versions()
     lay = install.layout(engine.settings.data_dir)
+    if lay["frozen"]:
+        # Bundled with Kompany Desktop: the persisted state belongs to an
+        # older engine in the same data dir. Report only what runs now.
+        stale = {"latest": {}, "update_available": False, "last_check_at": None}
+        if st.phase not in ("failed", "rolled_back"):  # a refused apply keeps its reason
+            stale["error"] = None
+        st = st.model_copy(update=stale)
+        st.installed_version, st.installed_pro_version = _versions()
+    elif st.installed_version is None:
+        st.installed_version, st.installed_pro_version = _versions()
     can_apply, why = _can_apply(lay)
     return {**st.model_dump(), "layout": lay, "can_apply": can_apply, "cannot_apply_reason": why,
             "supervised": install.supervised(), "mode": str(getattr(engine.settings, "update_mode", "manual"))}

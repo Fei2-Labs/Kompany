@@ -434,3 +434,17 @@ def test_tick_skips_bundled_desktop_engine(engine, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(pipeline, "check_for_update", lambda eng: pytest.fail("bundled engine checked for updates"))
     assert pipeline.tick_action(engine) == []
+
+
+def test_status_of_bundled_engine_ignores_state_left_by_an_older_engine(engine, monkeypatch):
+    # The data dir outlives the app: 0.2.1's engine stored 0.0.0+unknown and a
+    # failed check, and the 0.2.3 bundle read them back into the Update card.
+    stale = pipeline.load_state(engine.settings.data_dir)
+    stale.installed_version, stale.last_check_at, stale.error = "0.0.0+unknown", "2026-10-15T21:46:56+00:00", "kompany: unknown encoding: idna"
+    stale.latest = {"kompany": {"version": "0.1.18"}}
+    pipeline.save_state(engine.settings.data_dir, stale)
+    monkeypatch.setattr(pipeline, "_versions", lambda: ("0.1.19", None))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    st = pipeline.status(engine)
+    assert st["installed_version"] == "0.1.19"
+    assert st["error"] is None and st["last_check_at"] is None and st["latest"] == {} and not st["update_available"]
