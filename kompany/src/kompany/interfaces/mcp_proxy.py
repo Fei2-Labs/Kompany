@@ -91,6 +91,11 @@ def write_discovery_file(
         "started_at": datetime.now(timezone.utc).isoformat(),
         "source": source,
     }
+    # Set by Kompany Desktop on the sidecar it spawns, so the next launch
+    # of a newer app can tell that this server came from an older bundle.
+    app_version = os.environ.get("KOMPANY_DESKTOP_VERSION")
+    if app_version:
+        payload["app_version"] = app_version
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic publish: readers (the MCP proxy, the desktop shell, tests)
