@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { pendingUpdates } from './updateVersions';
+import { UpdateProgress } from './UpdateProgress';
 
 interface ReleaseRow {
   version?: string;
@@ -107,12 +108,21 @@ export function UpdateCard() {
         <h2 className="settings__card-title">Update</h2>
       </header>
       <p className="settings__hint">
-        Updates come only from signed GitHub releases: verified wheels into a fresh release
-        directory, a database backup, then a restart. The first boot rolls back on its own if
-        the doctor fails.
+        {st?.layout.frozen
+          ? 'This local engine updates with Kompany Desktop. Use Check for updates in the desktop top bar; download progress and Restart to update appear there.'
+          : 'Updates come only from signed GitHub releases: verified wheels into a fresh release directory, a database backup, then a restart. The first boot rolls back on its own if the doctor fails.'}
       </p>
       {err && <p className="settings__meta">{err}</p>}
-      {st && (
+      {/* The bundled engine never checks or installs on its own, so its
+          stored check result (latest, error, timestamp) is stale by
+          definition — show only what it runs. */}
+      {st?.layout.frozen && (
+        <p className="settings__meta">
+          engine: kompany {st.installed_version}
+          {st.installed_pro_version ? ` · pro ${st.installed_pro_version}` : ''}
+        </p>
+      )}
+      {st && !st.layout.frozen && (
         <>
           <p className="settings__meta">
             installed: kompany {st.installed_version}
@@ -124,6 +134,7 @@ export function UpdateCard() {
           </p>
           {st.update_available && <p className="settings__meta">✦ update available: {pending || latest}</p>}
           {!st.can_apply && <p className="settings__meta">{st.cannot_apply_reason}</p>}
+          {(inFlight || busy) && <UpdateProgress phase={inFlight ? st.phase : 'checking'} />}
           {inFlight && (
             <p className="settings__meta">
               {st.phase}

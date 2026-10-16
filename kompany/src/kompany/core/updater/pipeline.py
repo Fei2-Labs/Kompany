@@ -112,9 +112,17 @@ def check_for_update(engine: Any, *, fetch: Callable[..., Any] | None = None) ->
 
 def status(engine: Any, state: UpdateState | None = None) -> dict[str, Any]:
     st = state or load_state(engine.settings.data_dir)
-    if st.installed_version is None:
-        st.installed_version, st.installed_pro_version = _versions()
     lay = install.layout(engine.settings.data_dir)
+    if lay["frozen"]:
+        # Bundled with Kompany Desktop: the persisted state belongs to an
+        # older engine in the same data dir. Report only what runs now.
+        stale = {"latest": {}, "update_available": False, "last_check_at": None}
+        if st.phase not in ("failed", "rolled_back"):  # a refused apply keeps its reason
+            stale["error"] = None
+        st = st.model_copy(update=stale)
+        st.installed_version, st.installed_pro_version = _versions()
+    elif st.installed_version is None:
+        st.installed_version, st.installed_pro_version = _versions()
     can_apply, why = _can_apply(lay)
     return {**st.model_dump(), "layout": lay, "can_apply": can_apply, "cannot_apply_reason": why,
             "supervised": install.supervised(), "mode": str(getattr(engine.settings, "update_mode", "manual"))}
@@ -122,7 +130,7 @@ def status(engine: Any, state: UpdateState | None = None) -> dict[str, Any]:
 
 def _can_apply(lay: dict[str, Any]) -> tuple[bool, str | None]:
     if lay["frozen"]:
-        return False, "This engine is the desktop app's bundled sidecar — update by reinstalling Kompany.app."
+        return False, "This engine is bundled with Kompany Desktop. Use Check for updates in the desktop top bar, then Restart to update. The engine updates with the app."
     if not lay["running_from_release"]:
         return False, ("This engine does not run from <data_dir>/releases/current — run ops/bootstrap_release.sh once "
                        "(it migrates a checkout install to the release layout); afterwards updates are one click.")
@@ -359,6 +367,8 @@ def tick_action(engine: Any) -> list[str]:
     """Ticker: periodic check; automatic_when_idle applies when no agent is working."""
     settings = engine.settings
     hours = float(getattr(settings, "update_check_interval_hours", 6))
+    if install.layout(engine.settings.data_dir)["frozen"]:
+        return []  # bundled with Kompany Desktop: the app's own updater owns this
     state = load_state(engine.settings.data_dir)
     if state.phase in ("downloading", "installing", "switching", "restarting", "backing_up", "verifying"):
         return []

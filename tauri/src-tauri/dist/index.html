@@ -25,6 +25,14 @@
     .dot.error { background: var(--danger); }
     #status { margin-left: auto; color: var(--faint); max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #status.error { color: var(--danger); }
+    #tabs { flex: 1; }
+    #updater { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    #update-progress { width: 170px; }
+    #update-progress[hidden] { display: none; }
+    #update-label { display: block; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #update-meter { display: block; width: 100%; height: 5px; accent-color: var(--accent); }
+    #update-error { color: var(--danger); font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    @media (max-width: 720px) { #brand { display: none; } #bar { gap: 6px; padding: 0 6px; } #update-progress { width: 130px; } #status { max-width: 15%; } }
     #manager { display: none; height: calc(100% - var(--bar-height)); overflow-y: auto; padding: 24px; }
     body.expanded #manager { display: block; }
     .wrap { max-width: 680px; margin: 0 auto; }
@@ -51,7 +59,15 @@
     <span id="brand">Kompany</span>
     <nav id="tabs" aria-label="Connection targets"></nav>
     <span id="status" role="status"></span>
-    <button type="button" id="update" class="primary" hidden></button>
+    <div id="updater">
+      <div id="update-progress" hidden>
+        <span id="update-label" role="status" aria-live="polite"></span>
+        <progress id="update-meter" aria-label="Desktop update download"></progress>
+      </div>
+      <span id="update-error" role="status" hidden></span>
+      <button type="button" id="check-update">Check for updates</button>
+      <button type="button" id="update" class="primary" hidden></button>
+    </div>
     <button type="button" id="manage">Targets</button>
   </header>
   <main id="manager" aria-label="Manage connection targets">
@@ -207,15 +223,52 @@
       // A signed update is downloaded and installed in the background; it
       // only takes effect when the founder chooses to restart.
       const updateButton = $('update');
+      const checkButton = $('check-update');
       async function pollUpdate() {
         try {
           const s = await invoke('update_status');
+          const active = ['checking', 'downloading', 'verifying', 'installing'].includes(s.state);
+          const progress = $('update-progress'), meter = $('update-meter');
+          progress.hidden = !active;
+          checkButton.disabled = active;
+          checkButton.hidden = s.state === 'ready';
+          checkButton.title = `Kompany Desktop ${s.current}`;
+          const error = $('update-error');
+          error.hidden = s.state !== 'error';
+          error.textContent = s.error || '';
+          error.title = s.error || '';
           updateButton.hidden = s.state !== 'ready';
           if (s.state === 'ready') updateButton.textContent = `Restart to update (${s.ready_version})`;
+          meter.removeAttribute('value');
+          if (s.state === 'downloading') {
+            const bytes = Number(s.downloaded_bytes || 0), total = Number(s.total_bytes || 0);
+            const size = (n) => `${(n / 1048576).toFixed(1)} MB`;
+            if (total > 0) {
+              meter.max = total;
+              meter.value = Math.min(bytes, total);
+              $('update-label').textContent = `Downloading ${Math.min(100, Math.floor(bytes / total * 100))}% · ${size(bytes)} / ${size(total)}`;
+            } else {
+              $('update-label').textContent = `Downloading · ${size(bytes)}`;
+            }
+          } else {
+            $('update-label').textContent = ({ checking: 'Checking for updates…', verifying: 'Verifying signature…', installing: 'Installing update…' })[s.state] || '';
+          }
         } catch (e) {
-          updateButton.hidden = true;
+          $('update-error').hidden = false;
+          $('update-error').textContent = message(e);
         }
       }
+      checkButton.addEventListener('click', async () => {
+        checkButton.disabled = true;
+        try {
+          await invoke('check_desktop_update');
+          await pollUpdate();
+        } catch (e) {
+          $('update-error').hidden = false;
+          $('update-error').textContent = message(e);
+          checkButton.disabled = false;
+        }
+      });
       updateButton.addEventListener('click', async () => {
         updateButton.disabled = true;
         updateButton.textContent = 'Restarting…';
@@ -236,7 +289,7 @@
         .then(() => pick(list.active_id))
         .catch((e) => setStatus(message(e), true));
       pollUpdate();
-      setInterval(pollUpdate, 5 * 60 * 1000);
+      setInterval(pollUpdate, 1000);
     })();
   </script>
 </body>

@@ -296,6 +296,7 @@ fn main() {
             desktop::remove_target,
             desktop::set_shell_expanded,
             updates::update_status,
+            updates::check_desktop_update,
             updates::restart_to_update,
         ])
         .setup(|app| {

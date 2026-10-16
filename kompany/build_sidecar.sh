@@ -76,6 +76,16 @@ fi
 # Clean prior output so a stale build can't poison the bundle.
 rm -rf "${DIST_ROOT}/${BINARY_NAME}" "${BUILD_ROOT}/${BINARY_NAME}"
 
+# kompany.__version__ reads package metadata. Refresh the (editable)
+# install so its dist-info carries the current pyproject version, then
+# --copy-metadata ships it; without both the bundle reports 0.0.0+unknown.
+if python -m pip --version >/dev/null 2>&1; then
+  python -m pip install --quiet --no-deps --no-build-isolation -e .
+else
+  # uv-created venvs ship without pip.
+  uv pip install --quiet --python "$(command -v python)" --no-deps -e .
+fi
+
 python -m PyInstaller \
   --noconfirm \
   --onedir \
@@ -84,6 +94,7 @@ python -m PyInstaller \
   --workpath "${BUILD_ROOT}" \
   --specpath "${BUILD_ROOT}" \
   --collect-all kompany \
+  --copy-metadata kompany \
   --collect-all anthropic \
   --collect-all openai \
   --collect-all cryptography \
@@ -98,6 +109,8 @@ python -m PyInstaller \
   --hidden-import sqlite3 \
   --hidden-import anyio \
   --hidden-import h11 \
+  --hidden-import encodings.idna \
+  --hidden-import stringprep \
   sidecar_main.py
 
 echo "==> Sidecar bundle ready: ${DIST_ROOT}/${BINARY_NAME}/"
