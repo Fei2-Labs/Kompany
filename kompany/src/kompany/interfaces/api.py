@@ -262,6 +262,14 @@ if BOARD_AVAILABLE:
         first = full_path.split("/", 1)[0]
         if first in _NON_SPA_PREFIXES:
             raise HTTPException(status_code=404)
+        # PWA shell files (manifest, service worker, icons) sit at the top
+        # level of dist/. Serve the real file; the catch-all must not answer
+        # ``/sw.js`` with HTML or the browser rejects the worker.
+        if full_path and "/" not in full_path and not full_path.startswith("."):
+            candidate = _BOARD_UI_DIR / full_path
+            if candidate.is_file() and candidate != _BOARD_INDEX:
+                headers = {"Cache-Control": "no-cache"} if full_path.endswith((".js", ".webmanifest")) else None
+                return FileResponse(str(candidate), headers=headers)
         return FileResponse(str(_BOARD_INDEX))
 
 else:  # pragma: no cover - depends on build artifacts being present

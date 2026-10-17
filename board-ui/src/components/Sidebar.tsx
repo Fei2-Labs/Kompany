@@ -5,7 +5,7 @@ interface SidebarProps {
   onOpenPalette: () => void;
 }
 
-function ItemRow({ item }: { item: NavItem }) {
+export function ItemRow({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
   if (item.disabled) {
     return (
       <div className="nav__item nav__item--disabled">
@@ -18,7 +18,7 @@ function ItemRow({ item }: { item: NavItem }) {
 
   if (item.href) {
     return (
-      <a className="nav__item" href={item.href}>
+      <a className="nav__item" href={item.href} onClick={onNavigate}>
         <span className="nav__glyph">{item.glyph}</span>
         <span className="nav__label">{item.label}</span>
       </a>
@@ -29,6 +29,7 @@ function ItemRow({ item }: { item: NavItem }) {
     <NavLink
       to={item.path ?? '/'}
       end={item.path === '/'}
+      onClick={onNavigate}
       className={({ isActive }) =>
         isActive ? 'nav__item nav__item--active' : 'nav__item'
       }
@@ -36,6 +37,27 @@ function ItemRow({ item }: { item: NavItem }) {
       <span className="nav__glyph">{item.glyph}</span>
       <span className="nav__label">{item.label}</span>
     </NavLink>
+  );
+}
+
+export function NavList({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <nav className="nav">
+      <div className="nav__group">
+        {TOP_ITEMS.map((item) => (
+          <ItemRow key={item.label} item={item} onNavigate={onNavigate} />
+        ))}
+      </div>
+
+      {NAV_GROUPS.map((group) => (
+        <div className="nav__group" key={group.label}>
+          <div className="nav__group-label">{group.label}</div>
+          {group.items.map((item) => (
+            <ItemRow key={item.label} item={item} onNavigate={onNavigate} />
+          ))}
+        </div>
+      ))}
+    </nav>
   );
 }
 
@@ -54,22 +76,7 @@ export function Sidebar({ onOpenPalette }: SidebarProps) {
         <span className="search__kbd">⌘K</span>
       </button>
 
-      <nav className="nav">
-        <div className="nav__group">
-          {TOP_ITEMS.map((item) => (
-            <ItemRow key={item.label} item={item} />
-          ))}
-        </div>
-
-        {NAV_GROUPS.map((group) => (
-          <div className="nav__group" key={group.label}>
-            <div className="nav__group-label">{group.label}</div>
-            {group.items.map((item) => (
-              <ItemRow key={item.label} item={item} />
-            ))}
-          </div>
-        ))}
-      </nav>
+      <NavList />
     </aside>
   );
 }

@@ -1727,41 +1727,23 @@ body {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 720px) {
   .layout,
   .layout--rail {
     display: flex;
     flex-direction: column;
-    min-height: 100%;
+    height: 100dvh;
+    min-height: 0;
   }
   .sidebar {
-    flex: none;
-    max-height: none;
-    padding: 8px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  .nav {
-    flex-direction: row;
-    gap: 4px;
-    overflow-x: auto;
-  }
-  .nav__group {
-    flex-direction: row;
-    flex: none;
-  }
-  .nav__group-label,
-  .nav__item--disabled,
-  .nav__group:not(:first-child) .nav__group-label {
     display: none;
-  }
-  .nav__item {
-    flex: none;
-    padding: 7px 9px;
   }
   .content {
     flex: 1;
     min-height: 0;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .pane,
   .timeline--pane {
@@ -1793,10 +1775,146 @@ body {
   .board__columns {
     grid-template-columns: 1fr;
   }
-  .cmdbar {
-    position: sticky;
+}
+
+/* ---- Phone app shell (<=720px) ---- */
+.mbar,
+.mtabs,
+.mdrawer {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: env(safe-area-inset-top) calc(8px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left));
+    min-height: calc(48px + env(safe-area-inset-top));
+    background: var(--bg-rail);
+    border-bottom: 1px solid var(--border);
+  }
+  .mbar__brand {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+  }
+  .mbar__btn {
+    min-width: 44px;
+    min-height: 44px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .mtabs {
+    flex: none;
+    display: flex;
+    background: var(--bg-rail);
+    border-top: 1px solid var(--border);
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  .mtabs__tab {
+    flex: 1;
+    min-height: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    font: inherit;
+    font-size: 11px;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .mtabs__tab--active {
+    color: var(--accent);
+  }
+  .mtabs__glyph {
+    font-size: 18px;
+    line-height: 1;
+  }
+  .mdrawer {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+  }
+  .mdrawer__scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .mdrawer__panel {
+    position: absolute;
+    top: 0;
+    right: 0;
     bottom: 0;
-    z-index: 10;
+    width: min(320px, 86vw);
+    overflow-y: auto;
+    padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+    background: var(--bg-rail);
+    border-left: 1px solid var(--border);
+  }
+  .mdrawer__close {
+    float: right;
+    min-width: 44px;
+    min-height: 44px;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 18px;
+    cursor: pointer;
+  }
+  /* The drawer reuses the sidebar nav as a vertical list. */
+  .mdrawer .nav {
+    flex-direction: column;
+    overflow: visible;
+    clear: both;
+  }
+  .mdrawer .nav__group {
+    flex-direction: column;
+  }
+  .mdrawer .nav__group-label,
+  .mdrawer .nav__group:not(:first-child) .nav__group-label {
+    display: block;
+  }
+  .mdrawer .nav__item--disabled {
+    display: flex;
+  }
+
+  /* Touch ergonomics: 44px targets, 16px inputs (no iOS zoom), wrapped text. */
+  .nav__item,
+  .btn,
+  .search,
+  .cmdbar__expand {
+    min-height: 44px;
+  }
+  .cmdbar__input,
+  input,
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .cmdbar {
+    padding: 8px calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left));
+  }
+  .pane,
+  .board,
+  .timeline--pane {
+    overflow-wrap: anywhere;
+  }
+  pre {
+    white-space: pre-wrap;
   }
 }
 
