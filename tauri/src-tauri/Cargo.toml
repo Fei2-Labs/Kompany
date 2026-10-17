@@ -1,6 +1,6 @@
 [package]
 name = "kompany-desktop"
-version = "0.2.4"
+version = "0.2.5"
 description = "Kompany — autonomous business OS, desktop shell."
 authors = ["Kompany"]
 edition = "2021"

@@ -4,7 +4,9 @@
 //   1. Local engine. Attach-if-running (06-12-daemon-tick-loop D2): if
 //      `<data_dir>/server.json` points at a healthy live server (e.g.
 //      the `kompany daemon` LaunchAgent), use it and spawn nothing —
-//      exactly one engine process ever ticks. Otherwise pick a free
+//      exactly one engine process ever ticks. A sidecar spawned by a
+//      different app build is stopped and replaced instead, so an update
+//      never leaves the new app on the old engine. Otherwise pick a free
 //      loopback port and spawn the bundled `kompany-server` with
 //      `--port` and `--data-dir` (KOMPANY_DATA_DIR, default ~/.kompany),
 //      then poll `/health` until 200 OK (or 30s). Remote-only installs
@@ -143,7 +145,7 @@ fn wait_for_health(base_url: &str, timeout: Duration) -> bool {
 /// app is never mistaken for our server. The health probe doubles as
 /// the liveness check (a dead pid can't answer), which keeps this
 /// portable without a libc dependency.
-fn discover_running_server(data_dir: &std::path::Path) -> Option<(u16, i64)> {
+fn discover_running_server(data_dir: &std::path::Path) -> Option<RunningServer> {
     let raw = std::fs::read_to_string(data_dir.join("server.json")).ok()?;
     let info: serde_json::Value = serde_json::from_str(&raw).ok()?;
     let port = info.get("port")?.as_u64()?;
@@ -168,13 +170,132 @@ fn discover_running_server(data_dir: &std::path::Path) -> Option<(u16, i64)> {
     if body.get("status").and_then(|s| s.as_str()) != Some("ok") {
         return None;
     }
-    Some((port, pid))
+    let text = |key: &str| info.get(key).and_then(|v| v.as_str()).map(str::to_string);
+    Some(RunningServer {
+        port,
+        pid,
+        source: text("source"),
+        app_version: text("app_version"),
+    })
+}
+
+struct RunningServer {
+    port: u16,
+    pid: i64,
+    /// `sidecar` (spawned by Kompany Desktop) or `daemon` (`kompany daemon run`).
+    source: Option<String>,
+    /// Version of the Kompany Desktop that spawned it; absent before 0.2.5.
+    app_version: Option<String>,
+}
+
+/// Numeric dotted-version components; non-numeric parts count as 0.
+fn version_parts(version: &str) -> impl Iterator<Item = u64> + '_ {
+    version
+        .split('.')
+        .map(|part| part.split('-').next().unwrap_or(part).parse().unwrap_or(0))
+}
+
+/// A sidecar left running by a different Kompany Desktop build (the old
+/// app's engine survives "Restart to update" if it outlives the app) must
+/// be replaced, or the updated app keeps talking to the old engine. A
+/// daemon the founder runs is never ours to stop.
+///
+/// Only replace an older sidecar. A newer engine must not be downgraded by an
+/// older desktop binary starting against the same data directory.
+fn is_stale_sidecar(server: &RunningServer, app_version: &str) -> bool {
+    server.source.as_deref() == Some("sidecar")
+        && match server.app_version.as_deref() {
+            None => true,
+            Some(version) => version_parts(version)
+                .cmp(version_parts(app_version))
+                .is_lt(),
+        }
+}
+
+fn process_command(pid: i64) -> Result<String, String> {
+    let output = Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .map_err(|error| format!("inspect process {pid}: {error}"))?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// `lsof` selects one TCP port only as `-iTCP:<port>`; a separate port
+/// argument is read as a file name and the check always fails.
+fn lsof_listen_args(pid: i64, port: u16) -> [String; 6] {
+    [
+        "-nP".to_string(),
+        "-a".to_string(),
+        "-p".to_string(),
+        pid.to_string(),
+        format!("-iTCP:{port}"),
+        "-sTCP:LISTEN".to_string(),
+    ]
+}
+
+/// Verify that the discovery record still names the expected process and that
+/// it owns the recorded listening port. This is deliberately checked again
+/// immediately before signalling: server.json alone is not process identity.
+fn process_is_bundled_sidecar(server: &RunningServer, binary: &std::path::Path) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let expected = binary
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if expected.is_empty() {
+        return false;
+    }
+    let command = process_command(server.pid).unwrap_or_default();
+    if !command.contains(expected) {
+        return false;
+    }
+    Command::new("/usr/sbin/lsof")
+        .args(lsof_listen_args(server.pid, server.port))
+        .output()
+        .map(|output| output.status.success() && !output.stdout.is_empty())
+        .unwrap_or(false)
+}
+
+/// Stop a stale sidecar only after verifying executable and port ownership.
+/// Wait for the process itself to exit, not merely for health to disappear.
+/// Never force-kill: uncertainty leaves Local offline rather than risking an
+/// unrelated process or overlapping an old engine's shutdown.
+fn stop_stale_sidecar(server: &RunningServer, binary: &std::path::Path) -> Result<(), String> {
+    if !process_is_bundled_sidecar(server, binary) {
+        return Err(format!(
+            "stale sidecar identity or port ownership could not be verified (pid {}, port {})",
+            server.pid, server.port
+        ));
+    }
+    let pid = server.pid.to_string();
+    let status = Command::new("/bin/kill")
+        .args(["-TERM", &pid])
+        .status()
+        .map_err(|error| format!("request stale sidecar shutdown: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "request stale sidecar shutdown for pid {pid} failed"
+        ));
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if process_command(server.pid).unwrap_or_default().is_empty() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err(format!(
+        "stale sidecar pid {pid} did not exit after SIGTERM"
+    ))
 }
 
 fn spawn_sidecar(
     binary_path: &std::path::Path,
     port: u16,
     data_dir: &std::path::Path,
+    app_version: &str,
 ) -> std::io::Result<Child> {
     Command::new(binary_path)
         .arg("--port")
@@ -183,6 +304,7 @@ fn spawn_sidecar(
         .arg("127.0.0.1")
         .arg("--data-dir")
         .arg(data_dir.as_os_str())
+        .env("KOMPANY_DESKTOP_VERSION", app_version)
         .spawn()
 }
 
@@ -341,22 +463,56 @@ fn main() {
             // engine process ever ticks), else spawn the bundled sidecar.
             // Remote-only installs may ship without a sidecar; Local then
             // shows as offline instead of blocking launch.
-            let local_base = if let Some((port, pid)) = discover_running_server(&data_dir) {
-                eprintln!(
-                    "kompany: attaching to existing server on port {} (pid {}), not spawning a sidecar",
-                    port, pid
-                );
-                Some(format!("http://127.0.0.1:{}", port))
-            } else if let Some(binary) = sidecar_binary_path(&handle) {
+            let app_version = handle.package_info().version.to_string();
+            // Resolve the new executable before touching an old sidecar. A
+            // missing bundle must never turn into an offline app by stopping
+            // the only usable engine first.
+            let binary = sidecar_binary_path(&handle);
+            let mut local_error = None;
+            let running = discover_running_server(&data_dir);
+            let local_base = if let Some(server) = running {
+                if !is_stale_sidecar(&server, &app_version) {
+                    eprintln!(
+                        "kompany: attaching to existing server on port {} (pid {}), not spawning a sidecar",
+                        server.port, server.pid
+                    );
+                    Some(format!("http://127.0.0.1:{}", server.port))
+                } else if let Some(binary_path) = binary.as_deref() {
+                    match stop_stale_sidecar(&server, binary_path) {
+                        Ok(()) => None,
+                        Err(cause) => {
+                            let error = format!(
+                                "stale sidecar on port {} (pid {}) could not be stopped safely ({cause}); Local is offline",
+                                server.port, server.pid
+                            );
+                            eprintln!("kompany: {error}");
+                            local_error = Some(error);
+                            None
+                        }
+                    }
+                } else {
+                    let error = "bundled engine is missing; kept the old sidecar running and left Local offline".to_string();
+                    eprintln!("kompany: {error}");
+                    local_error = Some(error);
+                    None
+                }
+            } else {
+                None
+            };
+            let local_base = if let Some(base) = local_base {
+                Some(base)
+            } else if local_error.is_some() {
+                None
+            } else if let Some(binary) = binary {
                 let mut port = pick_free_port().map_err(|e| format!("port pick failed: {}", e))?;
-                let mut child = spawn_sidecar(&binary, port, &data_dir)
+                let mut child = spawn_sidecar(&binary, port, &data_dir, &app_version)
                     .map_err(|e| format!("spawn sidecar failed: {}", e))?;
                 let mut base = format!("http://127.0.0.1:{}", port);
                 if !wait_for_health(&base, Duration::from_secs(30)) {
                     // Retry once: maybe the port was grabbed between bind/drop.
                     stop_child(child);
                     port = pick_free_port().map_err(|e| format!("port pick failed: {}", e))?;
-                    child = spawn_sidecar(&binary, port, &data_dir)
+                    child = spawn_sidecar(&binary, port, &data_dir, &app_version)
                         .map_err(|e| format!("spawn sidecar (retry) failed: {}", e))?;
                     base = format!("http://127.0.0.1:{}", port);
                     if !wait_for_health(&base, Duration::from_secs(30)) {
@@ -385,7 +541,7 @@ fn main() {
                     &runtime,
                     target_registry::LOCAL_TARGET_ID,
                     "offline",
-                    Some("Local engine is not bundled".to_string()),
+                    Some(local_error.unwrap_or_else(|| "Local engine is not bundled".to_string())),
                 )?,
             }
 
@@ -408,4 +564,71 @@ fn main() {
                 stop_spawned_sidecar(app_handle);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn server(source: Option<&str>, app_version: Option<&str>) -> RunningServer {
+        RunningServer {
+            port: 1,
+            pid: 1,
+            source: source.map(str::to_string),
+            app_version: app_version.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn replaces_only_sidecars_from_another_app_build() {
+        assert!(!is_stale_sidecar(
+            &server(Some("sidecar"), Some("0.2.5")),
+            "0.2.5"
+        ));
+        assert!(is_stale_sidecar(
+            &server(Some("sidecar"), Some("0.2.4")),
+            "0.2.5"
+        ));
+        // Sidecars spawned before app_version was recorded are older builds.
+        assert!(is_stale_sidecar(&server(Some("sidecar"), None), "0.2.5"));
+        // A founder-run daemon, or a file without a source, is left alone.
+        assert!(!is_stale_sidecar(&server(Some("daemon"), None), "0.2.5"));
+        assert!(!is_stale_sidecar(&server(None, None), "0.2.5"));
+    }
+
+    #[test]
+    fn never_downgrades_a_newer_sidecar() {
+        assert!(!is_stale_sidecar(
+            &server(Some("sidecar"), Some("0.2.6")),
+            "0.2.5"
+        ));
+        assert!(!is_stale_sidecar(
+            &server(Some("sidecar"), Some("0.10.0")),
+            "0.9.9"
+        ));
+        assert!(is_stale_sidecar(
+            &server(Some("sidecar"), Some("0.9.9")),
+            "0.10.0"
+        ));
+    }
+
+    #[test]
+    fn refuses_to_stop_a_process_that_is_not_the_bundled_sidecar() {
+        // pid 1 is never our sidecar and cannot own the recorded port.
+        let unrelated = RunningServer {
+            port: 1,
+            pid: 1,
+            source: Some("sidecar".to_string()),
+            app_version: None,
+        };
+        let binary = std::path::Path::new("/nonexistent/kompany-server-test");
+        assert!(stop_stale_sidecar(&unrelated, binary).is_err());
+    }
+
+    #[test]
+    fn lsof_selects_the_port_in_one_argument() {
+        let args = lsof_listen_args(42, 18801);
+        assert!(args.contains(&"-iTCP:18801".to_string()));
+        assert!(!args.contains(&"18801".to_string()));
+    }
 }
