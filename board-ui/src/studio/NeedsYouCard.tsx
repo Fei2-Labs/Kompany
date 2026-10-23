@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { retryTask } from '../api/client';
 import { ApprovalActions } from '../board/ApprovalActions';
 import type { UseChannel } from '../channel/useChannel';
+import { ApprovalSummary } from './PayloadSummary';
 import { KIND_LABEL, type NeedsItem } from './needsYou';
 
 interface NeedsYouCardProps {
@@ -56,9 +57,7 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
       {error && <div className="approve__error">{error}</div>}
       {open && item.approval && (
         <>
-          {!compact && Object.keys(item.approval.payload).length > 0 && (
-            <pre className="ny-card__payload">{JSON.stringify(item.approval.payload, null, 2)}</pre>
-          )}
+          {!compact && <ApprovalSummary approval={item.approval} />}
           <ApprovalActions
             approval={item.approval}
             onResolved={() => {
