@@ -7,6 +7,8 @@ as a blocked task. Split out of ``executor.py`` (500-line rule).
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 from kompany.state.models import Task
@@ -52,4 +54,52 @@ def retry_context(task: Task, task_result: dict) -> str:
     )
 
 
-__all__ = ["requeue_or_block", "retry_context"]
+
+# Vehicles whose file tools are confined to the project workspace. A task
+# that names a path outside it can never succeed there (issue #109).
+WORKSPACE_CONFINED_VEHICLES = frozenset({"native"})
+_ABS_PATH = re.compile(r"(?<![\w.~-])(/(?:home|Users|root|opt|srv|var|mnt|tmp)/[^\s'\"`)]+)")
+
+
+def paths_outside_workspace(text: str, workspace: Path) -> list[str]:
+    """Absolute paths named in ``text`` that do not lie inside ``workspace``."""
+    ws = Path(workspace).resolve()
+    found: list[str] = []
+    for raw in _ABS_PATH.findall(text or ""):
+        path = raw.rstrip(".,;:")
+        try:
+            inside = Path(path).resolve().is_relative_to(ws)
+        except (OSError, ValueError):
+            inside = False
+        if not inside and path not in found:
+            found.append(path)
+    return found
+
+
+def block_out_of_workspace(
+    engine: Any, task: Task, project: Any, workspace: Any, outside: list[str]
+) -> None:
+    """Block before running: the paths must be staged into the workspace first."""
+    reason = (
+        "out_of_workspace: the task names paths outside the project workspace "
+        f"({', '.join(outside[:3])}). Copy the files into {workspace} and refer to "
+        "them by relative path, then retry."
+    )
+    engine.projects.update_task_status_raw(task_id=task.id, status="blocked", reason=reason)
+    engine.audit.record(
+        "task.blocked",
+        "Task names paths outside the sandboxed workspace",
+        detail={"task_id": task.id, "paths": outside, "workspace": str(workspace)},
+        agent_role=task.assigned_agent,
+        directive_id=project.triggers_directive_id,
+        project_id=project.id,
+    )
+
+
+__all__ = [
+    "WORKSPACE_CONFINED_VEHICLES",
+    "block_out_of_workspace",
+    "paths_outside_workspace",
+    "requeue_or_block",
+    "retry_context",
+]

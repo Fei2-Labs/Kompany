@@ -6,6 +6,7 @@ import json
 import time
 from typing import Any
 
+from kompany.core.harness_execution.selection import DEFAULT_MAX_TURNS
 from kompany.core.directive import Directive, DirectiveResult, DirectiveStatus
 from kompany.core.run_context import current_run_id
 from kompany.core.event_hub import get_event_hub
@@ -68,7 +69,7 @@ class ChannelDelegationMixin:
                     ),
                     assigned_agent=role,
                     budget_cap_usd=child_budget,
-                    max_turns=8,
+                    max_turns=DEFAULT_MAX_TURNS,
                 )
                 for role in destination_agent_ids
             ],

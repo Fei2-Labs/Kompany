@@ -288,3 +288,27 @@ def test_selection_native_requires_llm_client():
     )
     runner = select_runner(settings, llm_client=None)
     assert not isinstance(runner, NativeRunner)
+
+
+# ---------------------------------------------------------------------------
+# run_shell: cwd and shell-syntax hints (issue #109)
+# ---------------------------------------------------------------------------
+
+
+def test_run_shell_cwd_runs_inside_subdirectory(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "marker.txt").write_text("x")
+    out = execute_tool(tmp_path, "run_shell", {"command": "ls", "cwd": "pkg"})
+    assert "exit code: 0" in out and "marker.txt" in out
+
+
+def test_run_shell_cwd_cannot_escape_workspace(tmp_path):
+    out = execute_tool(tmp_path, "run_shell", {"command": "ls", "cwd": "../.."})
+    assert "escapes the workspace" in out
+
+
+@pytest.mark.parametrize("command", ["cd pkg", "pwd;", "ls && echo hi", "ls | wc -l", "echo x > f.txt"])
+def test_run_shell_explains_there_is_no_shell(tmp_path, command):
+    out = execute_tool(tmp_path, "run_shell", {"command": command})
+    assert out.startswith("ERROR:") and "no shell" in out
+    assert not (tmp_path / "f.txt").exists()

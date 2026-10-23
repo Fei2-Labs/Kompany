@@ -28,8 +28,12 @@ Available tools (args is always a JSON object):
   — create or overwrite a file (parent dirs created automatically).
 - list_dir: {"path": "<relative path, optional, default '.'>"} — list
   directory entries (directories end with '/').
-- run_shell: {"command": "<command string>"} — run a command in the
-  workspace (no shell interpolation; 120s timeout; output truncated).
+- run_shell: {"command": "<one command>", "cwd": "<relative dir, optional>"}
+  — run ONE program in the workspace (or in ``cwd`` inside it). There is no
+  shell: ``cd``, ``&&``, ``;``, ``|``, ``>`` and globs do not work. Use
+  ``cwd`` instead of ``cd`` and one call per command; for anything more
+  complex, write a Python script with write_file and run ``python3 it.py``.
+  120s timeout; output truncated.
 
 All paths are resolved inside the workspace only — escapes are rejected.
 """
@@ -92,6 +96,31 @@ def _list_dir(workspace: Path, args: dict[str, Any]) -> str:
     return _truncate("\n".join(entries) or "(empty directory)")
 
 
+_SHELL_OPERATORS = frozenset({"&&", "||", ";", "|", ">", ">>", "<", "&"})
+_SHELL_BUILTINS = frozenset({"cd", "export", "source", "."})
+
+
+def _shell_syntax_hint(argv: list[str]) -> str | None:
+    """Explain shell syntax up front instead of a bare 'command not found'.
+
+    Agents burned whole turn budgets retrying ``cd x && ...`` or ``pwd;``
+    because the error never said there is no shell.
+    """
+    first = argv[0].rstrip(";")
+    if first in _SHELL_BUILTINS:
+        return (
+            f"ERROR: {first!r} is a shell builtin and run_shell has no shell. "
+            "Pass the directory as the 'cwd' argument instead of using cd."
+        )
+    if any(a in _SHELL_OPERATORS or a.endswith(";") for a in argv):
+        return (
+            "ERROR: run_shell has no shell, so &&, ||, ;, |, > and < do not work. "
+            "Make one call per command (use 'cwd' for the directory), or write a "
+            "Python script with write_file and run it."
+        )
+    return None
+
+
 def _run_shell(workspace: Path, args: dict[str, Any]) -> str:
     command = str(args.get("command", "")).strip()
     if not command:
@@ -102,10 +131,21 @@ def _run_shell(workspace: Path, args: dict[str, Any]) -> str:
         return f"ERROR: cannot parse command: {exc}"
     if not argv:
         return "ERROR: run_shell requires a non-empty 'command'."
+    shell_hint = _shell_syntax_hint(argv)
+    if shell_hint:
+        return shell_hint
+    cwd = workspace
+    if args.get("cwd"):
+        resolved = _resolve_in_workspace(workspace, str(args["cwd"]))
+        if isinstance(resolved, str):
+            return resolved
+        if not resolved.is_dir():
+            return f"ERROR: cwd {args['cwd']!r} is not a directory in the workspace."
+        cwd = resolved
     try:
         proc = subprocess.run(
             argv,
-            cwd=str(workspace),
+            cwd=str(cwd),
             capture_output=True,
             text=True,
             timeout=SHELL_TIMEOUT_SECONDS,
