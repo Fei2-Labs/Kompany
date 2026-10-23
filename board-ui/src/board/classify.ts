@@ -73,9 +73,12 @@ const APPROVAL_PENDING: ReadonlySet<string> = new Set(['pending', 'snoozed']);
 
 /**
  * Build the Needs-You column: pending/snoozed approvals classified by badge,
- * PLUS blocked/delivered tasks from active projects surfaced as founder
- * actions. Sorted by severity (desc); blocked tasks rank as `high`,
- * delivered as `medium`. Account-connect is a blocked task, not an approval.
+ * PLUS blocked tasks from active projects. Sorted by severity (desc); blocked
+ * tasks rank as `high`. Account-connect is a blocked task, not an approval.
+ *
+ * Delivered tasks are NOT counted: the team finished them, so they are not a
+ * founder action. This matches the Needs You pane (studio/needsYou.ts); the
+ * board used to count them and showed "31 needs you" over an empty pane.
  */
 export function buildNeedsYou(
   inbox: ApprovalRequest[],
@@ -97,16 +100,15 @@ export function buildNeedsYou(
 
   for (const p of activeDetails) {
     for (const t of p.tasks) {
-      if (t.status !== 'blocked' && t.status !== 'delivered') continue;
+      if (t.status !== 'blocked') continue;
       cards.push({
         id: `task:${t.id}`,
         kind: 'task',
         title: t.title,
-        // blocked = connect-account / unblock (money-adjacent decision);
-        // delivered = founder must finish/ship → ship-gate-flavoured.
-        badge: t.status === 'blocked' ? 'decision' : 'ship-gate',
-        severity: t.status === 'blocked' ? 'high' : 'medium',
-        taskStatus: t.status,
+        // blocked = connect-account / unblock (money-adjacent decision).
+        badge: 'decision',
+        severity: 'high',
+        taskStatus: 'blocked',
         projectId: p.id,
         projectName: p.name,
         agent: t.agent,
