@@ -119,3 +119,19 @@ def test_runner_session_transcript_is_not_work(tmp_path):
     (tmp_path / "out.md").write_text("work")
     assert git_files_changed(tmp_path) == ["out.md"]
     assert is_runner_artifact(".native-session/x.jsonl") and not is_runner_artifact("src/a.py")
+
+
+def test_changes_since_ignores_leftovers_from_earlier_runs(tmp_path):
+    import subprocess
+
+    from kompany.core.harness.workspace import changes_since, git_files_changed, snapshot_changes
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / "left.py").write_text("from an earlier run")
+    before = snapshot_changes(tmp_path)
+    # This run changes nothing: the leftover must not count as its work.
+    assert changes_since(tmp_path, before, git_files_changed(tmp_path)) == []
+    # This run edits the leftover and adds a file: both count.
+    (tmp_path / "left.py").write_text("edited now")
+    (tmp_path / "new.py").write_text("new")
+    assert changes_since(tmp_path, before, git_files_changed(tmp_path)) == ["left.py", "new.py"]

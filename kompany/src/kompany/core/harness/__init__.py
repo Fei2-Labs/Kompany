@@ -24,7 +24,12 @@ from kompany.core.harness.protocol import (
 )
 from kompany.core.harness.runner_utils import DEFAULT_TIMEOUT_SECONDS, RunAbort
 from kompany.core.harness.safety import assert_workspace_safe
-from kompany.core.harness.workspace import ensure_workspace, git_files_changed
+from kompany.core.harness.workspace import (
+    changes_since,
+    ensure_workspace,
+    git_files_changed,
+    snapshot_changes,
+)
 
 __all__ = [
     "DEFAULT_TIMEOUT_SECONDS",
@@ -42,6 +47,8 @@ __all__ = [
     "OpencodeRunner",
     "RunAbort",
     "assert_workspace_safe",
+    "changes_since",
     "ensure_workspace",
     "git_files_changed",
+    "snapshot_changes",
 ]

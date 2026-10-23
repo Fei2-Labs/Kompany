@@ -20,8 +20,10 @@ from kompany.core.harness import (
     HarnessResult,
     HarnessRunner,
     RunAbort,
+    changes_since,
     ensure_workspace,
     git_files_changed,
+    snapshot_changes,
 )
 from kompany.core.harness_execution.monitor import EventMonitor
 from kompany.core.harness_execution.outcomes import (
@@ -29,7 +31,13 @@ from kompany.core.harness_execution.outcomes import (
     is_hard_failure,
 )
 from kompany.core.harness_execution.permission_gate import routing_args_for_task
-from kompany.core.harness_execution.retry import requeue_or_block, retry_context
+from kompany.core.harness_execution.retry import (
+    WORKSPACE_CONFINED_VEHICLES,
+    block_out_of_workspace,
+    paths_outside_workspace,
+    requeue_or_block,
+    retry_context,
+)
 from kompany.core.harness_execution.selection import execution_caps, harness_model
 from kompany.core.run_context import current_run_id
 from kompany.core.drain import get_drain_registry
@@ -115,6 +123,17 @@ def execute_harness_task(
 
     try:
         workspace = ensure_workspace(engine.settings.data_dir, project.id)
+        # A sandboxed vehicle cannot touch paths outside the workspace; such a
+        # task used to burn its whole turn budget on rejected writes (#109).
+        outside = (
+            paths_outside_workspace(task.title, workspace)
+            if runner.vehicle_name in WORKSPACE_CONFINED_VEHICLES else []
+        )
+        if outside:
+            block_out_of_workspace(engine, task, project, workspace, outside)
+            return
+        # Evidence must be what THIS run changed, not leftovers (issue #109).
+        before = snapshot_changes(workspace)
         prompt = _build_prompt(engine, task, project)
         caps = HarnessCaps(
             budget_cap_usd=effective_cap,
@@ -159,6 +178,7 @@ def execute_harness_task(
                 error=str(abort),
             )
 
+        run_result.files_changed = changes_since(workspace, before, run_result.files_changed)
         booked = _book_cost(engine, runner, task, project, run_result)
         if run_result.session_id:
             engine.projects.set_task_harness_session(

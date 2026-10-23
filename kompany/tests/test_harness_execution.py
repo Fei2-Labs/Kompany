@@ -1235,3 +1235,42 @@ def test_retry_prompt_carries_previous_failure(tmp_path):
     text = retry_context(row, {"csuite_revision_feedback": "- [CTO] missing tests"})
     assert "auto-retry 1/2" in text and "missing tests" in text
     assert retry_context(task, {}) == ""
+
+
+def test_paths_outside_workspace_detection(tmp_path):
+    from kompany.core.harness_execution.retry import paths_outside_workspace
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    text = f"Fix /home/someone/Business/app/src/x.py and {ws}/inside.py, see https://example.com/home/a"
+    assert paths_outside_workspace(text, ws) == ["/home/someone/Business/app/src/x.py"]
+    assert paths_outside_workspace("relative/path.py only", ws) == []
+
+
+def test_delegated_children_get_the_default_turn_budget():
+    import inspect
+
+    from kompany.core.engine_parts import channel_delegation
+
+    src = inspect.getsource(channel_delegation)
+    assert "max_turns=DEFAULT_MAX_TURNS" in src and "max_turns=8" not in src
+
+
+def test_native_task_naming_outside_path_is_blocked_before_running(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project, title="Harden /home/someone/Business/app/src/x.py")
+    runner = FakeRunner(result=HarnessResult(final_text="should not run"), vehicle="native")
+    execute_harness_task(engine, runner, task, project, ProjectRunResult(project_id=project.id))
+    row = engine.projects.get_task(task.id)
+    assert (row.block_reason or "").startswith("out_of_workspace")
+    assert runner.start_calls == []
+
+
+def test_unsandboxed_vehicle_may_name_outside_paths(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project, title="Harden /home/someone/Business/app/src/x.py")
+    runner = FakeRunner(result=HarnessResult(final_text="done", exit_status="success"))
+    execute_harness_task(engine, runner, task, project, ProjectRunResult(project_id=project.id))
+    assert runner.start_calls

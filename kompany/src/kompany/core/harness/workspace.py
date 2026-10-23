@@ -7,6 +7,7 @@ written only when missing so vehicle sessions never clobber founder edits.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -123,3 +124,27 @@ def ensure_workspace(data_dir: Path | str, project_id: str) -> Path:
             text=True,
         )
     return workspace
+
+
+def _digest(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None  # deleted or unreadable: compare as "absent"
+
+
+def snapshot_changes(workspace: Path) -> dict[str, str | None]:
+    """Content hashes of the files already changed before a run starts.
+
+    ``git_files_changed`` diffs against HEAD, so uncommitted work left by an
+    earlier run looks like this run's work. Taking a snapshot first lets
+    :func:`changes_since` keep only what the run itself touched.
+    """
+    ws = Path(workspace)
+    return {f: _digest(ws / f) for f in git_files_changed(ws)}
+
+
+def changes_since(workspace: Path, before: dict[str, str | None], files: list[str]) -> list[str]:
+    """``files`` minus the ones whose content is identical to ``before``."""
+    ws = Path(workspace)
+    return [f for f in files if f not in before or _digest(ws / f) != before[f]]
