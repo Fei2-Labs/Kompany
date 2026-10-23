@@ -107,7 +107,7 @@ describe('buildNeedsYou', () => {
     expect(cards.find((c) => c.id === 'g')?.badge).toBe('ship-gate');
   });
 
-  it('surfaces blocked + delivered tasks as founder-action cards', () => {
+  it('surfaces blocked tasks as founder-action cards, never delivered ones', () => {
     const detail: ProjectDetail = {
       ...project({ id: 'px', name: 'Site' }),
       plan: {},
@@ -119,13 +119,12 @@ describe('buildNeedsYou', () => {
       ],
     };
     const cards = buildNeedsYou([], [detail]);
-    expect(cards).toHaveLength(2);
+    expect(cards).toHaveLength(1);
     const blocked = cards.find((c) => c.id === 'task:t1');
     expect(blocked?.kind).toBe('task');
     expect(blocked?.badge).toBe('decision');
     expect(blocked?.projectName).toBe('Site');
-    const delivered = cards.find((c) => c.id === 'task:t2');
-    expect(delivered?.badge).toBe('ship-gate');
+    expect(cards.find((c) => c.id === 'task:t2')).toBeUndefined();
   });
 
   it('sorts the merged list by severity desc', () => {
@@ -206,5 +205,23 @@ describe('buildDone', () => {
     expect(out.find((d) => d.project.id === 'c1')?.summary).toBe('shipped it');
     expect(out.find((d) => d.project.id === 'x1')?.cancelled).toBe(true);
     expect(out.find((d) => d.project.id === 'x1')?.summary).toBeNull();
+  });
+});
+
+describe('board and Needs You pane agree', () => {
+  it('count the same items for the same data', async () => {
+    const { buildNeedsYou: paneNeedsYou } = await import('../src/studio/needsYou');
+    const detail: ProjectDetail = {
+      ...project({ id: 'px', name: 'Site' }),
+      plan: {},
+      assigned_agents: ['eng'],
+      tasks: [
+        { id: 't1', title: 'Pick a price', agent: 'eng', status: 'blocked' },
+        { id: 't2', title: 'Ship draft', agent: 'eng', status: 'delivered' },
+        { id: 't3', title: 'Done', agent: 'eng', status: 'completed' },
+      ],
+    };
+    const inbox = [approval({ id: 'a1' })];
+    expect(buildNeedsYou(inbox, [detail])).toHaveLength(paneNeedsYou(inbox, [detail], []).length);
   });
 });
