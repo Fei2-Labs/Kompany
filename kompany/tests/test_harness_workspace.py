@@ -105,3 +105,17 @@ def test_files_changed_modified_and_untracked_after_commit(tmp_path):
     (workspace / "KOMPANY.md").write_text("edited", encoding="utf-8")
     (workspace / "b.txt").write_text("b", encoding="utf-8")
     assert git_files_changed(workspace) == ["KOMPANY.md", "b.txt"]
+
+
+def test_runner_session_transcript_is_not_work(tmp_path):
+    import subprocess
+
+    from kompany.core.harness.workspace import git_files_changed, is_runner_artifact
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".native-session").mkdir()
+    (tmp_path / ".native-session" / "abc.jsonl").write_text("{}")
+    assert git_files_changed(tmp_path) == []
+    (tmp_path / "out.md").write_text("work")
+    assert git_files_changed(tmp_path) == ["out.md"]
+    assert is_runner_artifact(".native-session/x.jsonl") and not is_runner_artifact("src/a.py")

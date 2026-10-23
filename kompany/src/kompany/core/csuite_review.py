@@ -55,6 +55,8 @@ _REVIEW_PROMPT = (
     "Deliverable content:\n---\n{output}\n---\n\n"
     "Review it adversarially. List concrete defects (one per line, each "
     "starting with '- '); if there are none, write 'No defects.'.\n"
+    "Judge only the content above. You have no file or terminal access by "
+    "design, so never list your own lack of access as a defect.\n"
     "Then on the FINAL line write exactly one verdict token: '{ok}' if it is "
     "safe to ship as-is, or '{hold}' if it must NOT ship until fixed."
 )
@@ -121,13 +123,25 @@ def request_csuite_review(
     stamps ``csuite_approved`` with no card. Never raises — a review that
     cannot run fails closed (files the card for the human).
     """
+    from kompany.core import csuite_rework as rework
+
+    if rework.is_empty_deliverable(task):
+        return rework.requeue_empty(engine, task, project)
     roles = review_roles_for(deliverable_class)
     output = _deliverable_output(task)
-    findings, any_hold, errored = _run_review(
+    findings, _, errored = _run_review(
         engine, task, deliverable_class, roles, output
     )
+    findings = rework.strip_tooling(findings)
+    any_hold = any(f.get("verdict") == _HOLD_MARKER for f in findings)
 
     if any_hold or errored or _has_blocking_defects(findings):
+        # Defects go back to the team first; a failed reviewer call does not
+        # (the review itself broke) and still fails closed to the card.
+        if not errored:
+            routed = rework.route_hold(engine, task, project, findings)
+            if routed is not None:
+                return routed
         return _file_review_approval(
             engine, task, project, deliverable_class, findings,
             errored=errored, reason=reason,

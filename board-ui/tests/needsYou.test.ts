@@ -79,3 +79,18 @@ describe('three-kind classifier', () => {
     expect(countByKind(items)).toEqual({ money: 1, account: 1, decision: 2 });
   });
 });
+
+describe('retry-exhausted tasks', () => {
+  it('are flagged as team stuck, other blocked tasks are not', () => {
+    const project = {
+      id: 'p1', name: 'P',
+      tasks: [
+        { id: 't1', title: 'Build CLI', agent: 'builder', status: 'blocked', block_reason: 'retry_exhausted: run failed 3 times' },
+        { id: 't2', title: 'Pick a price', agent: 'cfo', status: 'blocked', block_reason: 'which tier?' },
+      ],
+    } as unknown as ProjectDetail;
+    const items = buildNeedsYou([], [project], []);
+    expect(items.find((i) => i.taskId === 't1')?.stuck).toBe(true);
+    expect(items.find((i) => i.taskId === 't2')?.stuck).toBe(false);
+  });
+});

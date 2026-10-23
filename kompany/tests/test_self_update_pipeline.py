@@ -372,3 +372,52 @@ def test_pipeline_requests_accept_edits_mode(engine, monkeypatch):
     monkeypatch.setattr(pipeline, "select_runner", spy)
     pipeline.propose_self_update(engine, "anything")
     assert captured["permission_mode"] == "acceptEdits"
+
+
+def test_env_error_in_tests_files_no_card(engine, monkeypatch):
+    """Tests that die on setup say nothing about the change: no founder card."""
+    _wire_runner(monkeypatch, FakeRunner(writes={"docs/a.md": "a\n"}))
+    monkeypatch.setattr(
+        pipeline, "_run_tests",
+        lambda clone, settings: "FAILED\nE   ModuleNotFoundError: No module named 'fastapi'",
+    )
+    row = pipeline.propose_self_update(engine, "docs change")
+    assert row["status"] == "failed"
+    assert "test environment error" in row["test_summary"]
+    assert engine.approvals.list_pending() == []
+
+
+def test_session_transcript_only_counts_as_no_change(engine, monkeypatch):
+    """A run that only wrote its own .native-session transcript proposed nothing."""
+    _wire_runner(monkeypatch, FakeRunner(writes={".native-session/abc.jsonl": "{}\n"}))
+    row = pipeline.propose_self_update(engine, "fix something")
+    assert row["status"] == "failed"
+    assert "no changes" in row["test_summary"]
+    assert engine.approvals.list_pending() == []
+
+
+def test_release_venv_without_pytest_gets_dedicated_test_venv(tmp_path, monkeypatch):
+    from kompany.core.self_update import testenv
+
+    clone = tmp_path / "repo"
+    (clone / "kompany").mkdir(parents=True)
+    (clone / "kompany" / "pyproject.toml").write_text("[project]\nname='x'\n")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if "-c" in cmd:
+            return subprocess.CompletedProcess(cmd, 1)
+        if "venv" in cmd:
+            py = tmp_path / "data" / "self_update" / "test-venv" / "bin" / "python"
+            py.parent.mkdir(parents=True, exist_ok=True)
+            py.write_text("")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(testenv.subprocess, "run", fake_run)
+    py = testenv.ensure_test_python(tmp_path / "data", clone)
+    assert py.name == "python" and "test-venv" in str(py)
+    assert any("pip" in c and "-e" in c for c in calls)
+    calls.clear()
+    assert testenv.ensure_test_python(tmp_path / "data", clone) == py
+    assert not any("pip" in c for c in calls)  # cached until pyproject changes

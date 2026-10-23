@@ -12,6 +12,9 @@ from kompany.core.harness import HarnessResult
 # Exit statuses that mean the vehicle itself broke (CLI died, wall-clock
 # timeout) rather than the work being capped or finished.
 _HARD_FAILURE_EXITS = frozenset({"error", "timeout"})
+# A turn cap is only "partial work" when work exists. With no diff it is the
+# same as a crash: nothing to review, so it goes back to the team.
+_CAPPED_EXITS = frozenset({"error_max_turns"})
 
 
 def is_hard_failure(result: HarnessResult) -> bool:
@@ -21,15 +24,17 @@ def is_hard_failure(result: HarnessResult) -> bool:
     the founder "review the output" when there was none. A run that ends
     ``error``/``timeout`` without a workspace diff produced nothing — mark
     it FAILED (retryable: the session id is persisted, a re-run resumes).
-    ``budget_exceeded`` and ``error_max_turns`` are NOT failures — they
-    keep their pause/delivered semantics (work happened, caps fired).
-    With diff evidence despite the error, real work happened → the normal
-    classifier takes it (``delivered``).
+    ``error_max_turns`` with no diff and no output text is a failure too:
+    the cap fired before anything was produced. ``budget_exceeded`` is NOT — it keeps its
+    pause-for-approval semantics. With diff evidence despite the error,
+    real work happened → the normal classifier takes it (``delivered``).
     """
-    if result.exit_status not in _HARD_FAILURE_EXITS:
+    if result.exit_status not in _HARD_FAILURE_EXITS | _CAPPED_EXITS:
         return False
     if result.files_changed:
         return False
+    if result.exit_status in _CAPPED_EXITS and result.final_text.strip():
+        return False  # capped with partial output: still something to review
     return True
 
 

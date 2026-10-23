@@ -84,13 +84,15 @@ def _project(engine, ptype=ProjectType.REVENUE) -> Project:
     return engine.projects.create(Project(name="P", type=ptype, plan={}))
 
 
-def _task(engine, project, title="Send launch email", output="hello world"):
+def _task(engine, project, title="Send launch email", output="hello world", rounds=2):
+    """A delivered task. ``rounds`` defaults to the rework cap, so a HOLD goes
+    straight to the founder card; pass ``rounds=0`` to test the rework path."""
     task = engine.projects.create_task(Task(
         project_id=project.id, title=title, assigned_agent="writer",
     ))
     engine.projects.update_task_status(
         task.id, TaskStatus.DELIVERED,
-        result={"output": output, "outcome": "delivered"},
+        result={"output": output, "outcome": "delivered", "csuite_rework_rounds": rounds},
     )
     return engine.projects.get_task(task.id)
 
@@ -469,3 +471,74 @@ def test_harness_finish_invokes_gate(tmp_path, monkeypatch):
     )
     assert calls and calls[0][0] == "Publish blog post about launch"
     assert calls[0][1] == "delivered"
+
+
+# ---------------------------------------------------------------------------
+# HOLD goes back to the team first (csuite_rework)
+# ---------------------------------------------------------------------------
+
+
+def test_hold_requeues_task_with_feedback_before_any_card(tmp_path):
+    roles = REVIEW_ROLES[DeliverableClass.EXTERNAL_COMMUNICATION]
+    reg = FakeRegistry({
+        roles[0]: FakeReviewer("- Tone is off-brand\nHOLD"),
+        roles[1]: FakeReviewer("No defects.\nPASS"),
+    })
+    engine = FakeEngine(tmp_path, reg)
+    project = _project(engine)
+    task = _task(engine, project, rounds=0)
+
+    out = request_csuite_review(engine, task, project, DeliverableClass.EXTERNAL_COMMUNICATION)
+
+    assert out["status"] == "rework" and out["round"] == 1
+    assert engine.approvals.list_pending() == []
+    row = engine.projects.get_task(task.id)
+    assert row.status == TaskStatus.PENDING
+    assert row.result["csuite_rework_rounds"] == 1
+    assert "Tone is off-brand" in row.result["csuite_revision_feedback"]
+    events = [e["event_type"] for e in engine.audit.recent(limit=10)]
+    assert "csuite_review.rework" in events
+
+
+def test_tooling_only_hold_is_not_a_defect(tmp_path):
+    roles = REVIEW_ROLES[DeliverableClass.EXTERNAL_COMMUNICATION]
+    reg = FakeRegistry({
+        roles[0]: FakeReviewer("- 无法访问文件系统，因此未能运行测试。\n- Unable to run the test command.\nHOLD"),
+        roles[1]: FakeReviewer("No defects.\nPASS"),
+    })
+    engine = FakeEngine(tmp_path, reg)
+    project = _project(engine)
+    task = _task(engine, project, rounds=0)
+
+    out = request_csuite_review(engine, task, project, DeliverableClass.EXTERNAL_COMMUNICATION)
+
+    assert out["status"] == "approved"
+    assert engine.approvals.list_pending() == []
+
+
+def test_empty_deliverable_is_retried_not_reviewed(tmp_path):
+    reg = FakeRegistry({})  # any reviewer call would raise
+    engine = FakeEngine(tmp_path, reg)
+    project = _project(engine)
+    task = _task(engine, project, output="", rounds=0)
+
+    out = request_csuite_review(engine, task, project, DeliverableClass.EXTERNAL_COMMUNICATION)
+
+    assert out["status"] == "empty_requeued"
+    assert engine.approvals.list_pending() == []
+    assert engine.projects.get_task(task.id).status == TaskStatus.PENDING
+
+
+def test_is_tooling_defect_examples():
+    from kompany.core.csuite_rework import is_tooling_defect
+
+    for line in [
+        "无法访问 `/home/x` 的文件系统",
+        "未能运行 `python3 -m unittest`",
+        "当前会话未提供文件系统或终端访问能力",
+        "Cannot access the filesystem to verify the change",
+        "Reviewer unavailable: timeout",
+    ]:
+        assert is_tooling_defect(line), line
+    for line in ["Tone is off-brand", "Price is wrong on line 3", "Missing unsubscribe link"]:
+        assert not is_tooling_defect(line), line

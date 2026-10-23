@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from kompany.core.harness.workspace import RUNNER_ARTIFACT_DIRS, is_runner_artifact
 from kompany.core.harness.safety import kompany_source_root
 
 _GIT_IDENTITY = [
@@ -124,7 +125,10 @@ def diff_stats(clone: Path) -> tuple[list[str], str]:
                 path = path.split(" -> ", 1)[1].strip()
             if path:
                 files.add(path.strip('"'))
-    stat = _git(clone, "diff", "--stat", base)
+    files = {f for f in files if not is_runner_artifact(f)}
+    if not files:
+        return [], ""
+    stat = _git(clone, "diff", "--stat", base, "--", ".", *(f":(exclude){d}" for d in RUNNER_ARTIFACT_DIRS))
     summary = stat.stdout.strip() if stat.returncode == 0 else ""
     return sorted(files), summary
 
