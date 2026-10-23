@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,7 @@ from kompany.core.harness import HarnessCaps, HarnessEvent, HarnessResult
 from kompany.core.harness.safety import assert_workspace_safe
 from kompany.core.harness_execution.selection import harness_model, select_runner
 from kompany.core.installation_role import resolve_installation_role
+from kompany.core.self_update.testenv import TestEnvError, ensure_test_python, is_env_error
 from kompany.core.self_update.tiers import T3_PROMPT_NOTE, classify_paths
 from kompany.core.self_update.workspace import (
     commit_all,
@@ -116,6 +116,17 @@ def propose_self_update(engine: Any, instruction: str) -> dict:
         ) or {}
 
     test_summary = _run_tests(clone, settings)
+    if is_env_error(test_summary):
+        # The tests never reached the change: a card would ask the founder to
+        # judge a broken test setup. Keep the branch for a re-run instead.
+        return store.update(
+            proposal_id,
+            status="failed",
+            tier=tier,
+            files_changed=files,
+            diff_stat=diff_stat,
+            test_summary=f"failed: test environment error, no card filed\n{test_summary}",
+        ) or {}
 
     # Installation role decides what approve DOES (07-24): maintainer →
     # push + PR; anyone else → local patch. Say so on the card.
@@ -261,7 +272,10 @@ def _run_tests(clone: Path, settings: Any) -> str:
     """
     cmd = shlex.split(str(settings.self_update_test_cmd))
     if cmd and cmd[0] in ("python", "python3"):
-        cmd[0] = sys.executable
+        try:
+            cmd[0] = str(ensure_test_python(settings.data_dir, clone))
+        except TestEnvError as exc:
+            return f"FAILED: {exc}"
     pkg_dir = clone / "kompany"
     cwd = pkg_dir if (pkg_dir / "tests").exists() else clone
     env = dict(os.environ)

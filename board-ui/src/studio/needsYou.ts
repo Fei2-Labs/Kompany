@@ -32,6 +32,8 @@ export interface NeedsItem {
   taskId?: string;
   /** Why it is here — block_reason from the watchdog or the runner's founder_action. */
   reason?: string;
+  /** The team already retried and gave up (`retry_exhausted`): not a product call. */
+  stuck?: boolean;
 }
 
 export const KIND_LABEL: Record<NeedsKind, string> = {
@@ -124,6 +126,7 @@ export function buildNeedsYou(
           projectName: p.name,
           taskId: t.id,
           reason,
+          stuck: (t.block_reason ?? '').startsWith('retry_exhausted'),
           escalation:
             `Task "${t.title}" (${t.agent}, project ${p.name}) is blocked` +
             (reason ? ` — ${reason}` : '') +

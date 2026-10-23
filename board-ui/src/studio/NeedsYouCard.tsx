@@ -49,7 +49,7 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
   return (
     <article className={`ny-card ny-card--${item.kind}`} data-testid="needs-you-card">
       <header className="ny-card__head" onClick={() => compact && setOpen((o) => !o)}>
-        <span className={`rail__tag rail__tag--${item.kind}`}>{KIND_LABEL[item.kind]}</span>
+        <span className={`rail__tag rail__tag--${item.kind}`}>{item.stuck ? 'team stuck' : KIND_LABEL[item.kind]}</span>
         <span className="ny-card__title">{item.title}</span>
       </header>
       {meta && <div className="ny-card__meta">{meta}</div>}

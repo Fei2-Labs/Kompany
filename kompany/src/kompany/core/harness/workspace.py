@@ -10,6 +10,18 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+# Files the execution vehicles write for their own bookkeeping (the native
+# runner's session transcript). They are not work: a run that only produced
+# its own transcript produced nothing, and counting it as a diff made failed
+# runs look delivered.
+RUNNER_ARTIFACT_DIRS: tuple[str, ...] = (".native-session/",)
+
+
+def is_runner_artifact(path: str) -> bool:
+    """True for a vehicle bookkeeping file, which is never work evidence."""
+    p = path.strip().strip('"')
+    return any(p == d.rstrip("/") or p.startswith(d) for d in RUNNER_ARTIFACT_DIRS)
+
 _KOMPANY_MD_STUB = """\
 # Kompany Workspace
 
@@ -50,7 +62,7 @@ def git_files_changed(workspace: Path) -> list[str]:
         files.update(
             ln.strip() for ln in untracked.stdout.splitlines() if ln.strip()
         )
-    return sorted(files)
+    return sorted(f for f in files if not is_runner_artifact(f))
 
 
 def ensure_workspace(data_dir: Path | str, project_id: str) -> Path:

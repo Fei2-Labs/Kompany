@@ -1013,9 +1013,14 @@ def test_is_hard_failure_matrix():
         # Work evidence despite the error → not a hard failure.
         (HarnessResult(exit_status="error", error="boom",
                        files_changed=["a.md"]), False),
-        # Cap exits keep their pause/delivered semantics.
+        # Budget cap keeps its pause semantics.
         (HarnessResult(exit_status="budget_exceeded", error="cap"), False),
-        (HarnessResult(exit_status="error_max_turns", error="turns"), False),
+        # Turn cap with nothing produced is a failure; with output it is not.
+        (HarnessResult(exit_status="error_max_turns", error="turns"), True),
+        (HarnessResult(exit_status="error_max_turns", error="turns",
+                       final_text="partial"), False),
+        (HarnessResult(exit_status="error_max_turns", error="turns",
+                       files_changed=["a.md"]), False),
         (HarnessResult(exit_status="success"), False),
     ]
     for result, expected in cases:
@@ -1036,7 +1041,11 @@ def test_hard_error_without_evidence_marks_task_failed(tmp_path, exit_status):
 
     assert result.tasks_failed == 1 and result.tasks_completed == 0
     row = engine.projects.list_tasks(project.id)[0]
-    assert row.status == TaskStatus.FAILED
+    # The failure is recorded, then the task goes back to the queue: a failed
+    # run is retried by the team, it does not land in Needs You.
+    assert row.status == TaskStatus.PENDING
+    assert row.retry_count == 1
+    assert "auto-retry 1/" in (row.block_reason or "")
     assert "claude CLI exited 1" in row.result["error"]
     assert row.result["exit_status"] == exit_status
     # Cost was real even though the run failed; session stays resumable.
@@ -1183,3 +1192,46 @@ def test_settings_yaml_loads_harness_flags(tmp_path):
     defaults = KompanySettings.load(str(bare))
     assert defaults.harness_execution_enabled is True
     assert defaults.harness_permission_routing is True
+
+
+def test_failed_run_blocks_only_after_retry_budget(tmp_path):
+    """Each failure requeues; the run past the budget becomes a blocked task."""
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project)
+    for attempt in range(3):
+        runner = FakeRunner(result=HarnessResult(
+            final_text="", session_id=f"s-{attempt}", exit_status="error", error="boom",
+        ))
+        current = engine.projects.get_task(task.id)
+        execute_harness_task(engine, runner, current, project, ProjectRunResult(project_id=project.id))
+    row = engine.projects.get_task(task.id)
+    assert row.status == "blocked" or getattr(row.status, "value", None) == "blocked"
+    assert (row.block_reason or "").startswith("retry_exhausted")
+
+
+def test_turn_cap_with_nothing_produced_is_retried(tmp_path):
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project)
+    runner = FakeRunner(result=HarnessResult(
+        final_text="", session_id="s-cap", exit_status="error_max_turns", error="turn cap 40",
+    ))
+    result = ProjectRunResult(project_id=project.id)
+    execute_harness_task(engine, runner, task, project, result)
+    row = engine.projects.get_task(task.id)
+    assert row.status == TaskStatus.PENDING and row.retry_count == 1
+    assert result.tasks_completed == 0
+
+
+def test_retry_prompt_carries_previous_failure(tmp_path):
+    from kompany.core.harness_execution.retry import retry_context
+
+    engine = FakeEngine(tmp_path)
+    project = _make_project(engine)
+    task = _make_task(engine, project)
+    engine.projects.requeue_task(task.id, reason="run failed (error: boom); auto-retry 1/2")
+    row = engine.projects.get_task(task.id)
+    text = retry_context(row, {"csuite_revision_feedback": "- [CTO] missing tests"})
+    assert "auto-retry 1/2" in text and "missing tests" in text
+    assert retry_context(task, {}) == ""
