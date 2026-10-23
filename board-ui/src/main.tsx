@@ -9,8 +9,10 @@ import { App } from './App';
 import './index.css';
 import './studio/skins.css';
 import { bootSkin } from './studio/useSkin';
+import { registerServiceWorker } from './pwa';
 
 bootSkin();
+registerServiceWorker();
 
 const container = document.getElementById('root');
 if (!container) {

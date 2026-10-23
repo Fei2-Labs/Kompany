@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
+import { MobileBar, MobileDrawer, MobileTabs } from './components/MobileShell';
 import { CommandPalette } from './components/CommandPalette';
 import { Placeholder } from './panes/Placeholder';
 import { Board } from './panes/Board';
@@ -21,6 +22,7 @@ import { useChannel } from './channel/useChannel';
 
 export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   // A monotonically-bumped signal the palette / nav uses to focus the CEO input.
   const [ceoFocus, setCeoFocus] = useState(0);
 
@@ -30,6 +32,8 @@ export function App() {
 
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
   const focusCeo = useCallback(() => setCeoFocus((n) => n + 1), []);
 
   // Global ⌘K / Ctrl+K toggle.
@@ -46,6 +50,7 @@ export function App() {
 
   return (
     <div className="layout layout--rail">
+      <MobileBar onOpenPalette={openPalette} onOpenMenu={openMenu} />
       <Sidebar onOpenPalette={openPalette} />
       <main className="content">
         <Routes>
@@ -73,6 +78,8 @@ export function App() {
       </main>
       <ActivityTimeline variant="rail" />
       <CommandBar channel={channel} focusSignal={ceoFocus} />
+      <MobileTabs onOpenMenu={openMenu} />
+      <MobileDrawer open={menuOpen} onClose={closeMenu} />
       <CommandPalette
         open={paletteOpen}
         onClose={closePalette}

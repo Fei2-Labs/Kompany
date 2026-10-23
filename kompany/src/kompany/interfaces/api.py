@@ -234,6 +234,23 @@ _NON_SPA_PREFIXES = (
 
 BOARD_AVAILABLE = _BOARD_INDEX.is_file()
 
+
+def board_file_response(dist: Path, full_path: str) -> FileResponse:
+    """Resolve a board catch-all path to a real dist/ file or the SPA shell.
+
+    PWA shell files (manifest, service worker, icons) sit at the top level of
+    dist/. They are served as files: answering ``/sw.js`` with HTML makes the
+    browser reject the worker. Only single-segment, non-dot names qualify, so
+    a request can never reach outside dist/.
+    """
+    index = dist / "index.html"
+    if full_path and "/" not in full_path and not full_path.startswith("."):
+        candidate = dist / full_path
+        if candidate.is_file() and candidate != index:
+            headers = {"Cache-Control": "no-cache"} if full_path.endswith((".js", ".webmanifest")) else None
+            return FileResponse(str(candidate), headers=headers)
+    return FileResponse(str(index))
+
 if BOARD_AVAILABLE:
     # Serve the hashed JS/CSS bundle. ``base: '/'`` in vite.config.ts makes
     # the SPA request ``/assets/*``, so mount the assets dir there.
@@ -262,7 +279,7 @@ if BOARD_AVAILABLE:
         first = full_path.split("/", 1)[0]
         if first in _NON_SPA_PREFIXES:
             raise HTTPException(status_code=404)
-        return FileResponse(str(_BOARD_INDEX))
+        return board_file_response(_BOARD_UI_DIR, full_path)
 
 else:  # pragma: no cover - depends on build artifacts being present
 

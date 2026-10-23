@@ -73,3 +73,12 @@ export const NAV_GROUPS: NavGroup[] = [
     items: LIVE_ITEMS,
   },
 ];
+
+// Bottom tab bar for the phone shell (<=720px). The four primary jobs, then a
+// "More" drawer that holds every other pane (the full NAV_GROUPS).
+export const MOBILE_TABS: NavItem[] = [
+  { path: '/', label: 'Studio', glyph: '◈' },
+  { path: '/needs-you', label: 'Needs You', glyph: '!' },
+  { path: '/talk', label: 'kompany>', glyph: '›' },
+  { path: '/board', label: 'Board', glyph: '▦' },
+];
