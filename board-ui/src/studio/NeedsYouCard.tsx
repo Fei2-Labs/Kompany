@@ -53,7 +53,16 @@ export function NeedsYouCard({ item, channel, onResolved, compact }: NeedsYouCar
         <span className="ny-card__title">{item.title}</span>
       </header>
       {meta && <div className="ny-card__meta">{meta}</div>}
-      {open && item.reason && <div className="ny-card__reason">{item.reason}</div>}
+      {open && item.reason && !item.summary && <div className="ny-card__reason">{item.reason}</div>}
+      {open && item.summary && (
+        <div className="ny-card__reason">
+          {item.summary}
+          <details className="ny-card__detail">
+            <summary>Engine detail</summary>
+            <code>{item.reason}</code>
+          </details>
+        </div>
+      )}
       {error && <div className="approve__error">{error}</div>}
       {open && item.approval && (
         <>

@@ -95,3 +95,20 @@ def test_scrubbed_env_drops_claude_and_opencode_prefixes(monkeypatch):
     assert env["ANTHROPIC_API_KEY"] == "sk-test"
     # Controlled per-run injection layers on top of the scrub.
     assert env["OPENCODE_PERMISSION"] == "{}"
+
+
+def test_repeated_tool_error_names_the_looping_tool() -> None:
+    obs = (
+        'linkedin_feed: {"ok": true, "result": {"status": "error", "detail": '
+        '"node:internal\\nError: Cannot find module \'playwright-core\'\\nRequire stack"}}'
+    )
+    history = [{"observation": obs}, {"observation": "list_dir: a/\nb/"}, {"observation": obs}]
+    assert runner_utils.repeated_tool_error(history) == (
+        "linkedin_feed failed 2 times: Cannot find module 'playwright-core'"
+    )
+
+
+def test_repeated_tool_error_ignores_single_or_clean_observations() -> None:
+    assert runner_utils.repeated_tool_error([{"observation": "read_file: ok"}]) == ""
+    once = [{"observation": "run_shell: ERROR: no shell"}, {"observation": None}]
+    assert runner_utils.repeated_tool_error(once) == ""

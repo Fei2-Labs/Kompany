@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { IntegrationInfo } from '../src/api/client';
 import type { ApprovalRequest, ProjectDetail } from '../src/api/types';
-import { buildNeedsYou, countByKind, integrationForTask, kindForApproval } from '../src/studio/needsYou';
+import { buildNeedsYou, countByKind, explainBlock, integrationForTask, kindForApproval } from '../src/studio/needsYou';
 
 function approval(over: Partial<ApprovalRequest>): ApprovalRequest {
   return {
@@ -92,5 +92,39 @@ describe('retry-exhausted tasks', () => {
     const items = buildNeedsYou([], [project], []);
     expect(items.find((i) => i.taskId === 't1')?.stuck).toBe(true);
     expect(items.find((i) => i.taskId === 't2')?.stuck).toBe(false);
+  });
+});
+
+describe('explainBlock', () => {
+  it('names the failing tool and the missing module in plain words', () => {
+    const reason =
+      "retry_exhausted: run failed 3 times (error_max_turns: turn cap 30 reached without done=true; " +
+      "linkedin_feed failed 76 times: Cannot find module 'playwright-core')";
+    expect(explainBlock(reason)).toBe(
+      'Tool linkedin_feed kept failing: a required module (playwright-core) is not installed on the server. The team tried 3 times.',
+    );
+  });
+
+  it('explains a bare turn cap without tool detail', () => {
+    expect(
+      explainBlock('retry_exhausted: run failed 3 times (error_max_turns: turn cap 30 reached without done=true)'),
+    ).toBe('The agent used all 30 steps without finishing. The team tried 3 times.');
+  });
+
+  it('leaves unknown reasons alone so the card shows them raw', () => {
+    expect(explainBlock('which tier?')).toBeUndefined();
+    expect(explainBlock(undefined)).toBeUndefined();
+  });
+
+  it('puts the summary on the card and in the CEO escalation, raw text as detail', () => {
+    const project = {
+      id: 'p1', name: 'P',
+      tasks: [{ id: 't1', title: 'Cycle', agent: 'linkedin_growth', status: 'blocked',
+        block_reason: 'retry_exhausted: run failed 3 times (error_max_turns: turn cap 30 reached without done=true)' }],
+    } as unknown as ProjectDetail;
+    const [item] = buildNeedsYou([], [project], []);
+    expect(item!.summary).toContain('30 steps');
+    expect(item!.escalation).toContain('30 steps');
+    expect(item!.escalation).toContain('Engine detail: retry_exhausted');
   });
 });

@@ -34,6 +34,34 @@ export interface NeedsItem {
   reason?: string;
   /** The team already retried and gave up (`retry_exhausted`): not a product call. */
   stuck?: boolean;
+  /** Plain-language reading of `reason`; the raw text stays available as detail. */
+  summary?: string;
+}
+
+/**
+ * Turn an engine block reason into one sentence a founder can act on.
+ * `retry_exhausted: run failed 3 times (error_max_turns: turn cap 30 reached
+ * without done=true; linkedin_feed failed 76 times: Cannot find module 'x')`
+ * becomes "linkedin_feed kept failing: a required module (x) is not
+ * installed on the server. The team tried 3 times." Unknown shapes return
+ * undefined so the card falls back to the raw reason.
+ */
+export function explainBlock(reason: string | undefined): string | undefined {
+  if (!reason) return undefined;
+  const tries = /run (?:failed|died) (\d+) times/.exec(reason)?.[1];
+  const tried = tries ? ` The team tried ${tries} times.` : '';
+  const tool = /([\w.-]+) failed \d+ times: ([^)]+)/.exec(reason);
+  if (tool) {
+    const missing = /Cannot find module '([^']+)'|No module named '([^']+)'/.exec(tool[2]!);
+    const what = missing
+      ? `a required module (${missing[1] ?? missing[2]}) is not installed on the server`
+      : tool[2]!.trim();
+    return `Tool ${tool[1]} kept failing: ${what}.${tried}`;
+  }
+  const cap = /turn cap (\d+) reached/.exec(reason);
+  if (cap) return `The agent used all ${cap[1]} steps without finishing.${tried}`;
+  if (reason.startsWith('retry_exhausted')) return `The run kept failing.${tried}`;
+  return undefined;
 }
 
 export const KIND_LABEL: Record<NeedsKind, string> = {
@@ -116,6 +144,7 @@ export function buildNeedsYou(
         });
       } else {
         const reason = t.block_reason || t.result?.founder_action || undefined;
+        const summary = explainBlock(reason);
         items.push({
           id: `task:${t.id}`,
           kind: 'decision',
@@ -126,10 +155,12 @@ export function buildNeedsYou(
           projectName: p.name,
           taskId: t.id,
           reason,
+          summary,
           stuck: (t.block_reason ?? '').startsWith('retry_exhausted'),
           escalation:
             `Task "${t.title}" (${t.agent}, project ${p.name}) is blocked` +
-            (reason ? ` — ${reason}` : '') +
+            (summary ? ` — ${summary}` : '') +
+            (reason ? ` Engine detail: ${reason}` : '') +
             `. What should the team do?`,
         });
       }

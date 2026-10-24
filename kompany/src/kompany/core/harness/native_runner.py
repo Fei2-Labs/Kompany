@@ -28,11 +28,22 @@ from kompany.core.harness.protocol import (
     HarnessCaps,
     HarnessResult,
 )
-from kompany.core.harness.runner_utils import build_handoff_brief, emit_event
+from kompany.core.harness.runner_utils import (
+    build_handoff_brief,
+    emit_event,
+    repeated_tool_error,
+)
 from kompany.core.harness.safety import assert_workspace_safe
 from kompany.core.harness.workspace import git_files_changed
 
 __all__ = ["NativeRunner", "NativeTurn", "SESSION_DIR_NAME"]
+
+def _cap_error(max_turns: int, history: list[dict[str, Any]]) -> str:
+    """Turn-cap error text, naming the tool error the run kept hitting."""
+    error = f"turn cap {max_turns} reached without done=true"
+    repeated = repeated_tool_error(history)
+    return f"{error}; {repeated}" if repeated else error
+
 
 _NATIVE_TOOL_SYSTEM_PROMPT = """\
 You are an autonomous software/work agent operating inside a git
@@ -363,7 +374,7 @@ class NativeRunner:
         )
         return _result(
             "error_max_turns",
-            error=f"turn cap {caps.max_turns} reached without done=true",
+            error=_cap_error(caps.max_turns, history),
         )
 
     # ------------------------------------------------------------------
@@ -635,5 +646,5 @@ class NativeRunner:
         )
         return _result(
             "error_max_turns",
-            error=f"turn cap {caps.max_turns} reached without done=true",
+            error=_cap_error(caps.max_turns, history),
         )
