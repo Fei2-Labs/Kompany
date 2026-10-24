@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -206,6 +207,39 @@ def run_streaming(
         returncode=proc.returncode,
         stderr_tail="".join(stderr_chunks).strip()[-500:],
     )
+
+
+_ERROR_LINE = re.compile(
+    r"(Cannot find module '[^']+'|ModuleNotFoundError: [^\n]+|"
+    r"ERROR: [^\n]+|[A-Z][A-Za-z]*Error: [^\n]+)"
+)
+
+
+def repeated_tool_error(history: list[dict[str, Any]]) -> str:
+    """Name the tool error a capped run kept hitting, in one line.
+
+    A turn cap usually means the agent looped on a broken tool. The cap
+    message alone ("turn cap 30 reached") tells nobody what to fix, so the
+    most frequent ``tool: error`` pair from the observations is appended.
+    Returns "" when no tool error repeats.
+    """
+    counts: dict[tuple[str, str], int] = {}
+    for entry in history:
+        for line in str(entry.get("observation") or "").split("\n"):
+            name, sep, rest = line.partition(": ")
+            if not sep or " " in name:
+                continue
+            match = _ERROR_LINE.search(rest.replace("\\n", "\n"))
+            if match is None:
+                continue
+            key = (name, match.group(1).strip()[:160])
+            counts[key] = counts.get(key, 0) + 1
+    if not counts:
+        return ""
+    (tool, error), times = max(counts.items(), key=lambda kv: kv[1])
+    if times < 2:
+        return ""
+    return f"{tool} failed {times} times: {error}"
 
 
 def build_handoff_brief(result: HarnessResult, vehicle: str) -> HandoffBrief:
