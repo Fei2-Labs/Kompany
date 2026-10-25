@@ -563,3 +563,13 @@ def test_discover_sidecar_no_remote_url(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_proxy, "default_data_dir", lambda: tmp_path)
     # No discovery file, no remote URL → None
     assert mcp_proxy.discover_sidecar() is None
+
+
+def test_discovery_file_records_desktop_app_version(tmp_path, monkeypatch):
+    # Kompany Desktop compares this with its own version on the next launch
+    # and replaces a sidecar left running by an older bundle.
+    monkeypatch.setenv("KOMPANY_DESKTOP_VERSION", "0.2.5")
+    data = json.loads(mcp_proxy.write_discovery_file(8123, tmp_path).read_text())
+    assert data["app_version"] == "0.2.5"
+    monkeypatch.delenv("KOMPANY_DESKTOP_VERSION")
+    assert "app_version" not in json.loads(mcp_proxy.write_discovery_file(8123, tmp_path).read_text())
