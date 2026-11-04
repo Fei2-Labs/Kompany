@@ -109,7 +109,10 @@ if [ -f "${PATH_SENTINEL}" ] && [ "$(cat "${PATH_SENTINEL}" 2>/dev/null)" != "${
   cargo clean
 fi
 
-cargo tauri build
+# Tauri 2.11.2 passes two positional arguments to its bundled DMG script,
+# whose parser rejects positional arguments. CI=true adds --skip-jenkins,
+# which skips Finder window styling but still creates the DMG.
+CI=true cargo tauri build
 
 mkdir -p target && printf '%s' "${CURRENT_PATH}" > "${PATH_SENTINEL}"
 

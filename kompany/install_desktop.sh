@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
-# Install the freshly-built Kompany DMG straight into /Applications and
+# Install the freshly-built Kompany DMG or .app into /Applications and
 # launch it — no manual drag-to-Applications.
 #
-# Tauri deletes the .app after packaging the DMG, so we mount the DMG,
-# copy the .app out with ditto, eject, and launch. Run this right after
-# build_desktop.sh.
+# Tauri deletes the .app after packaging the DMG. If DMG bundling fails,
+# install the .app bundle that Tauri already built. Run after build_desktop.sh.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DMG="$REPO_ROOT/tauri/src-tauri/target/release/bundle/dmg/Kompany_0.1.0_aarch64.dmg"
+BUNDLE_ROOT="$REPO_ROOT/tauri/src-tauri/target/release/bundle"
+DMG=""
+APP=""
 
-if [ ! -f "$DMG" ]; then
-  echo "DMG not found at $DMG — run build_desktop.sh first." >&2
+for candidate in "$BUNDLE_ROOT"/dmg/Kompany_*.dmg; do
+  if [ -f "$candidate" ]; then
+    DMG="$candidate"
+    break
+  fi
+done
+
+if [ -z "$DMG" ]; then
+  for candidate in "$BUNDLE_ROOT"/macos/Kompany.app "$BUNDLE_ROOT"/macos/Kompany_*.app; do
+    if [ -d "$candidate" ]; then
+      APP="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ -z "$DMG" ] && [ -z "$APP" ]; then
+  echo "No Kompany DMG or .app found under $BUNDLE_ROOT — run build_desktop.sh first." >&2
   exit 1
 fi
 
@@ -27,12 +44,24 @@ for vol in /Volumes/Kompany*; do
   [ -d "$vol" ] && hdiutil detach "$vol" -quiet 2>/dev/null || true
 done
 
-MNT="$(mktemp -d /tmp/kompany-mnt.XXXX)"
-hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
+if [ -n "$DMG" ]; then
+  MNT="$(mktemp -d /tmp/kompany-mnt.XXXX)"
+  hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
+  APP="$MNT/Kompany.app"
+  trap 'hdiutil detach "$MNT" -quiet 2>/dev/null || true' EXIT
+  if [ ! -d "$APP" ]; then
+    echo "Kompany.app not found in $DMG." >&2
+    exit 1
+  fi
+fi
+
 rm -rf "/Applications/Kompany.app"
-ditto "$MNT/Kompany.app" "/Applications/Kompany.app"
-hdiutil detach "$MNT" -quiet
-echo "installed → /Applications/Kompany.app"
+ditto "$APP" "/Applications/Kompany.app"
+if [ -n "$DMG" ]; then
+  hdiutil detach "$MNT" -quiet
+  trap - EXIT
+fi
+echo "installed /Applications/Kompany.app"
 # Explicit path — `open -a Kompany` resolves by name and can pick a
 # DMG-volume copy if one is mounted.
 open "/Applications/Kompany.app"
